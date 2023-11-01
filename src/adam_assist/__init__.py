@@ -1,12 +1,15 @@
 import hashlib
+import os
+import pathlib
 from importlib.resources import files
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import assist
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import rebound
+import urllib3
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.propagator.propagator import (
@@ -19,11 +22,40 @@ from adam_core.propagator.propagator import (
 from adam_core.time import Timestamp
 from quivr.concat import concatenate
 
+DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
-def initialize_assist() -> assist.Extras:
+
+def download_jpl_ephemeris_files(data_dir: str = DATA_DIR):
+    ephemeris_urls = (
+        "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp",
+        "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/linux_p1550p2650.440",
+    )
+    data_dir = pathlib.Path(data_dir).expanduser()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    for url in ephemeris_urls:
+        file_name = pathlib.Path(url).name
+        file_path = data_dir.joinpath(file_name)
+        if not file_path.exists():
+            # use urllib3
+            http = urllib3.PoolManager()
+            with http.request("GET", url, preload_content=False) as r, open(
+                file_path, "wb"
+            ) as out_file:
+                if r.status != 200:
+                    raise RuntimeError(f"Failed to download {url}")
+                while True:
+                    data = r.read(1024)
+                    if not data:
+                        break
+                    out_file.write(data)
+            r.release_conn()
+
+
+def initialize_assist(data_dir: str = DATA_DIR) -> assist.Extras:
+    root_dir = pathlib.Path(data_dir).expanduser()
     ephem = assist.Ephem(
-        files("adam_assist.data").joinpath("linux_p1550p2650.440"),
-        files("adam_assist.data").joinpath("sb441-n16.bsp"),
+        root_dir.joinpath("linux_p1550p2650.440"),
+        root_dir.joinpath("sb441-n16.bsp"),
     )
     sim = rebound.Simulation()
     ax = assist.Extras(sim, ephem)
@@ -102,7 +134,8 @@ class ASSISTPropagator(Propagator):
                 hash=uint_orbit_ids[i],
             )
 
-        # # Add the orbits as particles to the simulation
+        # For some reason this doesn't work. It likely needs the particles
+        # to be initialized:
         # start_xyzvxvyvz = np.array(
         #     [
         #         orbits.coordinates.x.to_numpy(),
