@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adam-assist"
+dynamic = ["version"]
+description = 'ADAM Core Propagator class using ASSIST'
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = []
+authors = [{ name = "Alec Koumjian", email = "akoumjian@gmail.com" }]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = [
+  "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core@main",
+  "naif-de440",
+  "numpy",
+  "rebound",
+  "assist",
+  "ray",
+]
+
+[project.urls]
+Documentation = "https://github.com/unknown/adam-assist#readme"
+Issues = "https://github.com/unknown/adam-assist/issues"
+Source = "https://github.com/unknown/adam-assist"

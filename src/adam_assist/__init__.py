@@ -1,0 +1,172 @@
+import hashlib
+from importlib.resources import files
+from typing import Dict, List, Tuple
+
+import assist
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+import rebound
+from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
+from adam_core.coordinates.origin import OriginCodes
+from adam_core.propagator.propagator import (
+    EphemerisType,
+    ObserverType,
+    OrbitType,
+    Propagator,
+    TimestampType,
+)
+from adam_core.time import Timestamp
+from quivr.concat import concatenate
+
+
+def initialize_assist() -> assist.Extras:
+    ephem = assist.Ephem(
+        files("adam_assist.data").joinpath("linux_p1550p2650.440"),
+        files("adam_assist.data").joinpath("sb441-n16.bsp"),
+    )
+    sim = rebound.Simulation()
+    ax = assist.Extras(sim, ephem)
+    return sim, ephem
+
+
+def uint32_hash(s):
+    sha256_result = hashlib.sha256(s.encode()).digest()
+    # Get the first 4 bytes of the SHA256 hash to obtain a uint32 value.
+    return int.from_bytes(sha256_result[:4], byteorder="big") % (2**32)
+
+
+def hash_orbit_ids_to_uint32(
+    orbit_ids: np.ndarray[str],
+) -> Tuple[Dict[int, str], np.ndarray[np.uint32]]:
+    """
+    Derive uint32 hashes from orbit id strigns
+
+    Rebound uses uint32 to track individual particles, but we use orbit id strings.
+    Here we attempt to generate uint32 hashes for each and return the mapping as well.
+    """
+    hashes = [uint32_hash(o) for o in orbit_ids]
+    mapping = {hashes[i]: orbit_ids[i] for i in range(len(orbit_ids))}
+    return mapping, hashes
+
+
+class ASSISTPropagator(Propagator):
+    def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
+        # Assert that the time for each orbit definition is the same for the simulator to work
+        assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
+
+        sim, ephem = initialize_assist()
+
+        # Add the particles to the simulation
+
+        """
+        
+        The coordinate frame is the equatorial International Celestial Reference Frame (ICRF). 
+        This is also the native coordinate system for the JPL binary files.
+        For units we use solar masses, astronomical units, and days. 
+        The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
+
+        """
+
+        # Convert coordinates to ICRF using TDB time
+        coords = transform_coordinates(
+            orbits.coordinates,
+            origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
+            frame_out="equatorial",
+        )
+        input_orbit_times = coords.time.rescale("tdb")
+        coords = coords.set_column("time", input_orbit_times)
+        orbits = orbits.set_column("coordinates", coords)
+
+        # Set the simulation time, relative to the jd_ref
+        start_tbd_time = orbits.coordinates.time.jd().to_numpy()[0] - ephem.jd_ref
+        sim.t = start_tbd_time
+
+        output_type = type(orbits)
+
+        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(
+            orbits.orbit_id.to_numpy(zero_copy_only=False)
+        )
+
+        # Add the orbits as particles to the simulation
+        coords_df = orbits.coordinates.to_dataframe()
+
+        for i in range(len(coords_df)):
+            sim.add(
+                x=coords_df.x[i],
+                y=coords_df.y[i],
+                z=coords_df.z[i],
+                vx=coords_df.vx[i],
+                vy=coords_df.vy[i],
+                vz=coords_df.vz[i],
+                hash=uint_orbit_ids[i],
+            )
+
+        # # Add the orbits as particles to the simulation
+        # start_xyzvxvyvz = np.array(
+        #     [
+        #         orbits.coordinates.x.to_numpy(),
+        #         orbits.coordinates.y.to_numpy(),
+        #         orbits.coordinates.z.to_numpy(),
+        #         orbits.coordinates.vx.to_numpy(),
+        #         orbits.coordinates.vy.to_numpy(),
+        #         orbits.coordinates.vz.to_numpy(),
+        #     ]
+        # )
+        # sim.set_serialized_particle_data(
+        #     xyzvxvyvz=start_xyzvxvyvz,
+        #     hash=uint_orbit_ids,
+        # )
+
+        # Prepare the times as jd - jd_ref
+        integrator_times = pc.subtract(
+            times.rescale("tdb").jd(), ephem.jd_ref
+        ).to_numpy()
+
+        results = None
+
+        # Step through each time, move the simulation forward and
+        # collect the results.
+        for i in range(len(integrator_times)):
+            sim.integrate(integrator_times[i])
+
+            # Get serialized particle data as numpy arrays
+            orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
+            step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
+
+            sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
+
+            # Retrieve original orbit it from hash
+            orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+
+            time_step_results = output_type.from_kwargs(
+                coordinates=CartesianCoordinates.from_kwargs(
+                    x=step_xyzvxvyvz[:, 0],
+                    y=step_xyzvxvyvz[:, 1],
+                    z=step_xyzvxvyvz[:, 2],
+                    vx=step_xyzvxvyvz[:, 3],
+                    vy=step_xyzvxvyvz[:, 4],
+                    vz=step_xyzvxvyvz[:, 5],
+                    time=Timestamp.from_jd(pa.repeat(sim.t, sim.N)),
+                    origin=Origin.from_kwargs(
+                        code=pa.repeat(
+                            "SOLAR_SYSTEM_BARYCENTER",
+                            sim.N,
+                        )
+                    ),
+                    frame="equatorial",
+                ),
+                orbit_id=orbit_ids,
+            )
+
+            if results is None:
+                results = time_step_results
+            else:
+                concatenate([results, time_step_results])
+
+        return results
+
+    def _generate_ephemeris(
+        self, orbits: OrbitType, observers: ObserverType
+    ) -> EphemerisType:
+        raise NotImplementedError("Ephemeris generation is not implemented for ASSIST.")
