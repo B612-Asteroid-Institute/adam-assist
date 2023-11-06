@@ -180,7 +180,7 @@ class ASSISTPropagator(Propagator):
                     vx=step_xyzvxvyvz[:, 3],
                     vy=step_xyzvxvyvz[:, 4],
                     vz=step_xyzvxvyvz[:, 5],
-                    time=Timestamp.from_jd(pa.repeat(sim.t, sim.N)),
+                    time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N)),
                     origin=Origin.from_kwargs(
                         code=pa.repeat(
                             "SOLAR_SYSTEM_BARYCENTER",
@@ -195,7 +195,16 @@ class ASSISTPropagator(Propagator):
             if results is None:
                 results = time_step_results
             else:
-                concatenate([results, time_step_results])
+                results = concatenate([results, time_step_results])
+
+        results = results.set_column(
+            "coordinates",
+            transform_coordinates(
+                results.coordinates,
+                origin_out=OriginCodes.SUN,
+                frame_out="ecliptic",
+            ),
+        )
 
         return results
 
