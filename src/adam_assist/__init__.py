@@ -9,6 +9,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 import rebound
+import quivr as qv
 import urllib3
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
@@ -23,6 +24,13 @@ from adam_core.time import Timestamp
 from quivr.concat import concatenate
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
+
+
+class EarthImpacts(qv.Table):
+    orbit_id = qv.StringColumn()
+    time = Timestamp.as_column()
+    # Distance from earth center in km
+    distance = qv.Float64Column()
 
 
 def download_jpl_ephemeris_files(data_dir: str = DATA_DIR):
@@ -83,22 +91,22 @@ def hash_orbit_ids_to_uint32(
 
 
 class ASSISTPropagator(Propagator):
-    def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
+    def _propagate_orbits(
+        self, orbits: OrbitType, times: TimestampType
+    ) -> OrbitType:
+            orbits, impacts = self._propagate_orbits_inner(orbits, times, False)
+            return orbits
+
+    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool) -> Tuple[OrbitType, EarthImpacts]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
         sim, ephem = initialize_assist()
 
-        # Add the particles to the simulation
-
-        """
-        
-        The coordinate frame is the equatorial International Celestial Reference Frame (ICRF). 
-        This is also the native coordinate system for the JPL binary files.
-        For units we use solar masses, astronomical units, and days. 
-        The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
-
-        """
+        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF). 
+        # This is also the native coordinate system for the JPL binary files.
+        # For units we use solar masses, astronomical units, and days. 
+        # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
         # Convert coordinates to ICRF using TDB time
         coords = transform_coordinates(
@@ -133,23 +141,6 @@ class ASSISTPropagator(Propagator):
                 vz=coords_df.vz[i],
                 hash=uint_orbit_ids[i],
             )
-
-        # For some reason this doesn't work. It likely needs the particles
-        # to be initialized:
-        # start_xyzvxvyvz = np.array(
-        #     [
-        #         orbits.coordinates.x.to_numpy(),
-        #         orbits.coordinates.y.to_numpy(),
-        #         orbits.coordinates.z.to_numpy(),
-        #         orbits.coordinates.vx.to_numpy(),
-        #         orbits.coordinates.vy.to_numpy(),
-        #         orbits.coordinates.vz.to_numpy(),
-        #     ]
-        # )
-        # sim.set_serialized_particle_data(
-        #     xyzvxvyvz=start_xyzvxvyvz,
-        #     hash=uint_orbit_ids,
-        # )
 
         # Prepare the times as jd - jd_ref
         integrator_times = pc.subtract(
@@ -206,7 +197,24 @@ class ASSISTPropagator(Propagator):
             ),
         )
 
-        return results
+        impacts = sim._extras_ref.get_impacts()
+        earth_impacts = None
+        for impact in impacts:
+            orbit_id = orbit_id_mapping[impact["hash"]]
+            if earth_impacts is None:
+                earth_impacts = EarthImpacts.from_kwargs(
+                    orbit_id=[orbit_id],
+                    time=Timestamp.from_jd([impact["time"] + ephem.jd_ref], scale="tdb"),
+                    distance=[impact["distance"]],
+                )
+            else:
+                earth_impacts = qv.concatenate(earth_impacts, EarthImpacts.from_kwargs(
+                    orbit_id=[orbit_id],
+                    time=Timestamp.from_jd([impact["time"] + ephem.jd_ref], scale="tdb"),
+                    distance=[impact["distance"]],
+                ))
+
+        return results, earth_impacts
 
     def _generate_ephemeris(
         self, orbits: OrbitType, observers: ObserverType
