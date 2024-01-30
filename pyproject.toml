@@ -20,7 +20,7 @@ dependencies = [
   "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core@main",
   "naif-de440",
   "numpy",
-  "rebound",
+  "rebound==4.0.2",
   "assist",
   "ray",
 ]
