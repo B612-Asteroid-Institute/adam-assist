@@ -531,6 +531,7 @@ class ASSISTPropagator(Propagator):
                         origin_out=OriginCodes.SUN,
                         frame_out="ecliptic",
                     )
+
                     earth_impacts = qv.concatenate(earth_impacts, EarthImpacts.from_kwargs(
                         orbit_id=[orbit_id],
                         distance=[impact["distance"]],
@@ -540,6 +541,7 @@ class ASSISTPropagator(Propagator):
             return results, earth_impacts
         else:
             return results, None
+
 
     def _generate_ephemeris(
         self, orbits: OrbitType, observers: ObserverType
