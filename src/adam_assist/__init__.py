@@ -110,19 +110,20 @@ def assist_propagation_worker_ray(
     orbits: OrbitType,
     times: OrbitType,
     adaptive_mode: int,
+    min_dt: float,
     propagator: Type["Propagator"],
     **kwargs,
 ) -> OrbitType:
     prop = propagator(**kwargs)
-    propagated = prop._propagate_orbits(orbits, times, adaptive_mode)
+    propagated = prop._propagate_orbits(orbits, times, adaptive_mode, min_dt)
     return propagated
 
 
 class ASSISTPropagator(Propagator):
     def _propagate_orbits(
-        self, orbits: OrbitType, times: TimestampType, adaptive_mode: int
+        self, orbits: OrbitType, times: TimestampType, adaptive_mode: int, min_dt: float
     ) -> OrbitType:
-            orbits, impacts = self._propagate_orbits_inner(orbits, times, False, adaptive_mode)
+            orbits, impacts = self._propagate_orbits_inner(orbits, times, False, adaptive_mode, min_dt)
             return orbits
     
     def propagate_orbits(
@@ -130,7 +131,8 @@ class ASSISTPropagator(Propagator):
         orbits: OrbitType,
         times: TimestampType,
         covariance: bool = False,
-        adaptive_mode: int = 0,
+        adaptive_mode: Optional[int] = 0,
+        min_dt: Optional[float] = None,
         covariance_method: Literal[
             "auto", "sigma-point", "monte-carlo"
         ] = "monte-carlo",
@@ -259,6 +261,7 @@ class ASSISTPropagator(Propagator):
                             orbit,
                             times_ref,
                             adaptive_mode,
+                            min_dt,
                             self.__class__,
                             **self.__dict__,
                         )
@@ -277,6 +280,7 @@ class ASSISTPropagator(Propagator):
                                 variants,
                                 times_ref,
                                 adaptive_mode,
+                                min_dt,
                                 self.__class__,
                                 **self.__dict__,
                             )
@@ -307,13 +311,13 @@ class ASSISTPropagator(Propagator):
                 propagated_variants = None
 
         else:
-            propagated = self._propagate_orbits(orbits, times, adaptive_mode)
+            propagated = self._propagate_orbits(orbits, times, adaptive_mode, min_dt)
 
             if covariance is True and not orbits.coordinates.covariance.is_all_nan():
                 variants = VariantOrbits.create(
                     orbits, method=covariance_method, num_samples=num_samples
                 )
-                propagated_variants = self._propagate_orbits(variants, times, adaptive_mode)
+                propagated_variants = self._propagate_orbits(variants, times, adaptive_mode, min_dt)
             else:
                 propagated_variants = None
 
@@ -324,7 +328,7 @@ class ASSISTPropagator(Propagator):
             ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
         )
 
-    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool, adaptive_mode: int) -> Tuple[OrbitType, EarthImpacts]:
+    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool, adaptive_mode: int, min_dt: float) -> Tuple[OrbitType, EarthImpacts]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
@@ -352,10 +356,11 @@ class ASSISTPropagator(Propagator):
         )
         sim = rebound.Simulation()
 
-        if adaptive_mode==1:
-            sim.ri_ias15.adaptive_mode = 1
-        elif adaptive_mode==2:
-            sim.ri_ias15.adaptive_mode = 2
+        if min_dt is not None:
+            sim.ri_ias15.min_dt = min_dt
+
+        if adaptive_mode is not None:
+            sim.ri_ias15.adaptive_mode = adaptive_mode
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0] - ephem.jd_ref
