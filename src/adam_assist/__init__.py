@@ -12,6 +12,8 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
+from adam_core.orbits.variants import VariantEphemeris, VariantOrbits
+from adam_core.orbits import Orbits
 from adam_core.coordinates import (CartesianCoordinates, Origin,
                                    transform_coordinates)
 from adam_core.coordinates.origin import OriginCodes
@@ -136,6 +138,15 @@ class ASSISTPropagator(Propagator):
             orbits.orbit_id.to_numpy(zero_copy_only=False)
         )
 
+        if isinstance(orbits, VariantOrbits):
+            variantattributes = {}
+            for idx, orbit_id in enumerate(orbits.orbit_id.to_numpy(zero_copy_only=False)):
+                variantattributes[orbit_id] = {
+                    'weight': orbits.weights[idx],
+                    'weight_cov': orbits.weights_cov[idx],
+                    'object_id': orbits.object_id[idx]
+                }
+
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
 
@@ -172,27 +183,56 @@ class ASSISTPropagator(Propagator):
 
             sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
 
-            # Retrieve original orbit it from hash
-            orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-            time_step_results = output_type.from_kwargs(
-                coordinates=CartesianCoordinates.from_kwargs(
-                    x=step_xyzvxvyvz[:, 0],
-                    y=step_xyzvxvyvz[:, 1],
-                    z=step_xyzvxvyvz[:, 2],
-                    vx=step_xyzvxvyvz[:, 3],
-                    vy=step_xyzvxvyvz[:, 4],
-                    vz=step_xyzvxvyvz[:, 5],
-                    time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
-                    origin=Origin.from_kwargs(
-                        code=pa.repeat(
-                            "SOLAR_SYSTEM_BARYCENTER",
-                            sim.N,
-                        )
+            if isinstance(orbits, Orbits):
+                # Retrieve original orbit id from hash
+                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                time_step_results = Orbits.from_kwargs(
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=step_xyzvxvyvz[:, 0],
+                        y=step_xyzvxvyvz[:, 1],
+                        z=step_xyzvxvyvz[:, 2],
+                        vx=step_xyzvxvyvz[:, 3],
+                        vy=step_xyzvxvyvz[:, 4],
+                        vz=step_xyzvxvyvz[:, 5],
+                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        origin=Origin.from_kwargs(
+                            code=pa.repeat(
+                                "SOLAR_SYSTEM_BARYCENTER",
+                                sim.N,
+                            )
+                        ),
+                        frame="equatorial",
                     ),
-                    frame="equatorial",
-                ),
-                orbit_id=orbit_ids,
-            )
+                    orbit_id=orbit_ids,
+                )
+            elif isinstance(orbits, VariantOrbits):
+                # Retrieve the orbit id and weights from hash
+                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                object_ids = [variantattributes[orbit_id]["object_id"] for orbit_id in orbit_ids]
+                weight = [variantattributes[orbit_id]["weight"] for orbit_id in orbit_ids]
+                weights_covs = [variantattributes[orbit_id]["weight_cov"] for orbit_id in orbit_ids]
+                time_step_results = VariantOrbits.from_kwargs(
+                    orbit_id=orbit_ids,
+                    object_id=object_ids,
+                    weights=weight,
+                    weights_cov=weights_covs,
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=step_xyzvxvyvz[:, 0],
+                        y=step_xyzvxvyvz[:, 1],
+                        z=step_xyzvxvyvz[:, 2],
+                        vx=step_xyzvxvyvz[:, 3],
+                        vy=step_xyzvxvyvz[:, 4],
+                        vz=step_xyzvxvyvz[:, 5],
+                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        origin=Origin.from_kwargs(
+                            code=pa.repeat(
+                                "SOLAR_SYSTEM_BARYCENTER",
+                                sim.N,
+                            )
+                        ),
+                        frame="equatorial",
+                    ),
+                )
 
             if results is None:
                 results = time_step_results
