@@ -248,61 +248,67 @@ class ASSISTPropagator(Propagator):
             ),
         )
 
-        impacts = sim._extras_ref.get_impacts()
-        earth_impacts = None
-        for i, impact in enumerate(impacts):
-            orbit_id = orbit_id_mapping.get(impact["hash"], f"unknown-{i}")
-            time = Timestamp.from_jd([impact["time"]], scale="tdb")
-            if earth_impacts is None:
-                coordinates=CartesianCoordinates.from_kwargs(
-                        x=[impact["x"]],
-                        y=[impact["y"]],
-                        z=[impact["z"]],
-                        vx=[impact["vx"]],
-                        vy=[impact["vy"]],
-                        vz=[impact["vz"]],
-                        time=time,
-                        origin=Origin.from_kwargs(
-                            code=["SOLAR_SYSTEM_BARYCENTER"],
-                        ),
-                        frame="equatorial",
+        if detect_impacts:
+            impacts = sim._extras_ref.get_impacts()
+            earth_impacts = None
+            for i, impact in enumerate(impacts):
+                orbit_id = orbit_id_mapping.get(impact["hash"], f"unknown-{i}")
+                time = Timestamp.from_jd([impact["time"]], scale="tdb")
+                if earth_impacts is None:
+                    coordinates=CartesianCoordinates.from_kwargs(
+                                x=[impact["x"]],
+                                y=[impact["y"]],
+                                z=[impact["z"]],
+                                vx=[impact["vx"]],
+                                vy=[impact["vy"]],
+                                vz=[impact["vz"]],
+                                time=time,
+                                origin=Origin.from_kwargs(
+                                    code=["SOLAR_SYSTEM_BARYCENTER"],
+                                ),
+                                frame="equatorial",
+                            )
+                    coordinates = transform_coordinates(
+                            coordinates,
+                            origin_out=OriginCodes.SUN,
+                            frame_out="ecliptic",
+                        )
+                    earth_impacts = EarthImpacts.from_kwargs(
+                            orbit_id=[orbit_id],
+                            distance=[impact["distance"]],
+                            coordinates=coordinates,
+                        )
+                else:
+                    coordinates=CartesianCoordinates.from_kwargs(
+                            x=[impact["x"]],
+                            y=[impact["y"]],
+                            z=[impact["z"]],
+                            vx=[impact["vx"]],
+                            vy=[impact["vy"]],
+                            vz=[impact["vz"]],
+                            time=time,
+                            origin=Origin.from_kwargs(
+                                code=["SOLAR_SYSTEM_BARYCENTER"],
+                            ),
+                            frame="equatorial",
+                        )
+                    coordinates = transform_coordinates(
+                        coordinates,
+                        origin_out=OriginCodes.SUN,
+                        frame_out="ecliptic",
                     )
-                coordinates = transform_coordinates(
-                    coordinates,
-                    origin_out=OriginCodes.SUN,
-                    frame_out="ecliptic",
-                )
-                earth_impacts = EarthImpacts.from_kwargs(
-                    orbit_id=[orbit_id],
-                    distance=[impact["distance"]],
-                    coordinates=coordinates,
-                )
-            else:
-                coordinates=CartesianCoordinates.from_kwargs(
-                        x=[impact["x"]],
-                        y=[impact["y"]],
-                        z=[impact["z"]],
-                        vx=[impact["vx"]],
-                        vy=[impact["vy"]],
-                        vz=[impact["vz"]],
-                        time=time,
-                        origin=Origin.from_kwargs(
-                            code=["SOLAR_SYSTEM_BARYCENTER"],
-                        ),
-                        frame="equatorial",
-                    )
-                coordinates = transform_coordinates(
-                    coordinates,
-                    origin_out=OriginCodes.SUN,
-                    frame_out="ecliptic",
-                )
-                earth_impacts = qv.concatenate(earth_impacts, EarthImpacts.from_kwargs(
-                    orbit_id=[orbit_id],
-                    distance=[impact["distance"]],
-                    coordinates=coordinates,
-                ))
+                    earth_impacts = qv.concatenate(earth_impacts, EarthImpacts.from_kwargs(
+                        orbit_id=[orbit_id],
+                        distance=[impact["distance"]],
+                        coordinates=coordinates,
+                    ))
 
-        return results, earth_impacts
+            return results, earth_impacts
+    
+        else:
+
+            return results, None
+
 
     def _generate_ephemeris(
         self, orbits: OrbitType, observers: ObserverType
