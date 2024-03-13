@@ -109,8 +109,8 @@ def hash_orbit_ids_to_uint32(
 def assist_propagation_worker_ray(
     orbits: OrbitType,
     times: OrbitType,
-    adaptive_mode: int,
-    min_dt: float,
+    adaptive_mode: Optional[int] = None,
+    min_dt: Optional[float] = None,
     propagator: Type["Propagator"],
     **kwargs,
 ) -> OrbitType:
@@ -121,7 +121,7 @@ def assist_propagation_worker_ray(
 
 class ASSISTPropagator(Propagator):
     def _propagate_orbits(
-        self, orbits: OrbitType, times: TimestampType, adaptive_mode: int, min_dt: float
+        self, orbits: OrbitType, times: TimestampType, adaptive_mode: Optional[int] = None, min_dt: Optional[float] = None
     ) -> OrbitType:
             orbits, impacts = self._propagate_orbits_inner(orbits, times, False, adaptive_mode, min_dt)
             return orbits
@@ -131,7 +131,7 @@ class ASSISTPropagator(Propagator):
         orbits: OrbitType,
         times: TimestampType,
         covariance: bool = False,
-        adaptive_mode: Optional[int] = 0,
+        adaptive_mode: Optional[int] = None,
         min_dt: Optional[float] = None,
         covariance_method: Literal[
             "auto", "sigma-point", "monte-carlo"
@@ -328,7 +328,7 @@ class ASSISTPropagator(Propagator):
             ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
         )
 
-    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool, adaptive_mode: int, min_dt: float) -> Tuple[OrbitType, EarthImpacts]:
+    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool, adaptive_mode: Optional[int] = None, min_dt: Optional[float] = None) -> Tuple[OrbitType, EarthImpacts]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
