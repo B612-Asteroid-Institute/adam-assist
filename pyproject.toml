@@ -17,11 +17,11 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
 ]
 dependencies = [
+  "assist @ git+https://github.com/B612-Asteroid-Institute/assist.git@ak/wip",
   "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core@main",
   "naif-de440",
   "numpy",
   "rebound",
-  "assist",
   "ray",
 ]
 
