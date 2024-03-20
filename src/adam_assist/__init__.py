@@ -4,6 +4,8 @@ import pathlib
 from ctypes import c_uint32
 from importlib.resources import files
 from typing import Dict, List, Optional, Tuple
+import ray
+import concurrent.futures
 
 import assist
 import numpy as np
@@ -19,9 +21,20 @@ from adam_core.coordinates import (CartesianCoordinates, Origin,
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.propagator.propagator import (EphemerisType, ObserverType,
                                              OrbitType, Propagator,
-                                             TimestampType)
+                                             TimestampType, propagation_worker_ray)
 from adam_core.time import Timestamp
 from quivr.concat import concatenate
+from typing import Literal
+import concurrent.futures
+import logging
+from abc import ABC, abstractmethod
+from typing import List, Literal, Optional, Type, Union
+
+import numpy as np
+import numpy.typing as npt
+import quivr as qv
+
+from adam_core.ray_cluster import initialize_use_ray
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
@@ -92,15 +105,230 @@ def hash_orbit_ids_to_uint32(
     
     return mapping, hashes
 
+@ray.remote
+def assist_propagation_worker_ray(
+    orbits: OrbitType,
+    times: OrbitType,
+    propagator: Type["Propagator"],
+    adaptive_mode: Optional[int] = None,
+    min_dt: Optional[float] = None,
+    **kwargs,
+) -> OrbitType:
+    prop = propagator(**kwargs)
+    propagated = prop._propagate_orbits(orbits, times, adaptive_mode, min_dt)
+    return propagated
+
 
 class ASSISTPropagator(Propagator):
     def _propagate_orbits(
-        self, orbits: OrbitType, times: TimestampType
+        self, orbits: OrbitType, times: TimestampType, adaptive_mode: Optional[int] = None, min_dt: Optional[float] = None
     ) -> OrbitType:
-            orbits, impacts = self._propagate_orbits_inner(orbits, times, False)
+            orbits, impacts = self._propagate_orbits_inner(orbits, times, False, adaptive_mode, min_dt)
             return orbits
+    
+    def propagate_orbits(
+        self,
+        orbits: OrbitType,
+        times: TimestampType,
+        covariance: bool = False,
+        adaptive_mode: Optional[int] = None,
+        min_dt: Optional[float] = None,
+        covariance_method: Literal[
+            "auto", "sigma-point", "monte-carlo"
+        ] = "monte-carlo",
+        num_samples: int = 1000,
+        chunk_size: int = 100,
+        max_processes: Optional[int] = 1,
+        parallel_backend: Literal["cf", "ray"] = "ray",
+    ) -> Orbits:
+        """
+        Propagate each orbit in orbits to each time in times.
 
-    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool) -> Tuple[OrbitType, EarthImpacts]:
+        Parameters
+        ----------
+        orbits : `~adam_core.orbits.orbits.Orbits` (N)
+            Orbits to propagate.
+        times : Timestamp (M)
+            Times to which to propagate orbits.
+        covariance : bool, optional
+            Propagate the covariance matrices of the orbits. This is done by sampling the
+            orbits from their covariance matrices and propagating each sample. The covariance
+            of the propagated orbits is then the covariance of the samples.
+        covariance_method : {'sigma-point', 'monte-carlo', 'auto'}, optional
+            The method to use for sampling the covariance matrix. If 'auto' is selected then the method
+            will be automatically selected based on the covariance matrix. The default is 'monte-carlo'.
+        num_samples : int, optional
+            The number of samples to draw when sampling with monte-carlo.
+        chunk_size : int, optional
+            Number of orbits to send to each job.
+        max_processes : int or None, optional
+            Maximum number of processes to launch. If None then the number of
+            processes will be equal to the number of cores on the machine. If 1
+            then no multiprocessing will be used. If "ray" is the parallel_backend and a ray instance
+            is initialized already then this argument is ignored.
+        parallel_backend : {'cf', 'ray'}, optional
+            The parallel backend to use. 'cf' uses concurrent.futures and 'ray' uses ray. The default is 'cf'.
+            To use ray, ray must be installed.
+
+        Returns
+        -------
+        propagated : `~adam_core.orbits.orbits.Orbits`
+            Propagated orbits.
+        """
+
+        if max_processes is None or max_processes > 1:
+            propagated_list: List[Orbits] = []
+            variants_list: List[VariantOrbits] = []
+
+            if parallel_backend == "cf":
+                with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=max_processes
+                ) as executor:
+                    # Add orbits to propagate to futures
+                    futures = []
+                    for orbit_chunk in _iterate_chunks(orbits, chunk_size):
+                        futures.append(
+                            executor.submit(
+                                propagation_worker,
+                                orbit_chunk,
+                                times,
+                                self.__class__,
+                                **self.__dict__,
+                            )
+                        )
+
+                    # Add variants to propagate to futures
+                    if (
+                        covariance is True
+                        and not orbits.coordinates.covariance.is_all_nan()
+                    ):
+                        variants = VariantOrbits.create(
+                            orbits, method=covariance_method, num_samples=num_samples
+                        )
+                        for variant_chunk in _iterate_chunks(variants, chunk_size):
+                            futures.append(
+                                executor.submit(
+                                    propagation_worker,
+                                    variant_chunk,
+                                    times,
+                                    self.__class__,
+                                    **self.__dict__,
+                                )
+                            )
+
+                    for future in concurrent.futures.as_completed(futures):
+                        result = future.result()
+                        if isinstance(result, Orbits):
+                            propagated_list.append(result)
+                        elif isinstance(result, VariantOrbits):
+                            variants_list.append(result)
+                        else:
+                            raise ValueError(
+                                f"Unexpected result type from propagation worker: {type(result)}"
+                            )
+
+            elif parallel_backend == "ray":
+                if RAY_INSTALLED is False:
+                    raise ImportError(
+                        "Ray must be installed to use the ray parallel backend"
+                    )
+
+                initialize_use_ray(num_cpus=max_processes)
+
+                # Add orbits and times to object store if
+                # they haven't already been added
+                if not isinstance(times, ObjectRef):
+                    times_ref = ray.put(times)
+                else:
+                    times_ref = times
+
+                if not isinstance(orbits, ObjectRef):
+                    orbits_ref = ray.put(orbits)
+                else:
+                    orbits_ref = orbits
+                    # We need to dereference the orbits ObjectRef so we can
+                    # check its length for chunking and determine
+                    # if we need to propagate variants
+                    orbits = ray.get(orbits_ref)
+
+                # Create futures
+                futures = []
+                idx = np.arange(0, len(orbits))
+
+                for orbit in orbits:
+                    futures.append(
+                        assist_propagation_worker_ray.remote(
+                            orbit,
+                            times_ref,
+                            adaptive_mode,
+                            min_dt,
+                            self.__class__,
+                            **self.__dict__,
+                        )
+                    )
+                    if (
+                        covariance is True
+                        and not orbit.coordinates.covariance.is_all_nan()
+                    ):
+                        variants = VariantOrbits.create(
+                            orbit,
+                            method=covariance_method,
+                            num_samples=num_samples,
+                        )
+                        futures.append(
+                            assist_propagation_worker_ray.remote(
+                                variants,
+                                times_ref,
+                                adaptive_mode,
+                                min_dt,
+                                self.__class__,
+                                **self.__dict__,
+                            )
+                        )
+
+                # Get results as they finish (we sort later)
+                unfinished = futures
+                while unfinished:
+                    finished, unfinished = ray.wait(unfinished, num_returns=1)
+                    result = ray.get(finished[0])
+                    if isinstance(result, Orbits):
+                        propagated_list.append(result)
+                    elif isinstance(result, VariantOrbits):
+                        variants_list.append(result)
+                    else:
+                        raise ValueError(
+                            f"Unexpected result type from propagation worker: {type(result)}"
+                        )
+
+            else:
+                raise ValueError(f"Unknown parallel backend: {parallel_backend}")
+
+            # Concatenate propagated orbits
+            propagated = qv.concatenate(propagated_list)
+            if len(variants_list) > 0:
+                propagated_variants = qv.concatenate(variants_list)
+            else:
+                propagated_variants = None
+
+        else:
+            propagated = self._propagate_orbits(orbits, times, adaptive_mode, min_dt)
+
+            if covariance is True and not orbits.coordinates.covariance.is_all_nan():
+                variants = VariantOrbits.create(
+                    orbits, method=covariance_method, num_samples=num_samples
+                )
+                propagated_variants = self._propagate_orbits(variants, times, adaptive_mode, min_dt)
+            else:
+                propagated_variants = None
+
+        if propagated_variants is not None:
+            propagated = propagated_variants.collapse(propagated)
+
+        return propagated.sort_by(
+            ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
+        )
+
+    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType, detect_impacts: bool, adaptive_mode: Optional[int] = None, min_dt: Optional[float] = None) -> Tuple[OrbitType, EarthImpacts]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
@@ -127,6 +355,12 @@ class ASSISTPropagator(Propagator):
             root_dir.joinpath("sb441-n16.bsp"),
         )
         sim = rebound.Simulation()
+
+        if min_dt is not None:
+            sim.ri_ias15.min_dt = min_dt
+
+        if adaptive_mode is not None:
+            sim.ri_ias15.adaptive_mode = adaptive_mode
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0] - ephem.jd_ref
@@ -256,28 +490,28 @@ class ASSISTPropagator(Propagator):
                 time = Timestamp.from_jd([impact["time"]], scale="tdb")
                 if earth_impacts is None:
                     coordinates=CartesianCoordinates.from_kwargs(
-                                x=[impact["x"]],
-                                y=[impact["y"]],
-                                z=[impact["z"]],
-                                vx=[impact["vx"]],
-                                vy=[impact["vy"]],
-                                vz=[impact["vz"]],
-                                time=time,
-                                origin=Origin.from_kwargs(
-                                    code=["SOLAR_SYSTEM_BARYCENTER"],
-                                ),
-                                frame="equatorial",
-                            )
+                            x=[impact["x"]],
+                            y=[impact["y"]],
+                            z=[impact["z"]],
+                            vx=[impact["vx"]],
+                            vy=[impact["vy"]],
+                            vz=[impact["vz"]],
+                            time=time,
+                            origin=Origin.from_kwargs(
+                                code=["SOLAR_SYSTEM_BARYCENTER"],
+                            ),
+                            frame="equatorial",
+                        )
                     coordinates = transform_coordinates(
-                            coordinates,
-                            origin_out=OriginCodes.SUN,
-                            frame_out="ecliptic",
-                        )
+                        coordinates,
+                        origin_out=OriginCodes.SUN,
+                        frame_out="ecliptic",
+                    )
                     earth_impacts = EarthImpacts.from_kwargs(
-                            orbit_id=[orbit_id],
-                            distance=[impact["distance"]],
-                            coordinates=coordinates,
-                        )
+                        orbit_id=[orbit_id],
+                        distance=[impact["distance"]],
+                        coordinates=coordinates,
+                    )
                 else:
                     coordinates=CartesianCoordinates.from_kwargs(
                             x=[impact["x"]],
@@ -297,6 +531,7 @@ class ASSISTPropagator(Propagator):
                         origin_out=OriginCodes.SUN,
                         frame_out="ecliptic",
                     )
+
                     earth_impacts = qv.concatenate(earth_impacts, EarthImpacts.from_kwargs(
                         orbit_id=[orbit_id],
                         distance=[impact["distance"]],
@@ -304,9 +539,7 @@ class ASSISTPropagator(Propagator):
                     ))
 
             return results, earth_impacts
-    
         else:
-
             return results, None
 
 
