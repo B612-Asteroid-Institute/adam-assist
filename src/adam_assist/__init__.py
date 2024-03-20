@@ -109,9 +109,9 @@ def hash_orbit_ids_to_uint32(
 def assist_propagation_worker_ray(
     orbits: OrbitType,
     times: OrbitType,
+    propagator: Type["Propagator"],
     adaptive_mode: Optional[int] = None,
     min_dt: Optional[float] = None,
-    propagator: Type["Propagator"],
     **kwargs,
 ) -> OrbitType:
     prop = propagator(**kwargs)
