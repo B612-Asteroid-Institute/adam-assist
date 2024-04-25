@@ -1,0 +1,41 @@
+[tool.poetry]
+name = "adam-assist"
+version = "0.1.0"  # Specify a static version or use dynamic versioning as needed
+description = 'ADAM Core Propagator class using ASSIST'
+authors = ["Alec Koumjian <akoumjian@gmail.com>"]
+readme = "README.md"
+license = ""  # Specify your license
+repository = "https://github.com/unknown/adam-assist"
+documentation = "https://github.com/unknown/adam-assist#readme"
+keywords = []
+packages = [
+    { include = "adam_core", from = "src"}
+]
+[tool.poetry.dependencies]
+python = ">=3.11"
+"adam-core" = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", branch = "main" }
+assist = { git = "https://github.com/B612-Asteroid-Institute/assist.git", branch = "ak/wip" }
+naif-de440 = "*"
+numpy = "*"
+rebound = "4.0.2"
+ray = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "*"
+black = "*"
+isort = "*"
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.urls]
+Documentation = "https://github.com/unknown/adam-assist#readme"
+Issues = "https://github.com/unknown/adam-assist/issues"
+Source = "https://github.com/unknown/adam-assist"
