@@ -329,10 +329,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         smallest_distance = None
         smallest_distance_time = None
         past_integrator_time = False
-        # while past_integrator_time is False:
-        #     sim.steps(1)
-        for i in [final_integrator_time]:
-            sim.integrate(i)
+        while past_integrator_time is False:
+            sim.steps(1)
+            sim.integratse(i)
             print("current sim time")
             print(sim.t)
             if sim.t >= final_integrator_time:
