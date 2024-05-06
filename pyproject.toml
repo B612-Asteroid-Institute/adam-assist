@@ -13,15 +13,16 @@ packages = [
 ]
 [tool.poetry.dependencies]
 python = ">=3.11"
-"adam-core" = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", branch = "main" }
+"adam-core" = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", branch = "ak/impacts" }
 assist = { git = "https://github.com/B612-Asteroid-Institute/assist.git", branch = "ak/wip" }
 naif-de440 = "*"
 numpy = "*"
-rebound = "4.0.2"
+# rebound = ">=4.0.3"
 ray = "*"
 
 [tool.poetry.dev-dependencies]
 pytest = "*"
+pytest-benchmark = "*"
 black = "*"
 isort = "*"
 

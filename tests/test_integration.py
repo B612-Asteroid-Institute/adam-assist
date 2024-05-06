@@ -1,10 +1,16 @@
+import time
+
 import numpy as np
+import pytest
 from adam_core.dynamics.impacts import calculate_impacts
 from adam_core.orbits import Orbits
 from adam_core.orbits.query import query_sbdb
 from adam_core.time import Timestamp
 
-from adam_core.propagator.assist import ASSISTPropagator, download_jpl_ephemeris_files
+from adam_core.propagator.adam_assist import (
+    ASSISTPropagator,
+    download_jpl_ephemeris_files,
+)
 
 IMPACTORS_FILE_PATH = "tests/data/impactors.parquet"
 
@@ -24,18 +30,12 @@ def test_detect_impacts():
     variants, impacts = propagator.detect_impacts(impactors)
     return variants, impacts
 
-
-def test_calculate_impacts():
+@pytest.mark.benchmark
+def test_calculate_impacts(benchmark):
     download_jpl_ephemeris_files()
-    # impactor = query_sbdb(["2023 CX1"])
-    impactor = Orbits.from_parquet(IMPACTORS_FILE_PATH)[0]
-    # from adam_core.coordinates.covariances import CoordinateCovariances
-    # impactor = impactor.set_column("coordinates.covariance", CoordinateCovariances.from_sigmas(np.ones((1, 6)) * 1e-12))
-    
     impactor = Orbits.from_parquet("/Users/aleck/Downloads/I00007_orbit.parquet")[0]
-    print(impactor.coordinates.time.to_astropy().isot)
     propagator = ASSISTPropagator()
-    variants, impacts = calculate_impacts(impactor, 31, propagator, 1_000, 1)
+    variants, impacts = benchmark(calculate_impacts, impactor, 60, propagator, num_samples=1000, processes=1)
     return variants, impacts
 
 
