@@ -76,10 +76,10 @@ def hash_orbit_ids_to_uint32(
     Here we attempt to generate uint32 hashes for each and return the mapping as well.
     """
     hashes = [uint32_hash(o) for o in orbit_ids]
-    # Because uint32 is an unhashable type, 
+    # Because uint32 is an unhashable type,
     # we use a dict mapping from uint32 to orbit id string
     mapping = {hashes[i].value: orbit_ids[i] for i in range(len(orbit_ids))}
-    
+
     return mapping, hashes
 
 
@@ -89,9 +89,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
-        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF). 
+        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
         # This is also the native coordinate system for the JPL binary files.
-        # For units we use solar masses, astronomical units, and days. 
+        # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
         # Convert coordinates to ICRF using TDB time
@@ -125,11 +125,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         if isinstance(orbits, VariantOrbits):
             variantattributes = {}
-            for idx, orbit_id in enumerate(orbits.orbit_id.to_numpy(zero_copy_only=False)):
+            for idx, orbit_id in enumerate(
+                orbits.orbit_id.to_numpy(zero_copy_only=False)
+            ):
                 variantattributes[orbit_id] = {
-                    'weight': orbits.weights[idx],
-                    'weight_cov': orbits.weights_cov[idx],
-                    'object_id': orbits.object_id[idx]
+                    "weight": orbits.weights[idx],
+                    "weight_cov": orbits.weights_cov[idx],
+                    "object_id": orbits.object_id[idx],
                 }
 
         # Add the orbits as particles to the simulation
@@ -150,9 +152,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         # Prepare the times as jd - jd_ref
         integrator_times = times.rescale("tdb").jd()
-        integrator_times = pc.subtract(
-            integrator_times, ephem.jd_ref
-        )
+        integrator_times = pc.subtract(integrator_times, ephem.jd_ref)
         integrator_times = integrator_times.to_numpy()
 
         results = None
@@ -179,7 +179,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                         vx=step_xyzvxvyvz[:, 3],
                         vy=step_xyzvxvyvz[:, 4],
                         vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        time=Timestamp.from_jd(
+                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
+                        ),
                         origin=Origin.from_kwargs(
                             code=pa.repeat(
                                 "SOLAR_SYSTEM_BARYCENTER",
@@ -193,9 +195,15 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                object_ids = [variantattributes[orbit_id]["object_id"] for orbit_id in orbit_ids]
-                weight = [variantattributes[orbit_id]["weight"] for orbit_id in orbit_ids]
-                weights_covs = [variantattributes[orbit_id]["weight_cov"] for orbit_id in orbit_ids]
+                object_ids = [
+                    variantattributes[orbit_id]["object_id"] for orbit_id in orbit_ids
+                ]
+                weight = [
+                    variantattributes[orbit_id]["weight"] for orbit_id in orbit_ids
+                ]
+                weights_covs = [
+                    variantattributes[orbit_id]["weight_cov"] for orbit_id in orbit_ids
+                ]
                 time_step_results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids,
                     object_id=object_ids,
@@ -208,7 +216,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                         vx=step_xyzvxvyvz[:, 3],
                         vy=step_xyzvxvyvz[:, 4],
                         vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        time=Timestamp.from_jd(
+                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
+                        ),
                         origin=Origin.from_kwargs(
                             code=pa.repeat(
                                 "SOLAR_SYSTEM_BARYCENTER",
@@ -235,14 +245,15 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         return results
 
-
-    def _detect_impacts(self, orbits: OrbitType, num_days: int) -> Tuple[VariantOrbits, EarthImpacts]:
+    def _detect_impacts(
+        self, orbits: OrbitType, num_days: int
+    ) -> Tuple[VariantOrbits, EarthImpacts]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
-        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF). 
+        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
         # This is also the native coordinate system for the JPL binary files.
-        # For units we use solar masses, astronomical units, and days. 
+        # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
         # Convert coordinates to ICRF using TDB time
@@ -270,17 +281,17 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
 
-        # Serialize the variantorbit 
+        # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
             # Use numpy string operations to concatenate the orbit_id and variant_id
-            particle_ids = np.char.add(np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids)
+            particle_ids = np.char.add(
+                np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids
+            )
             particle_ids = np.array(particle_ids, dtype="object")
-        
-        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(
-            particle_ids
-        )
+
+        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
@@ -295,16 +306,17 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 vz=coords_df.vz[i],
                 hash=uint_orbit_ids[i],
             )
-        
+
         ax = assist.Extras(sim, ephem)
         sim.ri_ias15.min_dt = 1e-15
         sim.ri_ias15.adaptive_mode = 2
 
-
         # Prepare the times as jd - jd_ref
-        final_integrator_time = orbits.coordinates.time.add_days(num_days).jd().to_numpy()[0]
+        final_integrator_time = (
+            orbits.coordinates.time.add_days(num_days).jd().to_numpy()[0]
+        )
         final_integrator_time = final_integrator_time - ephem.jd_ref
-        
+
         # Results stores the final positions of the objects
         # If an object is an impactor, this represents its position at impact time
         results = None
@@ -318,7 +330,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             sim.steps(1)
             if sim.t >= final_integrator_time:
                 past_integrator_time = True
-    
+
             # Get serialized particle data as numpy arrays
             orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
             step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
@@ -336,7 +348,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                         vx=step_xyzvxvyvz[:, 3],
                         vy=step_xyzvxvyvz[:, 4],
                         vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        time=Timestamp.from_jd(
+                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
+                        ),
                         origin=Origin.from_kwargs(
                             code=pa.repeat(
                                 "SOLAR_SYSTEM_BARYCENTER",
@@ -350,7 +364,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                orbit_ids, variant_ids = zip(*[particle_id.split("-") for particle_id in particle_ids])
+                orbit_ids, variant_ids = zip(
+                    *[particle_id.split("-") for particle_id in particle_ids]
+                )
 
                 # Historically we've done a check here to make sure the orbit of the orbits
                 # and serialized particles is consistent
@@ -370,7 +386,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                         vx=step_xyzvxvyvz[:, 3],
                         vy=step_xyzvxvyvz[:, 4],
                         vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        time=Timestamp.from_jd(
+                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
+                        ),
                         origin=Origin.from_kwargs(
                             code=pa.repeat(
                                 "SOLAR_SYSTEM_BARYCENTER",
@@ -380,7 +398,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                         frame="equatorial",
                     ),
                 )
-            
+
             time_step_results = time_step_results.set_column(
                 "coordinates",
                 transform_coordinates(
@@ -430,7 +448,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                     orbit_id=impacting_orbits.orbit_id,
                     distance=distances,
                     coordinates=impacting_orbits.coordinates,
-                    variant_id=impacting_orbits.variant_id
+                    variant_id=impacting_orbits.variant_id,
                 )
                 if earth_impacts is None:
                     earth_impacts = new_impacts
@@ -441,7 +459,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 for hash_id in orbit_id_hashes[within_radius]:
                     sim.remove(hash=c_uint32(hash_id))
                     # For some reason, it fails if we let rebound convert the hash to c_uint32
-                
+
                 # Remove the particle from the input / running orbits
                 # This allows us to carry through object_id, weights, and weights_cov
                 orbits = orbits.apply_mask(~within_radius)
@@ -474,12 +492,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                     ),
                     frame="ecliptic",
                 ),
-                variant_id=[]
+                variant_id=[],
             )
         return results, earth_impacts
-
 
     def _generate_ephemeris(
         self, orbits: OrbitType, observers: ObserverType
     ) -> EphemerisType:
-        raise NotImplementedError("ASSISTPropagator does not yet support ephemeris generation.")
+        raise NotImplementedError(
+            "ASSISTPropagator does not yet support ephemeris generation."
+        )
