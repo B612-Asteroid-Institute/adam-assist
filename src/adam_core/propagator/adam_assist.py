@@ -195,20 +195,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                object_ids = [
-                    variantattributes[orbit_id]["object_id"] for orbit_id in orbit_ids
-                ]
-                weight = [
-                    variantattributes[orbit_id]["weight"] for orbit_id in orbit_ids
-                ]
-                weights_covs = [
-                    variantattributes[orbit_id]["weight_cov"] for orbit_id in orbit_ids
-                ]
+
                 time_step_results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids,
-                    object_id=object_ids,
-                    weights=weight,
-                    weights_cov=weights_covs,
+                    object_id=orbits.object_ids,
+                    weights=orbits.weights,
+                    weights_cov=orbits.weights_covs,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=step_xyzvxvyvz[:, 0],
                         y=step_xyzvxvyvz[:, 1],
