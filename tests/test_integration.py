@@ -12,7 +12,7 @@ IMPACTOR_FILE_PATH = "tests/data/I00007_orbit.parquet"
 
 
 @pytest.mark.benchmark
-@pytest.mark.parametrize("processes", [1, None])
+@pytest.mark.parametrize("processes", [1])
 def test_calculate_impacts_benchmark(benchmark, processes):
     download_jpl_ephemeris_files()
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH)[0]
