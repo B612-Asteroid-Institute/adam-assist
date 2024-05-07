@@ -30,8 +30,6 @@ black = "*"
 isort = "*"
 ipython = "*"
 
-
-
 [tool.black]
 line-length = 88
 
