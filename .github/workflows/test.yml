@@ -38,7 +38,7 @@ jobs:
     # Run the tests
       - name: Run tests
         run: |
-          poetry run --no-cache pytest --cov=src --cov-report=xml
+          pytest --cov=src --cov-report=xml
       # # Use pip to install dependencies
       # - name: Install dependencies
       #   run: |
