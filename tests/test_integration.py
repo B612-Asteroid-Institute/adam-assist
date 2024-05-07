@@ -7,7 +7,7 @@ from adam_core.orbits import Orbits
 from adam_core.orbits.query import query_sbdb
 from adam_core.time import Timestamp
 
-from adam_core.propagator.adam_assist import (
+from ..src.adam_core.propagator.adam_assist import (
     ASSISTPropagator,
     download_jpl_ephemeris_files,
 )
