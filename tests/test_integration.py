@@ -12,32 +12,24 @@ from adam_core.propagator.adam_assist import (
     download_jpl_ephemeris_files,
 )
 
-IMPACTORS_FILE_PATH = "tests/data/impactors.parquet"
+# Contains a likely impactor with ~60% chance of impact in 30 days
+IMPACTOR_FILE_PATH = "tests/data/I00007_orbit.parquet"
 
-def test_assist_propagator():
-    download_jpl_ephemeris_files()
-    initial_time = Timestamp.from_mjd([60000.0], scale="tdb")
-    times = initial_time.from_mjd(initial_time.mjd() + np.arange(0, 100))
-    orbits = query_sbdb(["EDLU"])
-    propagator = ASSISTPropagator()
-    assist_propagated_orbits = propagator.propagate_orbits(orbits, times)
-    return assist_propagated_orbits
 
 
 def test_detect_impacts():
-    impactors = Orbits.from_parquet(IMPACTORS_FILE_PATH)[0]
+    impactors = Orbits.from_parquet(IMPACTOR_FILE_PATH)[0]
     propagator = ASSISTPropagator()
     variants, impacts = propagator.detect_impacts(impactors)
     return variants, impacts
 
 @pytest.mark.benchmark
-def test_calculate_impacts(benchmark):
+@pytest.mark.parametrize("processes", [1, None])
+def test_calculate_impacts_benchmark(benchmark, processes):
     download_jpl_ephemeris_files()
-    impactor = Orbits.from_parquet("/Users/aleck/Downloads/I00007_orbit.parquet")[0]
+    impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH)[0]
     propagator = ASSISTPropagator()
-    variants, impacts = benchmark(calculate_impacts, impactor, 60, propagator, num_samples=1000, processes=1)
-    return variants, impacts
-
-
-if __name__ == "__main__":
-    test_calculate_impacts()
+    variants, impacts = benchmark(calculate_impacts, impactor, 60, propagator, num_samples=1000, processes=processes)
+    assert len(variants) == 1000, "Should have 1000 variants"
+    assert len(impacts) > 500, "Should have at least 500 impactors"
+    assert len(impacts) < 700, "Should have less than 700 impactors"

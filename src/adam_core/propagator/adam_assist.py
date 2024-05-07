@@ -31,6 +31,8 @@ from adam_core.propagator.propagator import (
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
+EARTH_RADIUS_KM = 6371.0
+
 
 def download_jpl_ephemeris_files(data_dir: str = DATA_DIR):
     ephemeris_urls = (
@@ -302,138 +304,158 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         # Prepare the times as jd - jd_ref
         final_integrator_time = orbits.coordinates.time.add_days(num_days).jd().to_numpy()[0]
         final_integrator_time = final_integrator_time - ephem.jd_ref
+        
+        # Results stores the final positions of the objects
+        # If an object is an impactor, this represents its position at impact time
         results = None
+        earth_impacts = None
+        past_integrator_time = False
+        time_step_results = None
 
         # Step through each time, move the simulation forward and
         # collect the results.
-        earth_impacts = None
-        smallest_distance = None
-        smallest_distance_time = None
-        past_integrator_time = False
-        # for i in [final_integrator_time]:
-            # sim.integrate(i)
         while past_integrator_time is False:
             sim.steps(1)
             if sim.t >= final_integrator_time:
                 past_integrator_time = True
     
-        # Get serialized particle data as numpy arrays
-        orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
-        step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
+            # Get serialized particle data as numpy arrays
+            orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
+            step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
 
-        sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
-        if isinstance(orbits, Orbits):
-            # Retrieve original orbit id from hash
-            orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-            time_step_results = Orbits.from_kwargs(
-                coordinates=CartesianCoordinates.from_kwargs(
-                    x=step_xyzvxvyvz[:, 0],
-                    y=step_xyzvxvyvz[:, 1],
-                    z=step_xyzvxvyvz[:, 2],
-                    vx=step_xyzvxvyvz[:, 3],
-                    vy=step_xyzvxvyvz[:, 4],
-                    vz=step_xyzvxvyvz[:, 5],
-                    time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
-                    origin=Origin.from_kwargs(
-                        code=pa.repeat(
-                            "SOLAR_SYSTEM_BARYCENTER",
-                            sim.N,
-                        )
-                    ),
-                    frame="equatorial",
-                ),
-                orbit_id=orbit_ids,
-            )
-        elif isinstance(orbits, VariantOrbits):
-            # Retrieve the orbit id and weights from hash
-            particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-            orbit_ids, variant_ids = zip(*[particle_id.split("-") for particle_id in particle_ids])
+            sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
 
-            # Do a quick check to make sure the order of the particles has stayed the same
-            # otherwise we would misassign the weights
-            np.testing.assert_array_equal(orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str), orbit_ids)
-            np.testing.assert_array_equal(orbits.variant_id.to_numpy(zero_copy_only=False).astype(str), variant_ids)
-
-            time_step_results = VariantOrbits.from_kwargs(
-                orbit_id=orbit_ids,
-                variant_id=variant_ids,
-                object_id=orbits.object_id,
-                weights=orbits.weights,
-                weights_cov=orbits.weights_cov,
-                coordinates=CartesianCoordinates.from_kwargs(
-                    x=step_xyzvxvyvz[:, 0],
-                    y=step_xyzvxvyvz[:, 1],
-                    z=step_xyzvxvyvz[:, 2],
-                    vx=step_xyzvxvyvz[:, 3],
-                    vy=step_xyzvxvyvz[:, 4],
-                    vz=step_xyzvxvyvz[:, 5],
-                    time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
-                    origin=Origin.from_kwargs(
-                        code=pa.repeat(
-                            "SOLAR_SYSTEM_BARYCENTER",
-                            sim.N,
-                        )
-                    ),
-                    frame="equatorial",
-                ),
-            )
-        
-        results = time_step_results.set_column(
-            "coordinates",
-            transform_coordinates(
-                time_step_results.coordinates,
-                origin_out=OriginCodes.SUN,
-                frame_out="ecliptic",
-            ),
-        )
-
-            # earth_geo = get_perturber_state(OriginCodes.EARTH, results.coordinates.time[0], origin=OriginCodes.SUN)
-
-            # diff = results.coordinates.values - earth_geo.values
-            # normalized_distance = np.min(np.linalg.norm(diff[:, :3], axis=1) * 149597870.691)
-            # if smallest_distance is None or normalized_distance < smallest_distance:
-            #     smallest_distance = normalized_distance
-            #     smallest_distance_time = results.coordinates.time[0].to_astropy().isot
-
-        impacts = sim._extras_ref.get_impacts()
-        for i, impact in enumerate(impacts):
-                particle_id = orbit_id_mapping.get(impact["hash"], f"unknown-{i}")
-                time = Timestamp.from_jd([impact["time"]], scale="tdb")
-
-                coordinates=CartesianCoordinates.from_kwargs(
-                        x=[impact["x"]],
-                        y=[impact["y"]],
-                        z=[impact["z"]],
-                        vx=[impact["vx"]],
-                        vy=[impact["vy"]],
-                        vz=[impact["vz"]],
-                        time=time,
+            if isinstance(orbits, Orbits):
+                # Retrieve original orbit id from hash
+                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                time_step_results = Orbits.from_kwargs(
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=step_xyzvxvyvz[:, 0],
+                        y=step_xyzvxvyvz[:, 1],
+                        z=step_xyzvxvyvz[:, 2],
+                        vx=step_xyzvxvyvz[:, 3],
+                        vy=step_xyzvxvyvz[:, 4],
+                        vz=step_xyzvxvyvz[:, 5],
+                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
                         origin=Origin.from_kwargs(
-                            code=["SOLAR_SYSTEM_BARYCENTER"],
+                            code=pa.repeat(
+                                "SOLAR_SYSTEM_BARYCENTER",
+                                sim.N,
+                            )
                         ),
                         frame="equatorial",
-                    )
-                coordinates = transform_coordinates(
-                    coordinates,
+                    ),
+                    orbit_id=orbit_ids,
+                )
+            elif isinstance(orbits, VariantOrbits):
+                # Retrieve the orbit id and weights from hash
+                particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                orbit_ids, variant_ids = zip(*[particle_id.split("-") for particle_id in particle_ids])
+
+                # Historically we've done a check here to make sure the orbit of the orbits
+                # and serialized particles is consistent
+                # np.testing.assert_array_equal(orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str), orbit_ids)
+                # np.testing.assert_array_equal(orbits.variant_id.to_numpy(zero_copy_only=False).astype(str), variant_ids)
+
+                time_step_results = VariantOrbits.from_kwargs(
+                    orbit_id=orbit_ids,
+                    variant_id=variant_ids,
+                    object_id=orbits.object_id,
+                    weights=orbits.weights,
+                    weights_cov=orbits.weights_cov,
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=step_xyzvxvyvz[:, 0],
+                        y=step_xyzvxvyvz[:, 1],
+                        z=step_xyzvxvyvz[:, 2],
+                        vx=step_xyzvxvyvz[:, 3],
+                        vy=step_xyzvxvyvz[:, 4],
+                        vz=step_xyzvxvyvz[:, 5],
+                        time=Timestamp.from_jd(pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"),
+                        origin=Origin.from_kwargs(
+                            code=pa.repeat(
+                                "SOLAR_SYSTEM_BARYCENTER",
+                                sim.N,
+                            )
+                        ),
+                        frame="equatorial",
+                    ),
+                )
+            
+            time_step_results = time_step_results.set_column(
+                "coordinates",
+                transform_coordinates(
+                    time_step_results.coordinates,
                     origin_out=OriginCodes.SUN,
                     frame_out="ecliptic",
-                )
+                ),
+            )
 
-                orbit_id = particle_id
-                variant_id = None
-                if isinstance(orbits, VariantOrbits):
-                    orbit_id, variant_id = particle_id.split("-")
-                
+            # Get the Earth's position at the current time
+            # earth_geo = get_perturber_state(OriginCodes.EARTH, results.coordinates.time[0], origin=OriginCodes.SUN)
+            # diff = time_step_results.coordinates.values - earth_geo.coordinates.values
+            earth_geo = ephem.get_particle("Earth", sim.t)
+            earth_geo = CartesianCoordinates.from_kwargs(
+                x=[earth_geo.x],
+                y=[earth_geo.y],
+                z=[earth_geo.z],
+                vx=[earth_geo.vx],
+                vy=[earth_geo.vy],
+                vz=[earth_geo.vz],
+                time=Timestamp.from_jd([sim.t + ephem.jd_ref], scale="tdb"),
+                origin=Origin.from_kwargs(
+                    code=["SOLAR_SYSTEM_BARYCENTER"],
+                ),
+                frame="equatorial",
+            )
+            earth_geo = transform_coordinates(
+                earth_geo,
+                origin_out=OriginCodes.SUN,
+                frame_out="ecliptic",
+            )
+            diff = time_step_results.coordinates.values - earth_geo.values
+
+            # Calculate the distance in KM
+            normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * 149597870.691
+
+            # Calculate which particles are within an Earth radius
+            within_radius = normalized_distance < EARTH_RADIUS_KM
+
+            # If any are within our earth radius, we record the impact
+            # and do bookkeeping to remove the particle from the simulation
+            if np.any(within_radius):
+                distances = normalized_distance[within_radius]
+                impacting_orbits = time_step_results.apply_mask(within_radius)
+
                 new_impacts = EarthImpacts.from_kwargs(
-                    orbit_id=[orbit_id],
-                    distance=[impact["distance"]],
-                    coordinates=coordinates,
-                    variant_id=[variant_id]
+                    orbit_id=impacting_orbits.orbit_id,
+                    distance=distances,
+                    coordinates=impacting_orbits.coordinates,
+                    variant_id=impacting_orbits.variant_id
                 )
                 if earth_impacts is None:
                     earth_impacts = new_impacts
                 else:
                     earth_impacts = qv.concatenate([earth_impacts, new_impacts])
+
+                # Remove the particle from the simulation, orbits, and store in results
+                for hash_id in orbit_id_hashes[within_radius]:
+                    sim.remove(hash=c_uint32(hash_id))
+                    # For some reason, it fails if we let rebound convert the hash to c_uint32
+                
+                # Remove the particle from the input / running orbits
+                # This allows us to carry through object_id, weights, and weights_cov
+                orbits = orbits.apply_mask(~within_radius)
+                # Put the orbits / variants of the impactors into the results set
+                if results is None:
+                    results = impacting_orbits
+                else:
+                    results = qv.concatenate([results, impacting_orbits])
+
+        # Add the final positions of the particles to the results
+        if results is None:
+            results = time_step_results
+        else:
+            results = qv.concatenate([results, time_step_results])
 
         if earth_impacts is None:
             earth_impacts = EarthImpacts.from_kwargs(
@@ -460,4 +482,4 @@ class ASSISTPropagator(Propagator, ImpactMixin):
     def _generate_ephemeris(
         self, orbits: OrbitType, observers: ObserverType
     ) -> EphemerisType:
-        raise NotImplementedError("Ephemeris generation is not implemented for ASSIST.")
+        raise NotImplementedError("ASSISTPropagator does not yet support ephemeris generation.")
