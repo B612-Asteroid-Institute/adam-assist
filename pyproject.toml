@@ -11,6 +11,23 @@ keywords = []
 packages = [
     { include = "adam_core", from = "src"}
 ]
+# Dependencies (used by pip)
+dependencies = [
+    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core.git@ak/impacts",
+    "assist",
+    "naif-de440",
+    "numpy",
+    "ray"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-benchmark",
+    "black",
+    "isort"
+]
 [tool.poetry.dependencies]
 python = ">=3.11"
 "adam-core" = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", branch = "ak/impacts" }
@@ -25,6 +42,8 @@ pytest-cov = "*"
 pytest-benchmark = "*"
 black = "*"
 isort = "*"
+
+[]
 
 [tool.black]
 line-length = 88
