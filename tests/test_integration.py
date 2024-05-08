@@ -2,7 +2,7 @@ import pytest
 from adam_core.dynamics.impacts import calculate_impacts
 from adam_core.orbits import Orbits
 
-from adam_core.propagator.adam_assist import (
+from src.adam_core.propagator.adam_assist import (
     ASSISTPropagator,
     download_jpl_ephemeris_files,
 )
