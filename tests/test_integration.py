@@ -17,7 +17,8 @@ def test_calculate_impacts_benchmark(benchmark, processes):
     download_jpl_ephemeris_files()
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH)[0]
     propagator = ASSISTPropagator()
-    variants, impacts = calculate_impacts(
+    variants, impacts = benchmark(
+        calculate_impacts,
         impactor,
         60,
         propagator,
