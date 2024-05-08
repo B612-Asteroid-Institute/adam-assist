@@ -1,3 +1,4 @@
+import gc
 import hashlib
 import os
 import pathlib
@@ -264,6 +265,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             root_dir.joinpath("sb441-n16.bsp"),
         ]
         ephem = assist.Ephem(*ephem_paths)
+        sim = None
+        gc.collect()
         sim = rebound.Simulation()
 
         # Set the simulation time, relative to the jd_ref
@@ -287,6 +290,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
+        
+        # ASSIST _must_ be initialized before adding particles
+        ax = assist.Extras(sim, ephem)
 
         for i in range(len(coords_df)):
             sim.add(
@@ -299,8 +305,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 hash=uint_orbit_ids[i],
             )
 
-        ax = assist.Extras(sim, ephem)
+        
+        # sim.integrator = "ias15"
         sim.ri_ias15.min_dt = 1e-15
+        # sim.dt = 1e-9
+        # sim.force_is_velocity_dependent = 0
         sim.ri_ias15.adaptive_mode = 2
 
         # Prepare the times as jd - jd_ref
@@ -320,6 +329,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         # collect the results.
         while past_integrator_time is False:
             sim.steps(1)
+            # print(sim.dt_last_done)
             if sim.t >= final_integrator_time:
                 past_integrator_time = True
 

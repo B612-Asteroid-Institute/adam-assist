@@ -16,7 +16,7 @@ packages = [
 python = ">=3.11,<4.0"
 "adam-core" = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", branch = "ak/impacts" }
 assist = "*"
-rebound = "<4.4" # 4.4 has a bug that breaks the integration
+# rebound = "<4.4" # 4.4 has a bug that breaks the integration
 naif-de440 = "*"
 numpy = "*"
 ray = "*"
