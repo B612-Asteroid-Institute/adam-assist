@@ -1,31 +1,50 @@
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "adam-assist"
-dynamic = ["version"]
+version = "0.1.0"
 description = 'ADAM Core Propagator class using ASSIST'
-readme = "README.md"
-requires-python = ">=3.11"
-keywords = []
-authors = [{ name = "Alec Koumjian", email = "akoumjian@gmail.com" }]
-classifiers = [
-  "Development Status :: 4 - Beta",
-  "Programming Language :: Python",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: Implementation :: CPython",
+authors = [
+    { name = "Alec Koumjian", email = "akoumjian@gmail.com" },
+    { name = "Kathleen Kiker" }
 ]
+readme = "README.md"
+keywords = []
+requires-python = ">=3.11,<4.0"
 dependencies = [
-  "assist @ git+https://github.com/B612-Asteroid-Institute/assist.git@ak/wip",
-  "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core@main",
-  "naif-de440",
-  "numpy",
-  "rebound",
-  "ray",
+    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core.git@ak/impacts",
+    "assist",
+    "naif-de440",
+    "numpy",
+    "ray",
+    "spiceypy>=6.0.0"
 ]
 
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+[tool.pdm.build]
+includes = ["src/adam_core/"]
+# package-dir = "src"
+
 [project.urls]
-Documentation = "https://github.com/unknown/adam-assist#readme"
-Issues = "https://github.com/unknown/adam-assist/issues"
-Source = "https://github.com/unknown/adam-assist"
+"Documentation" = "https://github.com/unknown/adam-assist#readme"
+"Issues" = "https://github.com/unknown/adam-assist/issues"
+"Source" = "https://github.com/unknown/adam-assist"
+
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-benchmark",
+    "black",
+    "isort",
+    "ipython"
+]
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
+
+

@@ -1,19 +1,30 @@
-import numpy as np
-from adam_assist import ASSISTPropagator, download_jpl_ephemeris_files
-from adam_core.orbits.query import query_sbdb
-from adam_core.propagator.pyoorb import PYOORB
-from adam_core.time import Timestamp
+import pytest
+from adam_core.dynamics.impacts import calculate_impacts
+from adam_core.orbits import Orbits
+
+from src.adam_core.propagator.adam_assist import (
+    ASSISTPropagator,
+    download_jpl_ephemeris_files,
+)
+
+# Contains a likely impactor with ~60% chance of impact in 30 days
+IMPACTOR_FILE_PATH = "tests/data/I00007_orbit.parquet"
 
 
-def test_assist_propagator():
+@pytest.mark.benchmark
+@pytest.mark.parametrize("processes", [1, 2])
+def test_calculate_impacts_benchmark(benchmark, processes):
     download_jpl_ephemeris_files()
-    initial_time = Timestamp.from_mjd([60000.0], scale="tdb")
-    times = initial_time.from_mjd(initial_time.mjd() + np.arange(0, 100))
-    orbits = query_sbdb(["EDLU"])
+    impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH)[0]
     propagator = ASSISTPropagator()
-    assist_propagated_orbits = propagator.propagate_orbits(orbits, times)
-
-    pyoorb = PYOORB()
-    pyoorb_propagated_orbits = pyoorb.propagate_orbits(orbits, times)
-
-    return assist_propagated_orbits, pyoorb_propagated_orbits
+    variants, impacts = benchmark(
+        calculate_impacts,
+        impactor,
+        60,
+        propagator,
+        num_samples=200,
+        processes=processes,
+        seed=42  # This allows us to predict exact number of impactors empirically
+    )
+    assert len(variants) == 200, "Should have 200 variants"
+    assert len(impacts) == 138, "Should have exactly 138 impactors"
