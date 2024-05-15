@@ -454,12 +454,19 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 distances = normalized_distance[within_radius]
                 impacting_orbits = time_step_results.apply_mask(within_radius)
 
-                new_impacts = EarthImpacts.from_kwargs(
-                    orbit_id=impacting_orbits.orbit_id,
-                    distance=distances,
-                    coordinates=impacting_orbits.coordinates,
-                    variant_id=impacting_orbits.variant_id,
-                )
+                if isinstance(orbits, VariantOrbits):
+                    new_impacts = EarthImpacts.from_kwargs(
+                        orbit_id=impacting_orbits.orbit_id,
+                        distance=distances,
+                        coordinates=impacting_orbits.coordinates,
+                        variant_id=impacting_orbits.variant_id,
+                    )
+                elif isinstance(orbits, Orbits):
+                    new_impacts = EarthImpacts.from_kwargs(
+                        orbit_id=impacting_orbits.orbit_id,
+                        distance=distances,
+                        coordinates=impacting_orbits.coordinates,
+                    )
                 if earth_impacts is None:
                     earth_impacts = new_impacts
                 else:
