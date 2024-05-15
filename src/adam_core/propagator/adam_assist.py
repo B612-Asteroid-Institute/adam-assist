@@ -110,33 +110,35 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             root_dir.joinpath("linux_p1550p2650.440"),
             root_dir.joinpath("sb441-n16.bsp"),
         )
+        sim=None
+        gc.collect()
         sim = rebound.Simulation()
         sim.ri_ias15.min_dt = 1e-15
         sim.ri_ias15.adaptive_mode = 2
 
         # Set the simulation time, relative to the jd_ref
-        start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0] - ephem.jd_ref
+        start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
+        start_tdb_time = start_tdb_time - ephem.jd_ref
         sim.t = start_tdb_time
 
-        output_type = type(orbits)
+        particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
 
-        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(
-            orbits.orbit_id.to_numpy(zero_copy_only=False)
-        )
-
+        # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
-            variantattributes = {}
-            for idx, orbit_id in enumerate(
-                orbits.orbit_id.to_numpy(zero_copy_only=False)
-            ):
-                variantattributes[orbit_id] = {
-                    "weight": orbits.weights[idx],
-                    "weight_cov": orbits.weights_cov[idx],
-                    "object_id": orbits.object_id[idx],
-                }
+            orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
+            variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+            # Use numpy string operations to concatenate the orbit_id and variant_id
+            particle_ids = np.char.add(
+                np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids
+            )
+            particle_ids = np.array(particle_ids, dtype="object")
+
+        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
+
+        ax = assist.Extras(sim, ephem)
 
         for i in range(len(coords_df)):
             sim.add(
@@ -149,7 +151,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 hash=uint_orbit_ids[i],
             )
 
-        ax = assist.Extras(sim, ephem)
+        sim.ri_ias15.min_dt = 1e-15
+        sim.ri_ias15.adaptive_mode = 2
 
         # Prepare the times as jd - jd_ref
         integrator_times = times.rescale("tdb").jd()
@@ -195,13 +198,18 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
-                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                # Retrieve the orbit id and weights from hash
+                particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                orbit_ids, variant_ids = zip(
+                    *[particle_id.split("-") for particle_id in particle_ids]
+                )
 
                 time_step_results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids,
-                    object_id=orbits.object_ids,
+                    variant_id=variant_ids,
+                    object_id=orbits.object_id,
                     weights=orbits.weights,
-                    weights_cov=orbits.weights_covs,
+                    weights_cov=orbits.weights_cov,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=step_xyzvxvyvz[:, 0],
                         y=step_xyzvxvyvz[:, 1],

@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = []
 requires-python = ">=3.11,<4.0"
 dependencies = [
-    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core.git@ak/impacts",
+    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core.git@main",
     "assist",
     "naif-de440",
     "numpy",
@@ -23,7 +23,7 @@ requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 [tool.pdm.build]
 includes = ["src/adam_core/"]
-# package-dir = "src"
+
 
 [project.urls]
 "Documentation" = "https://github.com/unknown/adam-assist#readme"
