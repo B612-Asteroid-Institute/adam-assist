@@ -3,7 +3,7 @@ import hashlib
 import os
 import pathlib
 from ctypes import c_uint32
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple, Union
 
 import assist
 import numpy as np
@@ -33,16 +33,16 @@ DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 EARTH_RADIUS_KM = 6371.0
 
 
-def download_jpl_ephemeris_files(data_dir: str = DATA_DIR):
+def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
     ephemeris_urls = (
         "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp",
         "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/linux_p1550p2650.440",
     )
-    data_dir = pathlib.Path(data_dir).expanduser()
-    data_dir.mkdir(parents=True, exist_ok=True)
+    data_dir_path = pathlib.Path(data_dir).expanduser()
+    data_dir_path.mkdir(parents=True, exist_ok=True)
     for url in ephemeris_urls:
         file_name = pathlib.Path(url).name
-        file_path = data_dir.joinpath(file_name)
+        file_path = data_dir_path.joinpath(file_name)
         if not file_path.exists():
             # use urllib3
             http = urllib3.PoolManager()
@@ -60,15 +60,15 @@ def download_jpl_ephemeris_files(data_dir: str = DATA_DIR):
             r.release_conn()
 
 
-def uint32_hash(s) -> c_uint32:
+def uint32_hash(s: str) -> c_uint32:
     sha256_result = hashlib.sha256(s.encode()).digest()
     # Get the first 4 bytes of the SHA256 hash to obtain a uint32 value.
     return c_uint32(int.from_bytes(sha256_result[:4], byteorder="big"))
 
 
 def hash_orbit_ids_to_uint32(
-    orbit_ids: np.ndarray[str],
-) -> Tuple[Dict[int, str], np.ndarray[np.uint32]]:
+    orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
+) -> Tuple[Dict[int, str], List[c_uint32]]:
     """
     Derive uint32 hashes from orbit id strigns
 
@@ -83,7 +83,7 @@ def hash_orbit_ids_to_uint32(
     return mapping, hashes
 
 
-class ASSISTPropagator(Propagator, ImpactMixin):
+class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         # Assert that the time for each orbit definition is the same for the simulator to work
@@ -106,8 +106,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
-            planets_path=root_dir.joinpath("linux_p1550p2650.440"),
-            asteroids_path=root_dir.joinpath("sb441-n16.bsp"),
+            planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
+            asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
         )
         sim = None
         gc.collect()
@@ -234,6 +234,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             else:
                 results = concatenate([results, time_step_results])
 
+        assert isinstance(results, OrbitType)
         results = results.set_column(
             "coordinates",
             transform_coordinates(
@@ -268,8 +269,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
-            planets_path=root_dir.joinpath("linux_p1550p2650.440"),
-            asteroids_path=root_dir.joinpath("sb441-n16.bsp"),
+            planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
+            asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
         )
         sim = None
         gc.collect()
@@ -328,7 +329,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         results = None
         earth_impacts = None
         past_integrator_time = False
-        time_step_results = None
+        time_step_results: Union[None, OrbitType] = None
 
         # Step through each time, move the simulation forward and
         # collect the results.
@@ -406,6 +407,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                     ),
                 )
 
+            assert isinstance(time_step_results, OrbitType)
             time_step_results = time_step_results.set_column(
                 "coordinates",
                 transform_coordinates(
