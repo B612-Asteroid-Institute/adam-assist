@@ -54,7 +54,7 @@ typecheck = "mypy --strict ./src/adam_core"
 test = "pytest --benchmark-disable {args}"
 doctest = "pytest --doctest-plus --doctest-only"
 benchmark = "pytest --benchmark-only"
-coverage = "pytest --cov=src/adam_core/propagators/adam_assist --cov-report=xml"
+coverage = "pytest --cov=src --cov-report=xml"
 
 [tool.black]
 line-length = 88
