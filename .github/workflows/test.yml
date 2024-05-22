@@ -25,15 +25,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-      # # Use pip to install dependencies
+      # Use pip to install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install ".[dev]""
+      # Run linter
+      - name: Run linter
+        run: |
+          pdm run check
       # Run tests
       - name: Run tests
         run: |
-          pytest tests/ --cov=src --cov-report xml
+          pdm run coverage
       - name: Coveralls
         uses: coverallsapp/github-action@v2
         with:

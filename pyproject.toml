@@ -33,6 +33,9 @@ includes = ["src/adam_core/"]
 
 [project.optional-dependencies]
 dev = [
+    "ruff",
+    "pdm",
+    "mypy",
     "pytest",
     "pytest-cov",
     "pytest-benchmark",
@@ -41,10 +44,24 @@ dev = [
     "ipython"
 ]
 
+[tool.pdm.scripts]
+check = {composite = ["lint", "typecheck", "test"]}
+format = { composite = ["black ./src/adam_core", "isort ./src/adam_core"]}
+lint = { composite = ["ruff check ./src/adam_core", "black --check ./src/adam_core", "isort --check-only ./src/adam_core"] }
+fix = "ruff ./src/adam_core --fix"
+typecheck = "mypy --strict ./src/adam_core"
+
+test = "pytest --benchmark-disable {args}"
+doctest = "pytest --doctest-plus --doctest-only"
+benchmark = "pytest --benchmark-only"
+coverage = "pytest --cov=src/adam_core/propagators/adam_assist --cov-report=xml"
+
 [tool.black]
 line-length = 88
 
 [tool.isort]
 profile = "black"
 
+[tool.mypy]
+ignore_missing_imports = true
 

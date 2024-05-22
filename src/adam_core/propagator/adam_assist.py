@@ -7,7 +7,6 @@ from typing import Dict, Tuple
 
 import assist
 import numpy as np
-import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
@@ -19,7 +18,6 @@ from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
-from adam_core.utils import get_perturber_state
 from quivr.concat import concatenate
 
 from adam_core.propagator.propagator import (
@@ -48,9 +46,10 @@ def download_jpl_ephemeris_files(data_dir: str = DATA_DIR):
         if not file_path.exists():
             # use urllib3
             http = urllib3.PoolManager()
-            with http.request("GET", url, preload_content=False) as r, open(
-                file_path, "wb"
-            ) as out_file:
+            with (
+                http.request("GET", url, preload_content=False) as r,
+                open(file_path, "wb") as out_file,
+            ):
                 if r.status != 200:
                     raise RuntimeError(f"Failed to download {url}")
                 while True:
@@ -107,10 +106,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
-            root_dir.joinpath("linux_p1550p2650.440"),
-            root_dir.joinpath("sb441-n16.bsp"),
+            planets_path=root_dir.joinpath("linux_p1550p2650.440"),
+            asteroids_path=root_dir.joinpath("sb441-n16.bsp"),
         )
-        sim=None
+        sim = None
         gc.collect()
         sim = rebound.Simulation()
         sim.ri_ias15.min_dt = 1e-15
@@ -138,7 +137,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
 
-        ax = assist.Extras(sim, ephem)
+        assist.Extras(sim, ephem)
 
         for i in range(len(coords_df)):
             sim.add(
@@ -268,11 +267,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):
         orbits = orbits.set_column("coordinates", coords)
 
         root_dir = pathlib.Path(DATA_DIR).expanduser()
-        ephem_paths = [
-            root_dir.joinpath("linux_p1550p2650.440"),
-            root_dir.joinpath("sb441-n16.bsp"),
-        ]
-        ephem = assist.Ephem(*ephem_paths)
+        ephem = assist.Ephem(
+            planets_path=root_dir.joinpath("linux_p1550p2650.440"),
+            asteroids_path=root_dir.joinpath("sb441-n16.bsp"),
+        )
         sim = None
         gc.collect()
         sim = rebound.Simulation()
@@ -298,9 +296,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):
 
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
-        
+
         # ASSIST _must_ be initialized before adding particles
-        ax = assist.Extras(sim, ephem)
+        assist.Extras(sim, ephem)
 
         for i in range(len(coords_df)):
             sim.add(
@@ -313,7 +311,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):
                 hash=uint_orbit_ids[i],
             )
 
-        
         # sim.integrator = "ias15"
         sim.ri_ias15.min_dt = 1e-15
         # sim.dt = 1e-9
