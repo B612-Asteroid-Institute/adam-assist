@@ -12,7 +12,7 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
-from adam_core.constants import KM_P_AU
+from adam_core.constants import KM_P_AU, Constants
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
@@ -31,7 +31,9 @@ from adam_core.propagator.propagator import (
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
-EARTH_RADIUS_KM = 6371.0
+# Use the Earth's equatorial radius as used in DE4XX ephemerides
+# adam_core defines it in au but we need it in km
+EARTH_RADIUS_KM = Constants.R_EARTH * KM_P_AU
 
 
 def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
