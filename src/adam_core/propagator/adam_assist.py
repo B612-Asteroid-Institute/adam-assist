@@ -12,6 +12,7 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
+from adam_core.constants import KM_P_AU
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
@@ -444,7 +445,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             diff = time_step_results.coordinates.values - earth_geo.values
 
             # Calculate the distance in KM
-            normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * 149597870.691
+            # We use the IAU definition of the astronomical unit (149_597_870.7 km)
+            normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * KM_P_AU
 
             # Calculate which particles are within an Earth radius
             within_radius = normalized_distance < EARTH_RADIUS_KM
