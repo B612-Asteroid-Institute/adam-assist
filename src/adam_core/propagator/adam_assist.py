@@ -194,6 +194,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                         frame="equatorial",
                     ),
                     orbit_id=orbit_ids,
+                    object_id=orbits.object_id,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
@@ -368,6 +369,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                         frame="equatorial",
                     ),
                     orbit_id=orbit_ids,
+                    object_id=orbits.object_id,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
