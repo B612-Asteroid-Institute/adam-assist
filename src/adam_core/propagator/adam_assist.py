@@ -12,6 +12,7 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
+from adam_core.constants import KM_P_AU, Constants
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
@@ -30,7 +31,9 @@ from adam_core.propagator.propagator import (
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
-EARTH_RADIUS_KM = 6371.0
+# Use the Earth's equatorial radius as used in DE4XX ephemerides
+# adam_core defines it in au but we need it in km
+EARTH_RADIUS_KM = Constants.R_EARTH * KM_P_AU
 
 
 def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
@@ -194,6 +197,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                         frame="equatorial",
                     ),
                     orbit_id=orbit_ids,
+                    object_id=orbits.object_id,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
@@ -368,6 +372,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                         frame="equatorial",
                     ),
                     orbit_id=orbit_ids,
+                    object_id=orbits.object_id,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
@@ -442,7 +447,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             diff = time_step_results.coordinates.values - earth_geo.values
 
             # Calculate the distance in KM
-            normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * 149597870.691
+            # We use the IAU definition of the astronomical unit (149_597_870.7 km)
+            normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * KM_P_AU
 
             # Calculate which particles are within an Earth radius
             within_radius = normalized_distance < EARTH_RADIUS_KM
