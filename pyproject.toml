@@ -1,6 +1,6 @@
 [project]
 name = "adam-assist"
-version = "0.1.0"
+dynamic = ["version"]
 description = 'ADAM Core Propagator class using ASSIST'
 authors = [
     { name = "Alec Koumjian", email = "akoumjian@gmail.com" },
@@ -32,6 +32,10 @@ requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 [tool.pdm.build]
 includes = ["src/adam_core/"]
+[tool.pdm.version]
+source = "scm"
+write_to = "adam_core/propagator/adam_assist_version.py"
+write_template = "__version__ = '{}'"
 
 
 [project.urls]

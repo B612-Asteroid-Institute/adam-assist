@@ -29,6 +29,11 @@ from adam_core.propagator.propagator import (
     TimestampType,
 )
 
+try:
+    from adam_core.propagator.adam_assist_version import __version__
+except ImportError:
+    __version__ = "0.0.0"
+
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
 # Use the Earth's equatorial radius as used in DE4XX ephemerides
