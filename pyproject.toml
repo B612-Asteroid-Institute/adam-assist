@@ -7,10 +7,19 @@ authors = [
     { name = "Kathleen Kiker" }
 ]
 readme = "README.md"
-keywords = []
+license = { file = "LICENSE" }
+keywords = ["astronomy", "orbital mechanics", "propagation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy"
+]
 requires-python = ">=3.11,<4.0"
 dependencies = [
-    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core.git@ak/remove-pyoorb",
+    "adam-core>=0.2.0a1",
     "assist",
     "naif-de440",
     "numpy",
