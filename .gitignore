@@ -104,3 +104,5 @@ dmypy.json
 
 # As a library, we don't include poetry lock files
 poetry.lock
+
+.pdm-build/*
