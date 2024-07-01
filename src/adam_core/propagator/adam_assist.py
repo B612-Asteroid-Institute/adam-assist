@@ -13,7 +13,12 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
-from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
+import jax.numpy as jnp
+import numpy as np
+from jax import jit, lax, vmap
+from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates, SphericalCoordinates, CoordinateCovariances, OriginCodes
+from adam_core.coordinates.covariances import transform_covariances_jacobian, CoordinateCovariances
+from adam_core.coordinates.transform import _cartesian_to_spherical, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
 from adam_core.orbits import Orbits
@@ -23,12 +28,17 @@ from adam_core.utils import get_perturber_state
 from quivr.concat import concatenate
 
 from adam_core.propagator.propagator import (
+    EphemerisMixin,
     EphemerisType,
     ObserverType,
     OrbitType,
     Propagator,
     TimestampType,
 )
+
+from adam_core.observers.observers import Observers
+from adam_core.orbits.ephemeris import Ephemeris
+from adam_core.dynamics.aberrations import add_stellar_aberration
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
@@ -84,9 +94,12 @@ def hash_orbit_ids_to_uint32(
     return mapping, hashes
 
 
-class ASSISTPropagator(Propagator, ImpactMixin):
 
-    def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
+
+class ASSISTPropagator(Propagator, ImpactMixin, EphemerisMixin):
+
+    @staticmethod
+    def _propagate_orbits(orbits: OrbitType, times: TimestampType) -> OrbitType:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
@@ -513,9 +526,208 @@ class ASSISTPropagator(Propagator, ImpactMixin):
             )
         return results, earth_impacts
 
-    def _generate_ephemeris(
-        self, orbits: OrbitType, observers: ObserverType
-    ) -> EphemerisType:
-        raise NotImplementedError(
-            "ASSISTPropagator does not yet support ephemeris generation."
+    def _add_light_time(
+        self,
+        orbits: jnp.ndarray,
+        t0: jnp.ndarray,
+        observer_positions: jnp.ndarray,
+        lt_tol: float = 1e-10,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        orbits_aberrated, lts = self._add_light_time_vmap(
+            orbits, t0, observer_positions, lt_tol
         )
+        return orbits_aberrated, lts
+
+    def _add_light_time_single(
+        self,
+        orbit: jnp.ndarray,
+        t0: float,
+        observer_position: jnp.ndarray,
+        lt_tol: float = 1e-10,
+    ) -> Tuple[jnp.ndarray, jnp.float64]:
+        dlt = 1e30
+        lt = 1e30
+
+        C = 299792.458  # Speed of light in km/s
+
+        @jit
+        def _iterate_light_time(p):
+            orbit_i = p[0]
+            t0 = p[1]
+            lt0 = p[2]
+            dlt = p[3]
+
+            # Calculate topocentric distance
+            rho = jnp.linalg.norm(orbit_i[:3] - observer_position)
+
+            # Calculate initial guess of light time
+            lt = rho / C
+
+            # Calculate difference between previous light time correction
+            # and current guess
+            dlt = jnp.abs(lt - lt0)
+
+            # Propagate backwards to new epoch
+            t1 = t0 - lt
+            orbit_propagated = self.propagate_orbit(orbit, t1)
+
+            return [orbit_propagated, t1, lt, dlt]
+
+        @jit
+        def _while_condition(p):
+            dlt = p[-1]
+            return dlt > lt_tol
+
+        p = [orbit, t0, lt, dlt]
+        p = lax.while_loop(_while_condition, _iterate_light_time, p)
+
+        orbit_aberrated = p[0]
+        t0_aberrated = p[1]
+        lt = p[2]
+        return orbit_aberrated, lt
+
+    _add_light_time_vmap = jit(
+        vmap(
+            _add_light_time_single,
+            in_axes=(0, 0, 0, None),
+            out_axes=(0, 0)
+        )
+    )
+
+    @jit
+    def _compute_ephemeris(
+        self,
+        propagated_orbit: jnp.ndarray,
+        observation_time: float,
+        observer_coordinates: jnp.ndarray,
+        lt_tol: float = 1e-10,
+        stellar_aberration: bool = False,
+    ) -> Tuple[jnp.ndarray, jnp.float64]:
+        
+        propagated_orbits_aberrated, light_time = self._add_light_time(
+            propagated_orbit,
+            observation_time,
+            observer_coordinates[0:3],
+            lt_tol=lt_tol,
+        )
+
+        topocentric_coordinates = propagated_orbits_aberrated - observer_coordinates
+
+        topocentric_coordinates = lax.cond(
+            stellar_aberration,
+            lambda topocentric_coords: topocentric_coords.at[0:3].set(
+                add_stellar_aberration(
+                    propagated_orbits_aberrated.reshape(1, -1),
+                    observer_coordinates.reshape(1, -1),
+                )[0],
+            ),
+            lambda topocentric_coords: topocentric_coords,
+            topocentric_coordinates,
+        )
+
+        ephemeris_spherical = _cartesian_to_spherical(topocentric_coordinates)
+
+        return ephemeris_spherical, light_time
+
+    _compute_ephemeris_vmap = jit(
+        vmap(
+            lambda self, propagated_orbit, observation_time, observer_coordinates, lt_tol, stellar_aberration: self._compute_ephemeris(
+                propagated_orbit, observation_time, observer_coordinates, lt_tol, stellar_aberration
+            ),
+            in_axes=(None, 0, 0, 0, None, None),
+            out_axes=(0, 0),
+        )
+    )
+
+    def _generate_ephemeris(
+        self,
+        propagated_orbits: Orbits,
+        observers: Observers,
+        lt_tol: float = 1e-10,
+        stellar_aberration: bool = False,
+    ) -> Ephemeris:
+        
+        propagated_orbits_barycentric = propagated_orbits.set_column(
+            "coordinates",
+            transform_coordinates(
+                propagated_orbits.coordinates,
+                CartesianCoordinates,
+                frame_out="ecliptic",
+                origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
+            ),
+        )
+        observers_barycentric = observers.set_column(
+            "coordinates",
+            transform_coordinates(
+                observers.coordinates,
+                CartesianCoordinates,
+                frame_out="ecliptic",
+                origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
+            ),
+        )
+
+        # Stack the observer coordinates and codes for each orbit in the propagated orbits
+        num_orbits = len(propagated_orbits_barycentric.orbit_id.unique())
+        observer_coordinates = np.tile(
+            observers_barycentric.coordinates.values, (num_orbits, 1)
+        )
+        observer_codes = np.tile(observers.code.to_numpy(zero_copy_only=False), num_orbits)
+
+        times = propagated_orbits.coordinates.time.to_astropy()
+        ephemeris_spherical, light_time = self._compute_ephemeris_vmap(
+            propagated_orbits_barycentric.coordinates.values,
+            times.mjd,
+            observer_coordinates,
+            lt_tol,
+            stellar_aberration,
+        )
+        ephemeris_spherical = np.array(ephemeris_spherical)
+        light_time = np.array(light_time)
+
+        if not propagated_orbits.coordinates.covariance.is_all_nan():
+
+            cartesian_covariances = propagated_orbits.coordinates.covariance.to_matrix()
+            covariances_spherical = transform_covariances_jacobian(
+                propagated_orbits.coordinates.values,
+                cartesian_covariances,
+                self._compute_ephemeris,
+                in_axes=(None, 0, 0, 0, None, None),
+                out_axes=(0, 0),
+                observation_times=times.utc.mjd,
+                observer_coordinates=observer_coordinates,
+                lt_tol=lt_tol,
+                stellar_aberration=stellar_aberration,
+            )
+            covariances_spherical = CoordinateCovariances.from_matrix(
+                np.array(covariances_spherical)
+            )
+
+        else:
+            covariances_spherical = None
+
+        spherical_coordinates = SphericalCoordinates.from_kwargs(
+            time=propagated_orbits.coordinates.time,
+            rho=ephemeris_spherical[:, 0],
+            lon=ephemeris_spherical[:, 1],
+            lat=ephemeris_spherical[:, 2],
+            vrho=ephemeris_spherical[:, 3],
+            vlon=ephemeris_spherical[:, 4],
+            vlat=ephemeris_spherical[:, 5],
+            covariance=covariances_spherical,
+            origin=Origin.from_kwargs(code=observer_codes),
+            frame="ecliptic",
+        )
+
+        # Rotate the spherical coordinates from the ecliptic frame
+        # to the equatorial frame
+        spherical_coordinates = transform_coordinates(
+            spherical_coordinates, SphericalCoordinates, frame_out="equatorial"
+        )
+
+        return Ephemeris.from_kwargs(
+            orbit_id=propagated_orbits_barycentric.orbit_id,
+            object_id=propagated_orbits_barycentric.object_id,
+            coordinates=spherical_coordinates,
+            light_time=light_time,
+        )
+
