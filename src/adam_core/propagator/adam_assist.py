@@ -13,13 +13,15 @@ import quivr as qv
 import rebound
 import urllib3
 from adam_core.constants import KM_P_AU, Constants
-from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
+from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates, SphericalCoordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
 from adam_core.orbits import Orbits
-from adam_core.orbits.variants import VariantOrbits
+from adam_core.orbits.ephemeris import Ephemeris
+from adam_core.orbits.variants import VariantOrbits, VariantEphemeris
 from adam_core.time import Timestamp
 from quivr.concat import concatenate
+from adam_core.coordinates.transform import _cartesian_to_spherical
 
 from adam_core.propagator.propagator import (
     EphemerisType,
@@ -28,6 +30,10 @@ from adam_core.propagator.propagator import (
     Propagator,
     TimestampType,
 )
+
+from adam_core.constants import Constants as c
+
+C = c.C
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
@@ -517,10 +523,127 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 variant_id=[],
             )
         return results, earth_impacts
+    
+    def _add_light_time(
+        self, 
+        orbits,
+        observers,
+        lt_tol: float = 1e-10,
+    ):  
+        orbits_aberrated = orbits.empty()
+        lts = np.zeros(len(orbits))
+        for i, (orbit, observer) in enumerate(zip(orbits, observers)):
+            lt0 = 0
+            dlt = 1
+            while dlt > lt_tol:
+                observer_position = observer.coordinates.values[0,:3]
+                orbit_i = orbit
+                t0 = orbit_i.coordinates.time.mjd()[0].as_py()
 
+                rho = np.linalg.norm(orbit_i.coordinates.values[0,:3] - observer_position)
+
+                lt = rho / C
+
+                dlt = np.abs(lt - lt0)
+
+                t1 = t0 - lt
+                t1 = Timestamp.from_mjd([t1], scale="tdb")
+                orbit_propagated = self._propagate_orbits(orbit, t1)
+
+                orbit = orbit_propagated
+                t0 = t1
+                lt0 = lt
+                dlt = dlt
+            orbits_aberrated = qv.concatenate([orbits_aberrated, orbit])
+            lts[i] = lt
+
+        return orbits_aberrated, lts
+    
     def _generate_ephemeris(
-        self, orbits: OrbitType, observers: ObserverType
+        self, orbits: OrbitType, observers: ObserverType, lt_tol: float = 1e-10
     ) -> EphemerisType:
-        raise NotImplementedError(
-            "ASSISTPropagator does not yet support ephemeris generation."
-        )
+        
+        if isinstance(orbits, Orbits):
+            ephemeris_total = Ephemeris.empty()
+        elif isinstance(orbits, VariantOrbits):
+            ephemeris_total = VariantEphemeris.empty()
+        
+        for orbit in orbits:
+            propagated_orbits = self._propagate_orbits(orbit, observers.coordinates.time)
+
+            # Transform both the orbits and observers to the barycenter if they are not already.
+            propagated_orbits_barycentric = propagated_orbits.set_column(
+                "coordinates",
+                transform_coordinates(
+                    propagated_orbits.coordinates,
+                    CartesianCoordinates,
+                    frame_out="ecliptic",
+                    origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
+                ),
+            )
+            observers_barycentric = observers.set_column(
+                "coordinates",
+                transform_coordinates(
+                    observers.coordinates,
+                    CartesianCoordinates,
+                    frame_out="ecliptic",
+                    origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
+                ),
+            )
+
+            num_orbits = len(propagated_orbits_barycentric.orbit_id.unique())
+            observer_coordinates = np.tile(
+                observers_barycentric.coordinates.values, (num_orbits, 1)
+            )
+            observer_codes = np.tile(observers.code.to_numpy(zero_copy_only=False), num_orbits)
+
+            propagated_orbits_aberrated, light_time = self._add_light_time(
+                propagated_orbits_barycentric, 
+                observers_barycentric, 
+                lt_tol=lt_tol, 
+            )
+
+            topocentric_coordinates = CartesianCoordinates.from_kwargs(
+                x=propagated_orbits_aberrated.coordinates.values[:,0] - observers_barycentric.coordinates.values[:,0],
+                y=propagated_orbits_aberrated.coordinates.values[:,1] - observers_barycentric.coordinates.values[:,1],
+                z=propagated_orbits_aberrated.coordinates.values[:,2] - observers_barycentric.coordinates.values[:,2],
+                vx=propagated_orbits_aberrated.coordinates.values[:,3] - observers_barycentric.coordinates.values[:,3],
+                vy=propagated_orbits_aberrated.coordinates.values[:,4] - observers_barycentric.coordinates.values[:,4],
+                vz=propagated_orbits_aberrated.coordinates.values[:,5] - observers_barycentric.coordinates.values[:,5],
+                covariance = None,
+                time=propagated_orbits_aberrated.coordinates.time,
+                origin=Origin.from_kwargs(code=observer_codes),
+                frame="ecliptic",
+            )
+
+            spherical_coordinates = SphericalCoordinates.from_cartesian(topocentric_coordinates)
+            light_time = np.array(light_time)
+
+            spherical_coordinates = transform_coordinates(
+                spherical_coordinates, SphericalCoordinates, frame_out="equatorial"
+            )
+
+            if isinstance(orbits, Orbits):
+
+                ephemeris = Ephemeris.from_kwargs(
+                    orbit_id=propagated_orbits_barycentric.orbit_id,
+                    object_id=propagated_orbits_barycentric.object_id,
+                    coordinates=spherical_coordinates,
+                    light_time=light_time,
+                )
+
+            elif isinstance(orbits, VariantOrbits):
+                weights = orbits.weights
+                weights_cov = orbits.weights_cov
+
+                ephemeris = VariantEphemeris.from_kwargs(
+                    orbit_id=propagated_orbits_barycentric.orbit_id,
+                    object_id=propagated_orbits_barycentric.object_id,
+                    coordinates=spherical_coordinates,
+                    weights=weights,
+                    weights_cov=weights_cov,
+                )
+
+            ephemeris_total = qv.concatenate([ephemeris_total, ephemeris])
+
+        return ephemeris_total
