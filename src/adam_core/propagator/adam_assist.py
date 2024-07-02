@@ -550,7 +550,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 t1 = Timestamp.from_mjd([t1], scale="tdb")
                 orbit_propagated = self._propagate_orbits(orbit, t1)
 
-                orbit = orbit_propagated
+                orbit_i = orbit_propagated
                 t0 = t1
                 lt0 = lt
                 dlt = dlt
