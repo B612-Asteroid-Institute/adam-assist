@@ -12,7 +12,9 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
-from adam_core.constants import KM_P_AU, Constants
+from adam_core.constants import KM_P_AU
+from adam_core.constants import Constants
+from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
@@ -21,13 +23,9 @@ from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
 from quivr.concat import concatenate
 
-from adam_core.propagator.propagator import (
-    EphemerisType,
-    ObserverType,
-    OrbitType,
-    Propagator,
-    TimestampType,
-)
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
+
+C = c.C
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
@@ -517,10 +515,3 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 variant_id=[],
             )
         return results, earth_impacts
-
-    def _generate_ephemeris(
-        self, orbits: OrbitType, observers: ObserverType
-    ) -> EphemerisType:
-        raise NotImplementedError(
-            "ASSISTPropagator does not yet support ephemeris generation."
-        )
