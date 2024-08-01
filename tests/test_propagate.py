@@ -171,8 +171,8 @@ def test_propagate():
         )
 
         absolute_velocity = np.linalg.norm(
-            assist_propagated_orbits.coordinates.values[:, 3:]
-            - horizons_propagated_orbits.coordinates.values[:, 3:],
+            assist_propagated_orbits.coordinates.v
+            - horizons_propagated_orbits.coordinates.v,
             axis=1,
         )
         pos_tol = OBJECTS.get(object_id).get("position")
