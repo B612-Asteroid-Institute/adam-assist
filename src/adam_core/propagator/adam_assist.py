@@ -12,7 +12,8 @@ import pyarrow.compute as pc
 import quivr as qv
 import rebound
 import urllib3
-from adam_core.constants import KM_P_AU, Constants
+from adam_core.constants import KM_P_AU
+from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
@@ -21,19 +22,15 @@ from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
 from quivr.concat import concatenate
 
-from adam_core.propagator.propagator import (
-    EphemerisType,
-    ObserverType,
-    OrbitType,
-    Propagator,
-    TimestampType,
-)
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
+
+C = c.C
 
 DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
 # Use the Earth's equatorial radius as used in DE4XX ephemerides
 # adam_core defines it in au but we need it in km
-EARTH_RADIUS_KM = Constants.R_EARTH * KM_P_AU
+EARTH_RADIUS_KM = c.R_EARTH * KM_P_AU
 
 
 def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
@@ -96,6 +93,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # This is also the native coordinate system for the JPL binary files.
         # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
+
+        # Record the original origin and frame to use for the final results
+        original_origin = orbits.coordinates.origin
+        original_frame = orbits.coordinates.frame
 
         # Convert coordinates to ICRF using TDB time
         coords = transform_coordinates(
@@ -239,12 +240,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 results = concatenate([results, time_step_results])
 
         assert isinstance(results, OrbitType)
+
         results = results.set_column(
             "coordinates",
             transform_coordinates(
                 results.coordinates,
-                origin_out=OriginCodes.SUN,
-                frame_out="ecliptic",
+                origin_out=original_origin.as_OriginCodes(),
+                frame_out=original_frame,
             ),
         )
 
@@ -517,10 +519,3 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 variant_id=[],
             )
         return results, earth_impacts
-
-    def _generate_ephemeris(
-        self, orbits: OrbitType, observers: ObserverType
-    ) -> EphemerisType:
-        raise NotImplementedError(
-            "ASSISTPropagator does not yet support ephemeris generation."
-        )
