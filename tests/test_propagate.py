@@ -165,8 +165,8 @@ def test_propagate():
         )
         # Calculate the absolute magnitude of position and velocity vectors
         absolute_position = np.linalg.norm(
-            assist_propagated_orbits.coordinates.values[:, :3]
-            - horizons_propagated_orbits.coordinates.values[:, :3],
+            assist_propagated_orbits.coordinates.r
+            - horizons_propagated_orbits.coordinates.r,
             axis=1,
         )
 
