@@ -95,6 +95,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
+        # Record the original origin and frame to use for the final results
+        original_origin = orbits.coordinates.origin
+        original_frame = orbits.coordinates.frame
+
         # Convert coordinates to ICRF using TDB time
         coords = transform_coordinates(
             orbits.coordinates,
@@ -237,12 +241,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 results = concatenate([results, time_step_results])
 
         assert isinstance(results, OrbitType)
+
         results = results.set_column(
             "coordinates",
             transform_coordinates(
                 results.coordinates,
-                origin_out=OriginCodes.SUN,
-                frame_out="ecliptic",
+                origin_out=original_origin.as_OriginCodes(),
+                frame_out=original_frame,
             ),
         )
 
