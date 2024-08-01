@@ -13,7 +13,6 @@ import quivr as qv
 import rebound
 import urllib3
 from adam_core.constants import KM_P_AU
-from adam_core.constants import Constants
 from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
