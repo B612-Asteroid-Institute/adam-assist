@@ -140,6 +140,7 @@ def test_propagate():
     """
     download_jpl_ephemeris_files()
     prop = ASSISTPropagator()
+    millisecond_in_days = 1.1574074074074073e-8
 
     start_time_mjd = Timestamp.from_mjd([60000])
     delta_times = Timestamp.from_mjd(
@@ -154,6 +155,14 @@ def test_propagate():
             horizons_start, horizons_propagated_orbits.coordinates.time, covariance=True
         )
 
+        ephem_times_difference = pc.subtract(
+            assist_propagated_orbits.coordinates.time.mjd(), horizons_propagated_orbits.coordinates.time.mjd()
+        )
+        np.testing.assert_array_less(
+            np.abs(ephem_times_difference.to_numpy(zero_copy_only=False)),
+            millisecond_in_days,
+            err_msg=f"ASSIST produced significantly different epochs than Horizons for {object_id}",
+        )
         # Calculate the absolute magnitude of position and velocity vectors
         absolute_position = np.linalg.norm(
             assist_propagated_orbits.coordinates.values[:, :3]

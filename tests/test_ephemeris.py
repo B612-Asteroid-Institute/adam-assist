@@ -61,7 +61,7 @@ def test_ephemeris():
     observers = Observers.from_code("500", delta_times)
 
     on_sky_rtol = 1e-7
-    on_sky_atol = 2.77e-7  # 1 milliarcsecond
+    one_milliarcsecond = 2.77778e-7  # 1 milliarcsecond
     millisecond_in_days = 1.1574074074074073e-8
 
     light_time_rtol = 1e-8
@@ -80,9 +80,6 @@ def test_ephemeris():
             err_msg=f"Horizons returned significantly different epochs than were requested.",
         )
 
-        # Horizons appears to give us times that are not exactly what we asked for? try
-        # propagating to the times horizons returns
-        modified_observers = Observers.from_code("500", horizons_ephem.coordinates.time)
         assist_ephem = prop.generate_ephemeris(
             horizons_start_vector, observers, covariance=True
         )
@@ -108,7 +105,7 @@ def test_ephemeris():
             assist_ephem.coordinates.lon.to_numpy(zero_copy_only=False),
             horizons_ephem.coordinates.lon.to_numpy(zero_copy_only=False),
             rtol=on_sky_rtol,
-            atol=on_sky_atol,
+            atol=one_milliarcsecond,
             err_msg=f"Failed RA for {object_id}",
         )
 
@@ -116,6 +113,19 @@ def test_ephemeris():
             assist_ephem.coordinates.lat.to_numpy(zero_copy_only=False),
             horizons_ephem.coordinates.lat.to_numpy(zero_copy_only=False),
             rtol=on_sky_rtol,
-            atol=on_sky_atol,
+            atol=one_milliarcsecond,
             err_msg=f"Failed Dec for {object_id}",
+        )
+
+        # Get the difference in magnitude for the lon/lats
+        on_sky_difference = np.linalg.norm(
+            assist_ephem.coordinates.values[:, 1:3]
+            - horizons_ephem.coordinates.values[:, 1:3],
+            axis=1,
+        )
+
+        np.testing.assert_array_less(
+            on_sky_difference,
+            2 * one_milliarcsecond,
+            err_msg=f"Failed on sky for {object_id}",
         )
