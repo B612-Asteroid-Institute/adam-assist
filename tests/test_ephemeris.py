@@ -53,10 +53,10 @@ def test_ephemeris():
         # "A802 FA",
     ]
 
-    start_time_mjd = Timestamp.from_mjd([60000], scale="tdb")
+    start_time_mjd = Timestamp.from_mjd([60000], scale="utc")
     delta_times = Timestamp.from_mjd(
         pc.add(start_time_mjd.mjd()[0], pa.array([-300, -150, 0, 150, 300])),
-        scale="tdb",
+        scale="utc",
     )
     observers = Observers.from_code("500", delta_times)
 
