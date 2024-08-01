@@ -30,7 +30,7 @@ DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
 
 # Use the Earth's equatorial radius as used in DE4XX ephemerides
 # adam_core defines it in au but we need it in km
-EARTH_RADIUS_KM = Constants.R_EARTH * KM_P_AU
+EARTH_RADIUS_KM = c.R_EARTH * KM_P_AU
 
 
 def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:

@@ -142,9 +142,10 @@ def test_propagate():
     prop = ASSISTPropagator()
     millisecond_in_days = 1.1574074074074073e-8
 
-    start_time_mjd = Timestamp.from_mjd([60000])
+    start_time_mjd = Timestamp.from_mjd([60000], scale="tdb")
     delta_times = Timestamp.from_mjd(
-        pc.add(start_time_mjd.mjd()[0], pa.array([-300, -150, 0, 150, 300]))
+        pc.add(start_time_mjd.mjd()[0], pa.array([-300, -150, 0, 150, 300])),
+        scale="tdb",
     )
 
     for object_id in OBJECTS.keys():
