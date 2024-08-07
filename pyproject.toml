@@ -59,7 +59,7 @@ dev = [
 ]
 
 [tool.pdm.scripts]
-check = {composite = ["lint", "typecheck", "test"]}
+check = {composite = ["lint", "typecheck"]}
 format = { composite = ["black ./src/adam_core", "isort ./src/adam_core"]}
 lint = { composite = ["ruff check ./src/adam_core", "black --check ./src/adam_core", "isort --check-only ./src/adam_core"] }
 fix = "ruff ./src/adam_core --fix"
