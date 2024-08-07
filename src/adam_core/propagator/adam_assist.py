@@ -90,29 +90,72 @@ def hash_orbit_ids_to_uint32(
 
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
+
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
-        # Assert that the time for each orbit definition is the same for the simulator to work
-        assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
+        """
+        Propagate the orbits to the specified times.
+        """
+
+        # Record the original origin and frame to use for the final results
+        original_frame = orbits.coordinates.frame
 
         # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
         # This is also the native coordinate system for the JPL binary files.
         # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
-
-        # Record the original origin and frame to use for the final results
-        original_origin = orbits.coordinates.origin
-        original_frame = orbits.coordinates.frame
-
         # Convert coordinates to ICRF using TDB time
-        coords = transform_coordinates(
+        transformed_coords = transform_coordinates(
             orbits.coordinates,
             origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
             frame_out="equatorial",
         )
-        input_orbit_times = coords.time.rescale("tdb")
-        coords = coords.set_column("time", input_orbit_times)
-        orbits = orbits.set_column("coordinates", coords)
+        transformed_input_orbit_times = transformed_coords.time.rescale("tdb")
+        transformed_coords = transformed_coords.set_column("time", transformed_input_orbit_times)
+        transformed_orbits = orbits.set_column("coordinates", transformed_coords)
 
+        # Group orbits by unique time, then propagate them
+        results = None
+        unique_times = transformed_orbits.coordinates.time.unique()
+        for epoch in unique_times:
+            mask = transformed_orbits.coordinates.time.equals(epoch)
+            epoch_orbits = transformed_orbits.apply_mask(mask)
+            propagated_orbits = self._propagate_orbits_inner(epoch_orbits, times)
+            if results is None:
+                results = propagated_orbits
+            else:
+                results = concatenate([results, propagated_orbits])
+
+        # Sanity check that the results are of the correct type
+        assert isinstance(results, OrbitType)
+
+        # Return the results with the original origin and frame
+        # Preserve the original output origin for the input orbits
+        # by orbit id
+        final_results = None
+        unique_origins = pc.unique(orbits.coordinates.origin.code)
+        for origin_code in unique_origins:
+            origin_orbits = orbits.select("coordinates.origin.code", origin_code)
+            result_origin_orbits = results.where(pc.field("orbit_id").isin(origin_orbits.orbit_id))
+            partial_results = result_origin_orbits.set_column(
+                "coordinates",
+                transform_coordinates(
+                    result_origin_orbits.coordinates,
+                    origin_out=OriginCodes[origin_code.as_py()],
+                    frame_out=original_frame,
+                ),
+            )
+            if final_results is None:
+                final_results = partial_results
+            else:
+                final_results = concatenate([final_results, partial_results])
+
+        return final_results
+
+
+    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
+        """
+        Propagates one or more orbits with the same epoch to the specified times.
+        """
         root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
             planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
@@ -243,17 +286,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 results = time_step_results
             else:
                 results = concatenate([results, time_step_results])
-
-        assert isinstance(results, OrbitType)
-
-        results = results.set_column(
-            "coordinates",
-            transform_coordinates(
-                results.coordinates,
-                origin_out=original_origin.as_OriginCodes(),
-                frame_out=original_frame,
-            ),
-        )
 
         return results
 
