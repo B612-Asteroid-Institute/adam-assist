@@ -90,7 +90,6 @@ def hash_orbit_ids_to_uint32(
 
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
-
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
         Propagate the orbits to the specified times.
@@ -110,7 +109,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             frame_out="equatorial",
         )
         transformed_input_orbit_times = transformed_coords.time.rescale("tdb")
-        transformed_coords = transformed_coords.set_column("time", transformed_input_orbit_times)
+        transformed_coords = transformed_coords.set_column(
+            "time", transformed_input_orbit_times
+        )
         transformed_orbits = orbits.set_column("coordinates", transformed_coords)
 
         # Group orbits by unique time, then propagate them
@@ -135,7 +136,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         unique_origins = pc.unique(orbits.coordinates.origin.code)
         for origin_code in unique_origins:
             origin_orbits = orbits.select("coordinates.origin.code", origin_code)
-            result_origin_orbits = results.where(pc.field("orbit_id").isin(origin_orbits.orbit_id))
+            result_origin_orbits = results.where(
+                pc.field("orbit_id").isin(origin_orbits.orbit_id)
+            )
             partial_results = result_origin_orbits.set_column(
                 "coordinates",
                 transform_coordinates(
@@ -151,8 +154,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         return final_results
 
-
-    def _propagate_orbits_inner(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
+    def _propagate_orbits_inner(
+        self, orbits: OrbitType, times: TimestampType
+    ) -> OrbitType:
         """
         Propagates one or more orbits with the same epoch to the specified times.
         """
