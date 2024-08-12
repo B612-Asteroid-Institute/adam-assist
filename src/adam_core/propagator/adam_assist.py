@@ -94,10 +94,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         """
         Propagate the orbits to the specified times.
         """
-
-        # Record the original origin and frame to use for the final results
-        original_frame = orbits.coordinates.frame
-
         # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
         # This is also the native coordinate system for the JPL binary files.
         # For units we use solar masses, astronomical units, and days.
@@ -129,30 +125,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # Sanity check that the results are of the correct type
         assert isinstance(results, OrbitType)
 
-        # Return the results with the original origin and frame
-        # Preserve the original output origin for the input orbits
-        # by orbit id
-        final_results = None
-        unique_origins = pc.unique(orbits.coordinates.origin.code)
-        for origin_code in unique_origins:
-            origin_orbits = orbits.select("coordinates.origin.code", origin_code)
-            result_origin_orbits = results.where(
-                pc.field("orbit_id").isin(origin_orbits.orbit_id)
-            )
-            partial_results = result_origin_orbits.set_column(
-                "coordinates",
-                transform_coordinates(
-                    result_origin_orbits.coordinates,
-                    origin_out=OriginCodes[origin_code.as_py()],
-                    frame_out=original_frame,
-                ),
-            )
-            if final_results is None:
-                final_results = partial_results
-            else:
-                final_results = concatenate([final_results, partial_results])
-
-        return final_results
+        return results
 
     def _propagate_orbits_inner(
         self, orbits: OrbitType, times: TimestampType

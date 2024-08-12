@@ -185,39 +185,6 @@ def test_propagate():
         np.testing.assert_array_less(absolute_velocity, vel_tol, f"Failed velocity for {object_id}")
 
 
-def test_propagate_different_origins():
-    """
-    Test that we are returning propagated orbits with their original origins
-    """
-    download_jpl_ephemeris_files()
-    prop = ASSISTPropagator()
-    orbits = Orbits.from_kwargs(
-        orbit_id=["1", "2"],
-        object_id=["1", "2"],
-        coordinates=CartesianCoordinates.from_kwargs(
-            x=[1, 1],
-            y=[1, 1],
-            z=[1, 1],
-            vx=[1, 1],
-            vy=[1, 1],
-            vz=[1, 1],
-            time=Timestamp.from_mjd([60000, 60000], scale="tdb"),
-            frame="ecliptic",
-            origin=Origin.from_kwargs(code=["SOLAR_SYSTEM_BARYCENTER", "EARTH_MOON_BARYCENTER"]),
-        ),
-    )
-
-    propagated_orbits = prop.propagate_orbits(orbits, Timestamp.from_mjd([60001, 60002, 60003], scale="tdb"))
-    orbit_one_results = propagated_orbits.select("orbit_id", "1")
-    orbit_two_results = propagated_orbits.select("orbit_id", "2")
-    # Assert that the origin codes for each set of results is unique
-    # and that it matches the original input
-    assert len(orbit_one_results.coordinates.origin.code.unique()) == 1
-    assert orbit_one_results.coordinates.origin.code.unique()[0].as_py() == "SOLAR_SYSTEM_BARYCENTER"
-    assert len(orbit_two_results.coordinates.origin.code.unique()) == 1
-    assert orbit_two_results.coordinates.origin.code.unique()[0].as_py() == "EARTH_MOON_BARYCENTER"
-
-
 def test_propagate_different_input_times(mocker):
     """
     Ensure that we can pass in vectors with different epochs
