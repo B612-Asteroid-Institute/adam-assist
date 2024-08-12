@@ -33,7 +33,7 @@ jobs:
       # Temporary install adam-core version that implements origin updates
       - name: Install adam-core
         run: |
-          pip install git+https://github.com/B612-Asteroid-Initiative/adam-core.git@4e248a2d3ceb96921e5bd5eff29becb87a815f89
+          pip install git+https://github.com/B612-Asteroid-Institute/adam-core.git@4e248a2d3ceb96921e5bd5eff29becb87a815f89
       # Run linter
       - name: Run linter
         run: |
