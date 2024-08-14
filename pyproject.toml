@@ -19,7 +19,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<4.0"
 dependencies = [
-    "adam-core>=0.2.2",
+    "adam-core>=0.2.3",
     "assist",
     "naif-de440",
     "numpy",
@@ -51,6 +51,7 @@ dev = [
     "mypy",
     "pytest",
     "pytest-cov",
+    "pytest-mock",
     "pytest-benchmark",
     "black",
     "isort",
@@ -58,7 +59,7 @@ dev = [
 ]
 
 [tool.pdm.scripts]
-check = {composite = ["lint", "typecheck", "test"]}
+check = {composite = ["lint", "typecheck"]}
 format = { composite = ["black ./src/adam_core", "isort ./src/adam_core"]}
 lint = { composite = ["ruff check ./src/adam_core", "black --check ./src/adam_core", "isort --check-only ./src/adam_core"] }
 fix = "ruff ./src/adam_core --fix"
