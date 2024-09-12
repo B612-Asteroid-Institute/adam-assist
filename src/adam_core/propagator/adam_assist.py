@@ -42,6 +42,7 @@ def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
     ephemeris_urls = (
         "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp",
         "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/linux_p1550p2650.440",
+        "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp"
     )
     data_dir_path = pathlib.Path(data_dir).expanduser()
     data_dir_path.mkdir(parents=True, exist_ok=True)
@@ -134,15 +135,24 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         Propagates one or more orbits with the same epoch to the specified times.
         """
         root_dir = pathlib.Path(DATA_DIR).expanduser()
+
+        # Introspect Ephem, if _fields_ has "spk_planets" then we
+        # will use "de440.bsp" for the planets path
+        # otherwise we use "linux_p1550p2650.440"
+        planets_path = str(root_dir.joinpath("linux_p1550p2650.440"))
+        field_names = [field[0] for field in assist.Ephem._fields_]
+        if "spk_planets" in field_names:
+            planets_path = str(root_dir.joinpath("de440.bsp"))
+
         ephem = assist.Ephem(
-            planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
+            planets_path=planets_path,
             asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
         )
         sim = None
         gc.collect()
         sim = rebound.Simulation()
-        sim.ri_ias15.min_dt = 1e-15
-        sim.ri_ias15.adaptive_mode = 2
+        # sim.ri_ias15.min_dt = 1e-15
+        # sim.ri_ias15.adaptive_mode = 2
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
@@ -179,8 +189,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 hash=uint_orbit_ids[i],
             )
 
-        sim.ri_ias15.min_dt = 1e-15
-        sim.ri_ias15.adaptive_mode = 2
+        # sim.ri_ias15.min_dt = 1e-15
+        # sim.ri_ias15.adaptive_mode = 2
 
         # Prepare the times as jd - jd_ref
         integrator_times = times.rescale("tdb").jd()
@@ -295,6 +305,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim = None
         gc.collect()
         sim = rebound.Simulation()
+        # sim.ri_ias15.min_dt = 1e-15
+        # sim.ri_ias15.adaptive_mode = 2
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
