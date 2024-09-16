@@ -3,7 +3,7 @@ import hashlib
 import os
 import pathlib
 from ctypes import c_uint32
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import assist
 import numpy as np
@@ -11,6 +11,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
 import rebound
+import requests
 import urllib3
 from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
@@ -42,28 +43,25 @@ def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
     ephemeris_urls = (
         "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp",
         "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/linux_p1550p2650.440",
-        "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp"
+        "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de441/linux_m13000p17000.441",
+        "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de440.bsp",
+        "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de441.bsp",
+
     )
     data_dir_path = pathlib.Path(data_dir).expanduser()
     data_dir_path.mkdir(parents=True, exist_ok=True)
+
     for url in ephemeris_urls:
-        file_name = pathlib.Path(url).name
-        file_path = data_dir_path.joinpath(file_name)
+        filename = url.split("/")[-1]
+        file_path = data_dir_path.joinpath(filename)
         if not file_path.exists():
-            # use urllib3
-            http = urllib3.PoolManager()
-            with (
-                http.request("GET", url, preload_content=False) as r,
-                open(file_path, "wb") as out_file,
-            ):
-                if r.status != 200:
-                    raise RuntimeError(f"Failed to download {url}")
-                while True:
-                    data = r.read(1024)
-                    if not data:
-                        break
-                    out_file.write(data)
-            r.release_conn()
+            print(f"Downloading {url} to {file_path}")
+            with requests.get(url, stream=True) as r:
+                r.raise_for_status()
+                with open(file_path, "wb") as f:
+                    # big chunk size for large files
+                    for chunk in r.iter_content(chunk_size=64 * 1024):
+                        f.write(chunk)
 
 
 def uint32_hash(s: str) -> c_uint32:
@@ -90,6 +88,21 @@ def hash_orbit_ids_to_uint32(
 
 
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
+
+    def __init__(self, planets_path: Optional[str] = None, asteroids_path: Optional[str] = None) -> None:
+        field_names = [field[0] for field in assist.Ephem._fields_]
+        if planets_path is None:
+            planets_path = str(pathlib.Path(DATA_DIR).expanduser().joinpath("linux_p1550p2650.440"))
+            if "spk_planets" in field_names:
+                planets_path = str(pathlib.Path(DATA_DIR).expanduser().joinpath("de440.bsp"))
+        if asteroids_path is None:
+            asteroids_path = str(pathlib.Path(DATA_DIR).expanduser().joinpath("sb441-n16.bsp"))
+
+        self.planets_path = str(pathlib.Path(planets_path).expanduser())
+        self.asteroids_path = str(pathlib.Path(asteroids_path).expanduser())
+    
+        return super().__init__()
+
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
@@ -134,19 +147,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         """
         Propagates one or more orbits with the same epoch to the specified times.
         """
-        root_dir = pathlib.Path(DATA_DIR).expanduser()
-
-        # Introspect Ephem, if _fields_ has "spk_planets" then we
-        # will use "de440.bsp" for the planets path
-        # otherwise we use "linux_p1550p2650.440"
-        planets_path = str(root_dir.joinpath("linux_p1550p2650.440"))
-        field_names = [field[0] for field in assist.Ephem._fields_]
-        if "spk_planets" in field_names:
-            planets_path = str(root_dir.joinpath("de440.bsp"))
-
         ephem = assist.Ephem(
-            planets_path=planets_path,
-            asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
+            planets_path=self.planets_path,
+            asteroids_path=self.asteroids_path,
         )
         sim = None
         gc.collect()
@@ -297,10 +300,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         coords = coords.set_column("time", input_orbit_times)
         orbits = orbits.set_column("coordinates", coords)
 
-        root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
-            planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
-            asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
+            planets_path=self.planets_path,
+            asteroids_path=self.asteroids_path,
         )
         sim = None
         gc.collect()

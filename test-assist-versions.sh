@@ -1,19 +1,42 @@
 #!/usr/bin/env bash
 
-# Iterate through a list of custom dependencies and run pytest after
-# each one
-# e.g. "main", git+https://github.com/B612-Asteroid-Institute/assist.git@main
-# set a ASSIST_VERSION environment variable with the pytest command
+# Iterate through a list of custom dependencies and run pytest after each one
+# Set an ASSIST_VERSION environment variable with the pytest command
 
-ASSIST_VERSIONS=("main" "ak/spk_only" "ak/spk_only-trunc40" "main-ffp-off" "ak/spk_only-ffp-off" "ak/spk_only-trunc40-ffp-off")
+ASSIST_BRANCH=("main" "ak/spk_only")
+FFP=("off" "on")
 
+for branch in "${ASSIST_BRANCH[@]}"; do
+    for ffp in "${FFP[@]}"; do
+        if [ "$ffp" == "on" ]; then
+            # delete environment variable
+            unset FFP_CONTRACT_OFF
+        else
+            export FFP_CONTRACT_OFF=1
+        fi
+        # Only the 'ak/spk_only' branch has truncation options
+        if [ "$branch" == "main" ]; then
+            TRUNCATION=("0")
+        else
+            TRUNCATION=("0" "50")
+        fi
+        for truncation in "${TRUNCATION[@]}"; do
+            pip uninstall assist rebound -y
+            echo "Running test with version $branch, truncation $truncation, and ffp $ffp"
 
-for version in "${ASSIST_VERSIONS[@]}"; do
-    pip uninstall assist rebound -y
-    pip --no-cache-dir -v install git+https://github.com/B612-Asteroid-Institute/rebound.git@$version
-    pip --no-cache-dir -v install git+https://github.com/B612-Asteroid-Institute/assist.git@$version
-    # replace slashes with dashes
-    version=$(echo $version | tr / -)
-    export ASSIST_VERSION=$version
-    pytest -s -k "test_complete_residuals"
+            # Remove spaces around '=' in variable assignments
+            SAFE_BRANCH=$(echo "$branch" | tr / -)
+            export ASSIST_VERSION="$SAFE_BRANCH-trunc-$truncation-ffp-$ffp"
+            export ASSIST_TRUNCATE="$truncation"
+
+            # Use the pip_install function to handle optional compiler flags
+            pip install --no-cache-dir -v git+https://github.com/B612-Asteroid-Institute/rebound.git@main
+            pip install --no-cache-dir -v git+https://github.com/B612-Asteroid-Institute/assist.git@$branch
+
+            # Export environment variables
+
+            # Run pytest
+            pytest -s -k "test_horizons_residuals"
+        done
+    done
 done
