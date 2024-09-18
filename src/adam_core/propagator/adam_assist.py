@@ -353,7 +353,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         # Step through each time, move the simulation forward and
         # collect the results.
-        while past_integrator_time is False:
+        while past_integrator_time is False and len(orbits) > 0:
             sim.steps(1)
             # print(sim.dt_last_done)
             if sim.t >= final_integrator_time:
@@ -500,7 +500,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
                 # Remove the particle from the input / running orbits
                 # This allows us to carry through object_id, weights, and weights_cov
-                orbits = orbits.apply_mask(~within_radius)
+                orbits = orbits.apply_mask(~within_radius) 
                 # Put the orbits / variants of the impactors into the results set
                 if results is None:
                     results = impacting_orbits
