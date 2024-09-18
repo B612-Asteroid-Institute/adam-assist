@@ -351,7 +351,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         time_step_results: Union[None, OrbitType] = None
 
         # Step through each time, move the simulation forward and
-        # collect the results.
+        # collect the results. End if all orbits are removed from 
+        # the simulation or the final integrator time is reached.
         while past_integrator_time is False and len(orbits) > 0:
             sim.steps(1)
             # print(sim.dt_last_done)
@@ -506,7 +507,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 else:
                     results = qv.concatenate([results, impacting_orbits])
 
-        # Add the final positions of the particles to the results
+        # Add the final positions of the particles that are not already in the results
         if results is None:
             results = time_step_results
         else:
