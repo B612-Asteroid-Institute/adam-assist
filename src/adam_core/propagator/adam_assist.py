@@ -227,7 +227,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
-                # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
                 orbit_ids, variant_ids = zip(
                     *[particle_id.split("-") for particle_id in particle_ids]
@@ -511,7 +510,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         if results is None:
             results = time_step_results
         else:
-            results = qv.concatenate([results, time_step_results])
+            if isinstance(orbits, Orbits):
+                still_in_simulation = pc.invert(pc.is_in(time_step_results.orbit_id, results.orbit_id))
+            elif isinstance(orbits, VariantOrbits):
+                still_in_simulation = pc.invert(pc.is_in(time_step_results.variant_id, results.variant_id))
+            results = qv.concatenate([results, time_step_results.apply_mask(still_in_simulation)])
 
         if earth_impacts is None:
             earth_impacts = EarthImpacts.from_kwargs(
