@@ -500,7 +500,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
                 # Remove the particle from the input / running orbits
                 # This allows us to carry through object_id, weights, and weights_cov
-                orbits = orbits.apply_mask(~within_radius) 
+                orbits = orbits.apply_mask(~within_radius)
                 # Put the orbits / variants of the impactors into the results set
                 if results is None:
                     results = impacting_orbits
