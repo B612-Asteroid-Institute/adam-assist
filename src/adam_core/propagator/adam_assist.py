@@ -508,20 +508,21 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     results = qv.concatenate([results, impacting_orbits])
 
         # Add the final positions of the particles that are not already in the results
-        if results is None:
-            results = time_step_results
-        else:
-            if isinstance(orbits, Orbits):
-                still_in_simulation = pc.invert(
-                    pc.is_in(time_step_results.orbit_id, results.orbit_id)
+        if time_step_results is not None:
+            if results is None:
+                results = time_step_results
+            else:
+                if isinstance(orbits, Orbits):
+                    still_in_simulation = pc.invert(
+                        pc.is_in(time_step_results.orbit_id, results.orbit_id)
+                    )
+                elif isinstance(orbits, VariantOrbits):
+                    still_in_simulation = pc.invert(
+                        pc.is_in(time_step_results.variant_id, results.variant_id)
+                    )
+                results = qv.concatenate(
+                    [results, time_step_results.apply_mask(still_in_simulation)]
                 )
-            elif isinstance(orbits, VariantOrbits):
-                still_in_simulation = pc.invert(
-                    pc.is_in(time_step_results.variant_id, results.variant_id)
-                )
-            results = qv.concatenate(
-                [results, time_step_results.apply_mask(still_in_simulation)]
-            )
 
         if earth_impacts is None:
             earth_impacts = EarthImpacts.from_kwargs(
