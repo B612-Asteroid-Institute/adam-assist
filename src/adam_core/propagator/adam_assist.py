@@ -351,7 +351,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         time_step_results: Union[None, OrbitType] = None
 
         # Step through each time, move the simulation forward and
-        # collect the results. End if all orbits are removed from 
+        # collect the results. End if all orbits are removed from
         # the simulation or the final integrator time is reached.
         while past_integrator_time is False and len(orbits) > 0:
             sim.steps(1)
@@ -512,10 +512,16 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             results = time_step_results
         else:
             if isinstance(orbits, Orbits):
-                still_in_simulation = pc.invert(pc.is_in(time_step_results.orbit_id, results.orbit_id))
+                still_in_simulation = pc.invert(
+                    pc.is_in(time_step_results.orbit_id, results.orbit_id)
+                )
             elif isinstance(orbits, VariantOrbits):
-                still_in_simulation = pc.invert(pc.is_in(time_step_results.variant_id, results.variant_id))
-            results = qv.concatenate([results, time_step_results.apply_mask(still_in_simulation)])
+                still_in_simulation = pc.invert(
+                    pc.is_in(time_step_results.variant_id, results.variant_id)
+                )
+            results = qv.concatenate(
+                [results, time_step_results.apply_mask(still_in_simulation)]
+            )
 
         if earth_impacts is None:
             earth_impacts = EarthImpacts.from_kwargs(
