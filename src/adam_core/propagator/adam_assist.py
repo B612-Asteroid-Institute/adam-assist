@@ -227,7 +227,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
-                # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
                 orbit_ids, variant_ids = zip(
                     *[particle_id.split("-") for particle_id in particle_ids]
@@ -352,8 +351,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         time_step_results: Union[None, OrbitType] = None
 
         # Step through each time, move the simulation forward and
-        # collect the results.
-        while past_integrator_time is False:
+        # collect the results. End if all orbits are removed from
+        # the simulation or the final integrator time is reached.
+        while past_integrator_time is False and len(orbits) > 0:
             sim.steps(1)
             # print(sim.dt_last_done)
             if sim.t >= final_integrator_time:
@@ -507,11 +507,22 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 else:
                     results = qv.concatenate([results, impacting_orbits])
 
-        # Add the final positions of the particles to the results
-        if results is None:
-            results = time_step_results
-        else:
-            results = qv.concatenate([results, time_step_results])
+        # Add the final positions of the particles that are not already in the results
+        if time_step_results is not None:
+            if results is None:
+                results = time_step_results
+            else:
+                if isinstance(orbits, Orbits):
+                    still_in_simulation = pc.invert(
+                        pc.is_in(time_step_results.orbit_id, results.orbit_id)
+                    )
+                elif isinstance(orbits, VariantOrbits):
+                    still_in_simulation = pc.invert(
+                        pc.is_in(time_step_results.variant_id, results.variant_id)
+                    )
+                results = qv.concatenate(
+                    [results, time_step_results.apply_mask(still_in_simulation)]
+                )
 
         if earth_impacts is None:
             earth_impacts = EarthImpacts.from_kwargs(
