@@ -1,6 +1,7 @@
 import glob
 import os
 import pathlib
+from typing import Literal, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,16 +13,21 @@ import pyarrow.parquet as pq
 import pytest
 import quivr as qv
 import seaborn as sns
-from adam_core.observations
 from adam_core.constants import KM_P_AU
-from adam_core.observers import Observers
-from adam_core.orbits import Orbits, Ephemeris
-from adam_core.orbits.query.horizons import query_horizons
-from adam_core.orbits.query.sbdb import query_sbdb
-from adam_core.time import Timestamp
 from adam_core.coordinates import SphericalCoordinates
+from adam_core.coordinates.cometary import CometaryCoordinates
+from adam_core.coordinates.origin import Origin
+from adam_core.coordinates.residuals import Residuals
+from adam_core.observers import Observers
+from adam_core.observers.observers import OBSERVATORY_CODES
+from adam_core.orbits import Ephemeris, Orbits
+from adam_core.orbits.query.horizons import query_horizons
+from adam_core.time import Timestamp
+from adam_core.utils.spice import setup_SPICE, sp
 from assist import Ephem
-from astropy.mpc import MPC
+from astropy.time import Time
+from astroquery.mpc import MPC
+from google.cloud import bigquery
 from numpy.typing import NDArray
 from scipy.stats import ttest_rel
 
@@ -170,6 +176,200 @@ OBJECTS = {
 }
 
 
+## Begin Joachim's code, to be pulled into mpcq
+class MPCObservations(qv.Table):
+    obsid = qv.LargeStringColumn()
+    primary_designation = qv.LargeStringColumn()
+    trksub = qv.LargeStringColumn(nullable=True)
+    provid = qv.LargeStringColumn(nullable=True)
+    permid = qv.LargeStringColumn(nullable=True)
+    submission_id = qv.LargeStringColumn()
+    obssubid = qv.LargeStringColumn(nullable=True)
+    obstime = Timestamp.as_column()
+    ra = qv.Float64Column()
+    dec = qv.Float64Column()
+    rmsra = qv.Float64Column(nullable=True)
+    rmsdec = qv.Float64Column(nullable=True)
+    mag = qv.Float64Column(nullable=True)
+    rmsmag = qv.Float64Column(nullable=True)
+    band = qv.LargeStringColumn(nullable=True)
+    stn = qv.LargeStringColumn()
+    updated_at = Timestamp.as_column(nullable=True)
+    created_at = Timestamp.as_column(nullable=True)
+    status = qv.LargeStringColumn()
+
+
+def query_mpc_observations(provids):
+
+    query = f"""
+    SELECT DISTINCT obsid, primary_designation, trksub, permid, provid, submission_id, obssubid, obstime, ra, dec, rmsra, rmsdec, mag, rmsmag, band, stn, updated_at, created_at, status
+    FROM `moeyens-thor-dev.mpc_sbn_aipublic.obs_sbn` AS obs_sbn
+    INNER JOIN (
+        SELECT unpacked_primary_provisional_designation AS primary_designation, unpacked_secondary_provisional_designation AS secondary_designation
+        FROM moeyens-thor-dev.mpc_sbn_aipublic.current_identifications
+        WHERE unpacked_primary_provisional_designation IN ({", ".join([f'"{id}"' for id in provids])})
+        OR unpacked_secondary_provisional_designation IN ({", ".join([f'"{id}"' for id in provids])})
+    ) AS identifications
+    ON obs_sbn.provid = identifications.primary_designation OR obs_sbn.provid = identifications.secondary_designation
+    """
+
+    client = bigquery.Client()
+
+    query_job = client.query(query)
+
+    # Wait for the query to finish
+    results = query_job.result()
+
+    # Convert the results to a PyArrow table
+    table = results.to_arrow()
+
+    obstime = Time(
+        table["obstime"].to_numpy(zero_copy_only=False),
+        format="datetime64",
+        scale="utc",
+    )
+    created_at = Time(
+        table["created_at"].to_numpy(zero_copy_only=False),
+        format="datetime64",
+        scale="utc",
+    )
+    updated_at = Time(
+        table["updated_at"].to_numpy(zero_copy_only=False),
+        format="datetime64",
+        scale="utc",
+    )
+
+    mpcobs = MPCObservations.from_kwargs(
+        obsid=table["obsid"],
+        primary_designation=table["primary_designation"],
+        trksub=table["trksub"],
+        provid=table["provid"],
+        permid=table["permid"],
+        submission_id=table["submission_id"],
+        obssubid=table["obssubid"],
+        obstime=Timestamp.from_astropy(obstime),
+        ra=table["ra"],
+        dec=table["dec"],
+        rmsra=table["rmsra"],
+        rmsdec=table["rmsdec"],
+        mag=table["mag"],
+        rmsmag=table["rmsmag"],
+        band=table["band"],
+        stn=table["stn"],
+        updated_at=Timestamp.from_astropy(updated_at),
+        created_at=Timestamp.from_astropy(created_at),
+        status=table["status"],
+    )
+    return mpcobs.sort_by(
+        [
+            ("primary_designation", "ascending"),
+            ("obstime.days", "ascending"),
+            ("obstime.nanos", "ascending"),
+        ]
+    )
+
+
+class MPCOrbits(qv.Table):
+
+    id = qv.Int64Column()
+    provid = qv.LargeStringColumn()
+    created_at = Timestamp.as_column()
+    updated_at = Timestamp.as_column()
+    a = qv.Float64Column(nullable=True)
+    q = qv.Float64Column(nullable=True)
+    e = qv.Float64Column(nullable=True)
+    i = qv.Float64Column(nullable=True)
+    node = qv.Float64Column(nullable=True)
+    argperi = qv.Float64Column(nullable=True)
+    peri_time = qv.Float64Column(nullable=True)
+    mean_anomaly = qv.Float64Column(nullable=True)
+    epoch = Timestamp.as_column()
+
+    def to_orbits(self):
+
+        orbits = Orbits.from_kwargs(
+            orbit_id=self.id,
+            object_id=self.provid,
+            coordinates=CometaryCoordinates.from_kwargs(
+                q=self.q,
+                e=self.e,
+                i=self.i,
+                raan=self.node,
+                ap=self.argperi,
+                tp=self.peri_time,
+                time=self.epoch,
+                origin=Origin.from_kwargs(
+                    code=pa.repeat("SUN", len(self)),
+                ),
+                frame="ecliptic",
+            ).to_cartesian(),
+        )
+        return orbits
+
+
+def query_mpc_orbits(provids):
+
+    query = f"""
+    SELECT DISTINCT id, unpacked_primary_provisional_designation, created_at, updated_at, a, q, e, i, node, argperi, peri_time, mean_anomaly, epoch_mjd
+    FROM `moeyens-thor-dev.mpc_sbn_aipublic.mpc_orbits` AS mpc_orbits
+    INNER JOIN (
+        SELECT unpacked_primary_provisional_designation AS primary_designation, unpacked_secondary_provisional_designation AS secondary_designation
+        FROM moeyens-thor-dev.mpc_sbn_aipublic.current_identifications
+        WHERE unpacked_primary_provisional_designation IN ({", ".join([f'"{id}"' for id in provids])})
+        OR unpacked_secondary_provisional_designation IN ({", ".join([f'"{id}"' for id in provids])})
+    ) AS identifications
+    ON mpc_orbits.unpacked_primary_provisional_designation = identifications.primary_designation OR mpc_orbits.unpacked_primary_provisional_designation = identifications.secondary_designation
+    """
+
+    client = bigquery.Client()
+
+    query_job = client.query(query)
+
+    # Wait for the query to finish
+    results = query_job.result()
+
+    # Convert the results to a PyArrow table
+    table = results.to_arrow()
+
+    created_at = Time(
+        table["created_at"].to_numpy(zero_copy_only=False),
+        format="datetime64",
+        scale="utc",
+    )
+    updated_at = Time(
+        table["updated_at"].to_numpy(zero_copy_only=False),
+        format="datetime64",
+        scale="utc",
+    )
+
+    mpcorbits = MPCOrbits.from_kwargs(
+        id=table["id"],
+        provid=table["unpacked_primary_provisional_designation"],
+        created_at=Timestamp.from_astropy(created_at),
+        updated_at=Timestamp.from_astropy(updated_at),
+        a=table["a"],
+        q=table["q"],
+        e=table["e"],
+        i=table["i"],
+        node=table["node"],
+        argperi=table["argperi"],
+        peri_time=table["peri_time"],
+        mean_anomaly=table["mean_anomaly"],
+        epoch=Timestamp.from_mjd(table["epoch_mjd"], scale="utc"),
+    )
+
+    return mpcorbits.sort_by(
+        [
+            ("provid", "ascending"),
+            ("epoch.days", "ascending"),
+            ("epoch.nanos", "ascending"),
+        ]
+    )
+
+
+## End Joachim's code
+
+
 def chart_residuals(
     path: str,
     env_name: str,
@@ -251,11 +451,19 @@ def test_horizons_residuals():
         job_name = f"{env_name}_{ephem_version}"
         for object_id, times in OBJECTS.items():
 
-            print(f"{object_id} {job_name}")
+            safe_object_name = object_id.replace("/", "_")
+            residuals_path = (
+                f"./outputs/{safe_object_name}_horizons_{job_name}.parquet"
+            )
+
+            print(f"Running: {object_id} {job_name}")
+            if pathlib.Path(residuals_path).exists():
+                print(f"File found, skipping {object_id} {job_name}")
+                continue
+
 
             # Get the horizons vectors for this object_id
             object_horizons_vectors = horizons_vectors.select("object_id", object_id)
-            print(object_horizons_vectors)
 
             props = ASSISTPropagator(
                 planets_path=pathlib.Path(DATA_DIR).expanduser().joinpath(planets_file),
@@ -287,76 +495,101 @@ def test_horizons_residuals():
                     "env": pa.repeat(job_name, len(residuals)),
                 }
             )
-            safe_object_name = object_id.replace("/", "_")
-            residuals_path = (
-                f"./outputs/{safe_object_name}_residuals_{job_name}.parquet"
-            )
+
             pq.write_table(residuals_table, residuals_path)
 
 
-def fetch_mpc_observations():
+def fetch_mpc_data(output_folder: str = "./mpc") -> Tuple[Orbits, MPCObservations]:
     """
     Query the MPC for the ephemeris of the objects in OBJECTS
     """
-    if not pathlib.Path("./outputs/mpc_observations.parquet").exists():
-        pathlib.Path("./outputs").mkdir(parents=True, exist_ok=True)
+    if not pathlib.Path(f"./{output_folder}/mpc_observations.parquet").exists():
+        pathlib.Path(f"./{output_folder}").mkdir(parents=True, exist_ok=True)
         all_obs = None
         orbits = Orbits.empty()
-        for object_id, _ in OBJECTS.items():
-            obs = MPC.get_observations(object_id).to_pandas()
-            if all_obs is None:
-                all_obs = obs
-            else:
-                all_obs = pd.concat([all_obs, obs])
-            # Get orbits from sbdb
-            orbit = query_sbdb([object_id])
-            orbit = orbit.set_column(
-                "object_id",
-                pa.array(pa.repeat(object_id, len(orbit)), type=pa.large_string()),
-            )
-            orbits = qv.concatenate([orbits, orbit])
-    
-        all_obs.to_parquet("./outputs/mpc_observations.parquet")
-        orbits.to_parquet("./outputs/sbdb_orbits.parquet")
-    all_obs = pq.read_table("./outputs/mpc_observations.parquet")
-    orbits = Orbits.from_parquet("./outputs/sbdb_orbits.parquet")
+        all_obs = query_mpc_observations([object_id for object_id in OBJECTS.keys()])
+        mpc_orbits = query_mpc_orbits([object_id for object_id in OBJECTS.keys()])
+        orbits = mpc_orbits.to_orbits()
+        all_obs.to_parquet(f"./{output_folder}/mpc_observations.parquet")
+        orbits.to_parquet(f"./{output_folder}/mpc_orbits.parquet")
+    all_obs = MPCObservations.from_parquet(f"./{output_folder}/mpc_observations.parquet")
+    orbits = Orbits.from_parquet(f"./{output_folder}/mpc_orbits.parquet")
     return orbits, all_obs
 
 
-
-def _observers_from_mpc_observations(mpc_observations: pa.Table) -> Observers:
+def _observers_from_mpc_observations(mpc_observations: MPCObservations) -> Observers:
     """
     Convert the MPC observations to Observers
     """
-    observers = Observers.empty()
-    # Traverse over unique observatories
-    for observatory_code in mpc_observations["observatory"].unique():
-        observatory_obs = mpc_observations.select("observatory", observatory_code)
-        times = Timestamp.from_iso8601([obstime.replace(' UTC', '').replace(' ', 'T') for obstime in observatory_obs["obstime"].to_pylist()])
-        observer = Observers.from_code(
-            code=observatory_code,
-            time=times
-        )
-        assert len(observatory_obs) == len(observer)
-        observers = qv.concatenate([observers, observer])
-
+    observers = Observers.from_codes(
+        codes=mpc_observations.stn, times=mpc_observations.obstime
+    )
     return observers
 
-def _ephemeris_from_mpc_observations(mpc_observations: pa.Table) -> Ephemeris:
-    coordinates = SphericalCoordinates.from_kwargs(
 
+def _collect_supported_observatories(
+    mpc_observations: MPCObservations,
+) -> pa.LargeStringArray:
+    """
+    Get the unique codes from mpc_observations and check via observers if we have coverage in the spice files
+    """
+    unique_codes = set(mpc_observations.stn.unique().to_pylist())
+    # Get the intersection of the unique codes and the supported codes
+    allowed_codes = unique_codes.intersection(OBSERVATORY_CODES)
+    # These codes are not supported by the spice files
+    allowed_codes.remove("C53")
+    allowed_codes.remove("C51")
+    return pa.array(list(allowed_codes), type=pa.large_string())
+
+
+def _filter_supported_mpc_observations(
+    mpc_observations: MPCObservations,
+) -> MPCObservations:
+    """
+    Filter the MPC observations to only include those with supported observatories
+    """
+    supported_codes = _collect_supported_observatories(mpc_observations)
+    mask = pc.is_in(mpc_observations.stn, supported_codes)
+    mpc_observations = mpc_observations.apply_mask(mask)
+
+    # Remove observations before 1990
+    mask = pc.greater(mpc_observations.obstime.mjd(), 47892)
+    mpc_observations = mpc_observations.apply_mask(mask)
+    return mpc_observations
+
+
+def _select_object_observations(
+    mpc_observations: MPCObservations, object_id: str
+) -> MPCObservations:
+    """
+    Select the observations for a given object_id
+    """
+    mask = pc.or_(
+        pc.or_(
+            pc.fill_null(
+                pc.equal(mpc_observations.primary_designation, object_id), False
+            ),
+            pc.fill_null(pc.equal(mpc_observations.provid, object_id), False),
+        ),
+        pc.fill_null(pc.equal(mpc_observations.permid, object_id), False),
+    )
+    return mpc_observations.apply_mask(mask)
 
 
 def test_mpc_residuals():
     """
-    Produces ephemeris for objects in MPC using MPC Orbits and observations
+    Test how closely assist matches the MPC ephemeris
     """
+    # Find the total number of loaded kernels
     download_jpl_ephemeris_files()
     env_name = os.environ.get("ASSIST_VERSION", "local")
 
     pathlib.Path("./outputs").mkdir(parents=True, exist_ok=True)
 
-    sbdb_orbits, mpc_observations = fetch_mpc_observations()
+    orbits, mpc_observations = fetch_mpc_data()
+
+    mpc_observations = _filter_supported_mpc_observations(mpc_observations)
+
     fieldnames = [field[0] for field in Ephem._fields_]
     is_spk = "spk_global" in fieldnames
 
@@ -370,19 +603,19 @@ def test_mpc_residuals():
             ("440", "de440.bsp", "sb441-n16.bsp"),
             ("441", "de441.bsp", "sb441-n16.bsp"),
         )
-    
+
     for ephem_version, planets_file, asteroids_file in ephem_files:
         job_name = f"{env_name}_{ephem_version}"
-        for object_id, _ in OBJECTS.items():
 
-            print(f"{object_id} {job_name}")
+        for object_id in OBJECTS.keys():
+            safe_object_name = object_id.replace("/", "_")
+            on_sky_difference_path = f"./outputs/{safe_object_name}_mpc_{job_name}.parquet"
 
-            # Get the horizons vectors for this object_id
-            orbit = sbdb_orbits.select("object_id", object_id)
-            object_mpc_observations = mpc_observations.select("designation", object_id)
+            print(f"Running: {object_id} {job_name}")
+            if pathlib.Path(on_sky_difference_path).exists():
+                print(f"File found, skipping {object_id} {job_name}")
+                continue
 
-            # Generate observers from the MPC observations
-            observers = _observers_from_mpc_observations(object_mpc_observations)
 
             props = ASSISTPropagator(
                 planets_path=pathlib.Path(DATA_DIR).expanduser().joinpath(planets_file),
@@ -390,116 +623,54 @@ def test_mpc_residuals():
                 .expanduser()
                 .joinpath(asteroids_file),
             )
-            # We use the first vector as the initial state
-            assist_ephem = props.generate_ephemeris(
-                orbit, observers, covariance=True
+            orbit = orbits.select("object_id", object_id)
+            # Select observations from primary_designation, provid or permid
+            object_mpc_observations = _select_object_observations(
+                mpc_observations, object_id
+            )
+            if len(object_mpc_observations) == 0:
+                print(f"No observations found for {object_id}")
+                continue
+            object_mpc_observations = object_mpc_observations.sort_by(
+                [("obstime.days", "ascending"), ("obstime.nanos", "ascending")]
             )
 
+            observers = _observers_from_mpc_observations(object_mpc_observations)
 
+            props = ASSISTPropagator()
+            assist_ephem = props.generate_ephemeris(orbit, observers, covariance=True)
 
+            # Compare ra/dec
+            # Get the difference in magnitude for the lon/lats
+            on_sky_difference = np.linalg.norm(
+                assist_ephem.coordinates.values[:, 1:3]
+                - object_mpc_observations.to_dataframe()[["ra", "dec"]].to_numpy(),
+                axis=1,
+            )
 
-            # Convert from AU to meters
-            residuals *= KM_P_AU
+            # Convert from decimal degrees to milliarcseconds
+            on_sky_difference *= 3600000
 
             # Convert the rediduals to pyarrow and save as parquet
-            residuals_pa = pa.array(residuals)
-            residuals_table = pa.table(
+            on_sky_difference_pa = pa.array(on_sky_difference)
+            on_sky_difference_table = pa.table(
                 {
-                    "residuals": residuals_pa,
-                    "object_id": pa.repeat(object_id, len(residuals)),
-                    "time": object_horizons_vectors.coordinates.time.mjd(),
-                    "env": pa.repeat(job_name, len(residuals)),
+                    "residuals": on_sky_difference_pa,
+                    "object_id": pa.repeat(object_id, len(on_sky_difference)),
+                    "time": object_mpc_observations.obstime.mjd(),
+                    "env": pa.repeat(job_name, len(on_sky_difference)),
                 }
             )
-            safe_object_name = object_id.replace("/", "_")
-            residuals_path = (
-                f"./outputs/{safe_object_name}_residuals_{job_name}.parquet"
-            )
-            pq.write_table(residuals_table, residuals_path)
+
+            pq.write_table(on_sky_difference_table, on_sky_difference_path)
 
 
-
-
-def compare_residuals_old():
-    """
-    Load in the parquet files in outputs.
-    Calculate the cumulative absolute residuals for each unique environment,
-    normalized by object_id.
-    """
-    residuals_files = glob.glob("./outputs/*_residuals_*.parquet")
-    residuals_tables = [pq.read_table(file) for file in residuals_files]
-
-    # Combine all the tables
-    residuals_table = pa.concat_tables(residuals_tables)
-
-    pq.write_table(residuals_table, "./outputs/all_residuals.parquet")
-
-    # Convert residuals to absolute values
-    abs_residuals = pc.abs(residuals_table.column("residuals"))
-    # residuals_table = residuals_table.drop_columns("residuals")
-    residuals_table = residuals_table.add_column(0, "abs_residuals", abs_residuals)
-
-    # # Group by object_id and env to calculate sum of residuals and count per object_id
-    grouped_by_object_env = residuals_table.group_by(["object_id", "env"])
-
-    env_object_sums = grouped_by_object_env.aggregate(
-        [("abs_residuals", "sum"), ("abs_residuals", "count")]
-    )
-
-    # # Normalize residuals by the count of residuals for each object_id
-    # normalized_residuals = pc.divide(grouped_by_object.column("residuals_sum"), grouped_by_object.column("residuals_count"))
-
-    # grouped_by_object = grouped_by_object.drop_columns(["residuals_sum", "residuals_count"])
-    # grouped_by_object = grouped_by_object.add_column(0, "normalized_residuals", normalized_residuals)
-
-    # Find the maximum residual for each object_id
-    max_object_residuals = env_object_sums.group_by("object_id").aggregate(
-        [("abs_residuals_sum", "max")]
-    )
-
-    env_object_sums = env_object_sums.join(max_object_residuals, "object_id")
-
-    # Normalize the residuals by the max residual for each object_id
-    normalized_residuals = pc.divide(
-        env_object_sums.column("abs_residuals_sum"),
-        env_object_sums.column("abs_residuals_sum_max"),
-    )
-
-    # Invert it so we get the difference from 1
-    distance_from_worst_residuals = pc.subtract(1, normalized_residuals)
-
-    env_object_sums = env_object_sums.add_column(
-        0, "distance_from_worst_residuals", distance_from_worst_residuals
-    )
-
-    # Update pandas to print out full tables (rows)
-    pd.set_option("display.max_rows", None)
-
-    # Sort by object_id and then normalized_residuals
-    print(
-        env_object_sums.sort_by(
-            [
-                ("object_id", "ascending"),
-                ("distance_from_worst_residuals", "descending"),
-            ]
-        ).to_pandas()[["object_id", "env", "distance_from_worst_residuals"]]
-    )
-
-    # Group by env
-    print(
-        env_object_sums.group_by("env")
-        .aggregate([("distance_from_worst_residuals", "sum")])
-        .sort_by([("distance_from_worst_residuals_sum", "descending")])
-        .to_pandas()
-    )
-
-
-def compare_residuals():
+def compare_residuals(residual_type: Literal["horizons", "mpc"]):
     """
     Load in the parquet files in outputs.
     Calculate the mean residuals per time step for each unique environment and object.
     """
-    residuals_files = glob.glob("./outputs/*_residuals_*.parquet")
+    residuals_files = glob.glob(f"./outputs/*_{residual_type}_*.parquet")
     residuals_tables = [pq.read_table(file) for file in residuals_files]
 
     # Combine all the tables
@@ -507,8 +678,46 @@ def compare_residuals():
 
     # Compute mean residual per time step for each object and environment
     grouped = residuals_table.group_by(["object_id", "env"]).aggregate(
-        [("residuals", "mean"), ("residuals", "stddev"), ("residuals", "count")]
+        [
+            ("residuals", "mean"),
+            ("residuals", "stddev"),
+            ("residuals", "count"),
+            ("time", "min"),
+            ("time", "max"),
+        ]
     )
+
+    # Represent time min and max as datetime strings instead of MJD
+    time_min_str = [
+        time.strftime("%Y-%m-%d")
+        for time in list(
+            Timestamp.from_mjd(grouped["time_min"]).to_astropy().to_datetime()
+        )
+    ]
+    time_max_str = [
+        time.strftime("%Y-%m-%d")
+        for time in list(
+            Timestamp.from_mjd(grouped["time_max"]).to_astropy().to_datetime()
+        )
+    ]
+    grouped = grouped.add_column(0, "time_min_str", pa.array(time_min_str))
+    grouped = grouped.add_column(0, "time_max_str", pa.array(time_max_str))
+
+    to_print = grouped.to_pandas()[
+        [
+            "object_id",
+            "env",
+            "residuals_mean",
+            "residuals_stddev",
+            "residuals_count",
+            "time_min_str",
+            "time_max_str",
+        ]
+    ]
+    to_print = to_print.sort_values(
+        by=["time_min_str", "residuals_mean"], ascending=[True, True]
+    )
+    print(to_print.to_string(index=False))
 
     # Convert to pandas DataFrame for easier manipulation
     df = grouped.to_pandas()
@@ -524,59 +733,61 @@ def compare_residuals():
         .reset_index()
     )
 
-    summary = summary.sort_values(("normalized_residual", "mean"), ascending=True)
+    # Replace normalized residual with 1-minus
+    summary["normalized_residual"] = 1 - summary["normalized_residual"]
 
-    print(summary)
+    # A larger 1-minus normalized residuals indicates better performance
+    # against the worst performer
+    summary = summary.sort_values(("normalized_residual", "mean"), ascending=False)
+
+    # print without the index
+    print(summary.to_string(index=False))
 
     statistical_test(df)
-
 
 
 def statistical_test(df):
     """
     Perform paired t-tests between each pair of environments and print the results in a table.
-    
+
     Parameters:
     df (DataFrame): The DataFrame containing 'env' and 'normalized_residual' columns.
     """
-    envs = df['env'].unique()
+    envs = df["env"].unique()
     results = []
 
     for i in range(len(envs)):
-        for j in range(i+1, len(envs)):
+        for j in range(i + 1, len(envs)):
             env1 = envs[i]
             env2 = envs[j]
             # Ensure the data is aligned by 'object_id' to maintain pairing
-            data1 = df[df['env'] == env1].set_index('object_id')['normalized_residual']
-            data2 = df[df['env'] == env2].set_index('object_id')['normalized_residual']
+            data1 = df[df["env"] == env1].set_index("object_id")["normalized_residual"]
+            data2 = df[df["env"] == env2].set_index("object_id")["normalized_residual"]
             # Only keep common object_ids to ensure proper pairing
             common_objects = data1.index.intersection(data2.index)
             paired_data1 = data1.loc[common_objects]
             paired_data2 = data2.loc[common_objects]
             # Perform paired t-test
             stat, p = ttest_rel(paired_data1, paired_data2)
-            results.append({
-                'Environment 1': env1,
-                'Environment 2': env2,
-                'p-value': p
-            })
+            results.append({"Environment 1": env1, "Environment 2": env2, "p-value": p})
 
     # Create a DataFrame for the results
     results_df = pd.DataFrame(results)
 
     # Format p-values for readability
-    results_df['p-value'] = results_df['p-value'].apply(lambda x: f'{x:.3e}')
+    results_df["p-value"] = results_df["p-value"].apply(lambda x: f"{x:.3e}")
 
     # Print the results in a nicely formatted table
     print("\nPaired t-test Results:")
     print(results_df.to_string(index=False))
 
+
 def plot_residuals(df):
     plt.figure(figsize=(10, 6))
-    sns.boxplot(x='env', y='normalized_residual', data=df)
-    plt.title('Normalized Residuals per Environment')
-    plt.ylabel('Normalized Residual')
-    plt.xlabel('Environment')
+    sns.boxplot(x="env", y="normalized_residual", data=df)
+    plt.title("Normalized Residuals per Environment")
+    plt.ylabel("Normalized Residual")
+    plt.xlabel("Environment")
     # Make sure the labels are angled to make them readable
-    plt.xticks(rotation=45, ha='right')
+    plt.xticks(rotation=45, ha="right")
     plt.show()

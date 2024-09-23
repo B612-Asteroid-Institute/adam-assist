@@ -36,7 +36,7 @@ for branch in "${ASSIST_BRANCH[@]}"; do
             # Export environment variables
 
             # Run pytest
-            pytest -s -k "test_horizons_residuals"
+            pytest -s -k "test_horizons_residuals or test_mpc_residuals"
         done
     done
 done
