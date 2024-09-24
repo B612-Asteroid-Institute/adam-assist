@@ -81,10 +81,6 @@ OBJECTS = {
     "1986 TO": Timestamp.from_mjd(
         pc.add(60000, pa.array(range(0, 3 * 365, 50))), scale="utc"
     ),
-    # 54509 YORP (2000 PH5)
-    "2000 PH5": Timestamp.from_mjd(
-        pc.add(60000, pa.array(range(0, 3 * 365, 50))), scale="utc"
-    ),
     # 2063 Bacchus (1977 HB)
     "1977 HB": Timestamp.from_mjd(
         pc.add(60000, pa.array(range(0, 3 * 365, 50))), scale="utc"
@@ -355,7 +351,7 @@ def query_mpc_orbits(provids):
         argperi=table["argperi"],
         peri_time=table["peri_time"],
         mean_anomaly=table["mean_anomaly"],
-        epoch=Timestamp.from_mjd(table["epoch_mjd"], scale="utc"),
+        epoch=Timestamp.from_mjd(table["epoch_mjd"], scale="tt"),
     )
 
     return mpcorbits.sort_by(
@@ -729,21 +725,23 @@ def compare_residuals(residual_type: Literal["horizons", "mpc"]):
     # Aggregate across objects
     summary = (
         df.groupby("env")
-        .agg({"normalized_residual": ["mean", "median"], "residuals_count": "sum"})
+        .agg({"residuals_mean": "mean", "normalized_residual": "mean"})
         .reset_index()
     )
 
     # Replace normalized residual with 1-minus
-    summary["normalized_residual"] = 1 - summary["normalized_residual"]
+    summary["inverse_normalized_residual"] = 1 - summary["normalized_residual"]
+
+    del summary["normalized_residual"]
 
     # A larger 1-minus normalized residuals indicates better performance
     # against the worst performer
-    summary = summary.sort_values(("normalized_residual", "mean"), ascending=False)
+    summary = summary.sort_values(("inverse_normalized_residual"), ascending=False)
 
     # print without the index
     print(summary.to_string(index=False))
 
-    statistical_test(df)
+    # statistical_test(df)
 
 
 def statistical_test(df):
