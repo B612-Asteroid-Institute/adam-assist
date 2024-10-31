@@ -295,10 +295,15 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         gc.collect()
         sim = rebound.Simulation()
 
+        backward_propagation = num_days < 0
+
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
         start_tdb_time = start_tdb_time - ephem.jd_ref
         sim.t = start_tdb_time
+
+        if backward_propagation:
+            sim.dt = -0.01
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
 
@@ -356,7 +361,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         while past_integrator_time is False and len(orbits) > 0:
             sim.steps(1)
             # print(sim.dt_last_done)
-            if sim.t >= final_integrator_time:
+            if (sim.t >= final_integrator_time) or (backward_propagation and sim.t <= final_integrator_time):
                 past_integrator_time = True
 
             # Get serialized particle data as numpy arrays
