@@ -1,4 +1,3 @@
-import gc
 import hashlib
 import os
 import pathlib
@@ -291,7 +290,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
         )
         sim = None
-        gc.collect()
         sim = rebound.Simulation()
 
         # Set the simulation time, relative to the jd_ref
