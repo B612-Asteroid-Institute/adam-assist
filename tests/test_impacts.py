@@ -85,3 +85,4 @@ def test_detect_impacts():
 
     results, impacts = propagator._detect_impacts(orbit, -60)
     assert results.coordinates.time.mjd()[0] <= orbit.coordinates.time.add_days(-60).mjd()[0]
+    assert len(impacts) == 0, "Should have exactly 0 impactors"

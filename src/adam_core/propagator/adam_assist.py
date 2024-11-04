@@ -1,4 +1,3 @@
-import gc
 import hashlib
 import os
 import pathlib
@@ -139,7 +138,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
         )
         sim = None
-        gc.collect()
         sim = rebound.Simulation()
         sim.ri_ias15.min_dt = 1e-15
         sim.ri_ias15.adaptive_mode = 2
@@ -292,7 +290,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
         )
         sim = None
-        gc.collect()
         sim = rebound.Simulation()
 
         backward_propagation = num_days < 0
