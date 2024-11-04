@@ -360,8 +360,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # the simulation or the final integrator time is reached.
         while past_integrator_time is False and len(orbits) > 0:
             sim.steps(1)
-            # print(sim.dt_last_done)
-            if (sim.t >= final_integrator_time) or (backward_propagation and sim.t <= final_integrator_time):
+            if (sim.t >= final_integrator_time and not backward_propagation) or (backward_propagation and sim.t <= final_integrator_time):
                 past_integrator_time = True
 
             # Get serialized particle data as numpy arrays
