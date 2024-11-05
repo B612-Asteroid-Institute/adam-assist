@@ -74,7 +74,7 @@ def test_calculate_impacts_benchmark(benchmark, processes):
     assert len(impacts) == 0, "Should have exactly 0 impactors"
 
 
-def test_detect_impacts():
+def test_detect_impacts_time_direction():
     start_time = Timestamp.from_mjd([60000], scale="utc")
     orbit = query_horizons(["1980 PA"], start_time)
     download_jpl_ephemeris_files()
