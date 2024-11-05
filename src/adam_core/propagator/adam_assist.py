@@ -300,7 +300,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim.t = start_tdb_time
 
         if backward_propagation:
-            sim.dt = -0.01
+            sim.dt = sim.dt * -1
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
 
