@@ -1,6 +1,8 @@
 import pytest
 from adam_core.dynamics.impacts import calculate_impacts
 from adam_core.orbits import Orbits
+from adam_core.time import Timestamp
+from adam_core.orbits.query.horizons import query_horizons
 
 from src.adam_core.propagator.adam_assist import (
     ASSISTPropagator,
@@ -70,3 +72,16 @@ def test_calculate_impacts_benchmark(benchmark, processes):
     )
     assert len(variants) == 200, "Should have 200 variants"
     assert len(impacts) == 0, "Should have exactly 0 impactors"
+
+
+def test_detect_impacts_time_direction():
+    start_time = Timestamp.from_mjd([60000], scale="utc")
+    orbit = query_horizons(["1980 PA"], start_time)
+    download_jpl_ephemeris_files()
+    propagator = ASSISTPropagator()
+
+    results, impacts = propagator._detect_impacts(orbit, 60)
+    assert results.coordinates.time.mjd().to_numpy()[0] >= orbit.coordinates.time.add_days(60).mjd().to_numpy()[0]
+
+    results, impacts = propagator._detect_impacts(orbit, -60)
+    assert results.coordinates.time.mjd().to_numpy()[0] <= orbit.coordinates.time.add_days(-60).mjd().to_numpy()[0]
