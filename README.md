@@ -24,14 +24,6 @@
 pip install adam-assist
 ```
 
-You will need to download the JPL ephemeris files. It is recommended to use the built in utility for this.
-
-```python
-from adam_core.propagator.adam_assist import download_jpl_ephemeris_files
-
-download_jpl_ephemeris_files()
-```
-
 ## Usage
 
 ### Propagating Orbits

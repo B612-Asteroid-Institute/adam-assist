@@ -1,16 +1,14 @@
 import hashlib
-import os
-import pathlib
 from ctypes import c_uint32
 from typing import Dict, List, Tuple, Union
 
 import assist
 import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
 import rebound
-import urllib3
 from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
@@ -19,6 +17,8 @@ from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
+from jpl_small_bodies_de441_n16 import de441_n16
+from naif_de440 import de440
 from quivr.concat import concatenate
 
 from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
@@ -30,38 +30,9 @@ try:
 except ImportError:
     __version__ = "0.0.0"
 
-DATA_DIR = os.getenv("ASSIST_DATA_DIR", "~/.adam_assist_data")
-
 # Use the Earth's equatorial radius as used in DE4XX ephemerides
 # adam_core defines it in au but we need it in km
-EARTH_RADIUS_KM = c.R_EARTH * KM_P_AU
-
-
-def download_jpl_ephemeris_files(data_dir: str = DATA_DIR) -> None:
-    ephemeris_urls = (
-        "https://ssd.jpl.nasa.gov/ftp/eph/small_bodies/asteroids_de441/sb441-n16.bsp",
-        "https://ssd.jpl.nasa.gov/ftp/eph/planets/Linux/de440/linux_p1550p2650.440",
-    )
-    data_dir_path = pathlib.Path(data_dir).expanduser()
-    data_dir_path.mkdir(parents=True, exist_ok=True)
-    for url in ephemeris_urls:
-        file_name = pathlib.Path(url).name
-        file_path = data_dir_path.joinpath(file_name)
-        if not file_path.exists():
-            # use urllib3
-            http = urllib3.PoolManager()
-            with (
-                http.request("GET", url, preload_content=False) as r,
-                open(file_path, "wb") as out_file,
-            ):
-                if r.status != 200:
-                    raise RuntimeError(f"Failed to download {url}")
-                while True:
-                    data = r.read(1024)
-                    if not data:
-                        break
-                    out_file.write(data)
-            r.release_conn()
+EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
 
 def uint32_hash(s: str) -> c_uint32:
@@ -71,7 +42,8 @@ def uint32_hash(s: str) -> c_uint32:
 
 
 def hash_orbit_ids_to_uint32(
-    orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
+    # orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
+    orbit_ids: npt.NDArray[np.str_],
 ) -> Tuple[Dict[int, str], List[c_uint32]]:
     """
     Derive uint32 hashes from orbit id strigns
@@ -132,10 +104,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         """
         Propagates one or more orbits with the same epoch to the specified times.
         """
-        root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
-            planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
-            asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
+            planets_path=de440,
+            asteroids_path=de441_n16,
         )
         sim = None
         sim = rebound.Simulation()
@@ -284,10 +255,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         coords = coords.set_column("time", input_orbit_times)
         orbits = orbits.set_column("coordinates", coords)
 
-        root_dir = pathlib.Path(DATA_DIR).expanduser()
         ephem = assist.Ephem(
-            planets_path=str(root_dir.joinpath("linux_p1550p2650.440")),
-            asteroids_path=str(root_dir.joinpath("sb441-n16.bsp")),
+            planets_path=de440,
+            asteroids_path=de441_n16,
         )
         sim = None
         sim = rebound.Simulation()
