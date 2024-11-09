@@ -1,13 +1,10 @@
 import pytest
 from adam_core.dynamics.impacts import calculate_impacts
 from adam_core.orbits import Orbits
-from adam_core.time import Timestamp
 from adam_core.orbits.query.horizons import query_horizons
+from adam_core.time import Timestamp
 
-from src.adam_core.propagator.adam_assist import (
-    ASSISTPropagator,
-    download_jpl_ephemeris_files,
-)
+from src.adam_core.propagator.adam_assist import ASSISTPropagator
 
 # Contains a likely impactor with ~60% chance of impact in 30 days
 IMPACTOR_FILE_PATH_60 = "tests/data/I00007_orbit.parquet"
@@ -20,7 +17,6 @@ IMPACTOR_FILE_PATH_0 = "tests/data/I00009_orbit.parquet"
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
 def test_calculate_impacts_benchmark(benchmark, processes):
-    download_jpl_ephemeris_files()
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_60)[0]
     propagator = ASSISTPropagator()
     variants, impacts = benchmark(
@@ -39,7 +35,7 @@ def test_calculate_impacts_benchmark(benchmark, processes):
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
 def test_calculate_impacts_benchmark(benchmark, processes):
-    download_jpl_ephemeris_files()
+    
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_100)[0]
     propagator = ASSISTPropagator()
     variants, impacts = benchmark(
@@ -58,7 +54,6 @@ def test_calculate_impacts_benchmark(benchmark, processes):
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
 def test_calculate_impacts_benchmark(benchmark, processes):
-    download_jpl_ephemeris_files()
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_0)[0]
     propagator = ASSISTPropagator()
     variants, impacts = benchmark(
@@ -77,7 +72,7 @@ def test_calculate_impacts_benchmark(benchmark, processes):
 def test_detect_impacts_time_direction():
     start_time = Timestamp.from_mjd([60000], scale="utc")
     orbit = query_horizons(["1980 PA"], start_time)
-    download_jpl_ephemeris_files()
+    
     propagator = ASSISTPropagator()
 
     results, impacts = propagator._detect_impacts(orbit, 60)

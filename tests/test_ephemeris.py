@@ -8,17 +8,13 @@ from adam_core.time import Timestamp
 from astropy import units as u
 from numpy.testing import assert_allclose
 
-from src.adam_core.propagator.adam_assist import (
-    ASSISTPropagator,
-    download_jpl_ephemeris_files,
-)
+from src.adam_core.propagator.adam_assist import ASSISTPropagator
 
 
 def test_ephemeris():
     """
     Test the accurate of the ephemeris generator by comparing the propagated orbit to the JPL ephemeris
     """
-    download_jpl_ephemeris_files()
     prop = ASSISTPropagator()
     OBJECT_IDS = [
         "2020 AV2",

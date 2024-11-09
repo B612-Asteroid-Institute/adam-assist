@@ -6,15 +6,10 @@ from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.coordinates.residuals import Residuals
 from adam_core.orbits import Orbits
 from adam_core.orbits.query.horizons import query_horizons
-from adam_core.orbits.query.sbdb import query_sbdb
 from adam_core.time import Timestamp
 from astropy import units as u
-from numpy.testing import assert_allclose
 
-from src.adam_core.propagator.adam_assist import (
-    ASSISTPropagator,
-    download_jpl_ephemeris_files,
-)
+from src.adam_core.propagator.adam_assist import ASSISTPropagator
 
 DEFAULT_POSITION_TOLERANCE = (50 * u.m).to(u.au).value
 DEFAULT_VELOCITY_TOLERANCE = (1 * u.mm / u.s).to(u.au / u.day).value
@@ -140,7 +135,7 @@ def test_propagate():
     """
     Test the accurate of the ephemeris generator by comparing the propagated orbit to the JPL ephemeris
     """
-    download_jpl_ephemeris_files()
+    
     prop = ASSISTPropagator()
     millisecond_in_days = 1.1574074074074073e-8
 
@@ -189,7 +184,7 @@ def test_propagate_different_input_times(mocker):
     """
     Ensure that we can pass in vectors with different epochs
     """
-    download_jpl_ephemeris_files()
+    
     prop = ASSISTPropagator()
     watched_propagate_orbits_inner = mocker.spy(prop, "_propagate_orbits_inner")
     orbits = Orbits.from_kwargs(
