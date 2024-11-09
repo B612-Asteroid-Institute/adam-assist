@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple, Union
 
 import assist
 import numpy as np
+import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
@@ -41,7 +42,8 @@ def uint32_hash(s: str) -> c_uint32:
 
 
 def hash_orbit_ids_to_uint32(
-    orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
+    # orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
+    orbit_ids: npt.NDArray[np.str_],
 ) -> Tuple[Dict[int, str], List[c_uint32]]:
     """
     Derive uint32 hashes from orbit id strigns
