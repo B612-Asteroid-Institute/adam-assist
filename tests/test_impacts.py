@@ -4,7 +4,7 @@ from adam_core.orbits import Orbits
 from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
 
-from src.adam_core.propagator.adam_assist import ASSISTPropagator
+from adam_assist import ASSISTPropagator
 
 # Contains a likely impactor with ~60% chance of impact in 30 days
 IMPACTOR_FILE_PATH_60 = "tests/data/I00007_orbit.parquet"

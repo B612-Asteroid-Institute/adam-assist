@@ -9,7 +9,7 @@ from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
 from astropy import units as u
 
-from src.adam_core.propagator.adam_assist import ASSISTPropagator
+from adam_assist import ASSISTPropagator
 
 DEFAULT_POSITION_TOLERANCE = (50 * u.m).to(u.au).value
 DEFAULT_VELOCITY_TOLERANCE = (1 * u.mm / u.s).to(u.au / u.day).value

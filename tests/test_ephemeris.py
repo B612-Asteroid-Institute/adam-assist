@@ -8,7 +8,7 @@ from adam_core.time import Timestamp
 from astropy import units as u
 from numpy.testing import assert_allclose
 
-from src.adam_core.propagator.adam_assist import ASSISTPropagator
+from adam_assist import ASSISTPropagator
 
 
 def test_ephemeris():
