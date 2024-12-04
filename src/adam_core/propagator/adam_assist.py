@@ -34,10 +34,13 @@ except ImportError:
 # adam_core defines it in au but we need it in km
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
+
+# Will want to move these to adam_core eventually
 class CollisionConditions(qv.Table):
     collision_object_name = qv.LargeStringColumn()
     collision_distance = qv.Float64Column()
     stopping_condition = qv.BooleanColumn()
+
 
 class CollisionEvent(qv.Table):
     orbit_id = qv.StringColumn()
@@ -247,9 +250,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 results = concatenate([results, time_step_results])
 
         return results
-    
+
     def _detect_collisions(
-        self, orbits: OrbitType, num_days: int, collision_conditions: CollisionConditions
+        self,
+        orbits: OrbitType,
+        num_days: int,
+        collision_conditions: CollisionConditions,
     ) -> Tuple[VariantOrbits, EarthImpacts]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
@@ -259,8 +265,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
-        #KK Note: do we want to specify the version of spice kernels that were used- if we're doing 
-        #addtional work down stream, to ensure that the same kernels are used? de440, 441 for asteroid positions 
+        # KK Note: do we want to specify the version of spice kernels that were used- if we're doing
+        # addtional work down stream, to ensure that the same kernels are used? de440, 441 for asteroid positions
 
         coords = transform_coordinates(
             orbits.coordinates,
@@ -425,7 +431,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
             )
             for particle in collision_conditions:
-                particle_location = ephem.get_particle(particle.collision_object_name.to_numpy(zero_copy_only=False).astype(str)[0], sim.t)
+                particle_location = ephem.get_particle(
+                    particle.collision_object_name.to_numpy(
+                        zero_copy_only=False
+                    ).astype(str)[0],
+                    sim.t,
+                )
                 particle_location = CartesianCoordinates.from_kwargs(
                     x=[particle_location.x],
                     y=[particle_location.y],
@@ -480,7 +491,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                         )
                     collision_events = qv.concatenate([collision_events, new_impacts])
 
-                    stopping_condition = particle.stopping_condition.to_numpy(zero_copy_only=False)[0]
+                    stopping_condition = particle.stopping_condition.to_numpy(
+                        zero_copy_only=False
+                    )[0]
 
                     if stopping_condition:
                         for hash_id in orbit_id_hashes[within_radius]:
@@ -514,10 +527,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 )
 
         return results, collision_events
-
-
-
-
 
     def _detect_impacts(
         self, orbits: OrbitType, num_days: int
