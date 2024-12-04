@@ -16,12 +16,11 @@ from adam_core.coordinates.origin import OriginCodes
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 from quivr.concat import concatenate
-
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 
 C = c.C
 
