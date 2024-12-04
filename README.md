@@ -119,6 +119,8 @@ propagator = ASSISTPropagator(
 )
 ```
 
+When initializing the `ASSISTPropagator`, you can configure several parameters that control the integration. 
+These parameters are passed directly to REBOUND's IAS15 integrator. The IAS15 integrator is a high accuracy integrator that uses adaptive timestepping to maintain precision while optimizing performance.
 
 ## Default SPK Files
 
