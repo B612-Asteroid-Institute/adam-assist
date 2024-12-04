@@ -32,19 +32,19 @@ dependencies = [
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
+
 [tool.pdm.build]
-includes = ["src/adam_core/"]
+includes = ["src/adam_assist/"]
+
 [tool.pdm.version]
 source = "scm"
-write_to = "adam_core/propagator/adam_assist_version.py"
+write_to = "adam_assist/propagator/version.py"
 write_template = "__version__ = '{}'"
-
 
 [project.urls]
 "Documentation" = "https://github.com/B612-Asteroid-Institute/adam-assist#readme"
 "Issues" = "https://github.com/B612-Asteroid-Institute/adam-assist/issues"
 "Source" = "https://github.com/B612-Asteroid-Institute/adam-assist"
-
 
 [project.optional-dependencies]
 dev = [
@@ -62,10 +62,10 @@ dev = [
 
 [tool.pdm.scripts]
 check = {composite = ["lint", "typecheck"]}
-format = { composite = ["black ./src/adam_core", "isort ./src/adam_core"]}
-lint = { composite = ["ruff check ./src/adam_core", "black --check ./src/adam_core", "isort --check-only ./src/adam_core"] }
-fix = "ruff ./src/adam_core --fix"
-typecheck = "mypy --strict ./src/adam_core"
+format = { composite = ["black ./src/adam_assist", "isort ./src/adam_assist"]}
+lint = { composite = ["ruff check ./src/adam_assist", "black --check ./src/adam_assist", "isort --check-only ./src/adam_assist"] }
+fix = "ruff ./src/adam_assist --fix"
+typecheck = "mypy --strict ./src/adam_assist"
 
 test = "pytest --benchmark-disable {args}"
 doctest = "pytest --doctest-plus --doctest-only"
