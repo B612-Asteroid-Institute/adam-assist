@@ -38,7 +38,7 @@ includes = ["src/adam_assist/"]
 
 [tool.pdm.version]
 source = "scm"
-write_to = "adam_assist/propagator/version.py"
+write_to = "adam_assist/version.py"
 write_template = "__version__ = '{}'"
 
 [project.urls]
