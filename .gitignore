@@ -108,4 +108,4 @@ poetry.lock
 .pdm-build/*
 .pdm-python
 pdm.lock
-src/version.py
+src/adam_assist/version.py
