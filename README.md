@@ -33,7 +33,7 @@ Here we initialize a set of `adam_core.orbit.Orbit` objects from the JPL Small B
 ```python
 from adam_core.orbits.query.sbdb import query_sbdb
 from adam_core.time import Timestamp
-from adam_core.propagator.adam_assist import ASSISTPropagator
+from adam_assist import ASSISTPropagator
 
 # Query the JPL Small Bodies Database for a set of orbits
 sbdb_orbits = query_sbdb(["2020 AV2", "A919 FB", "1993 SB"])
@@ -52,7 +52,7 @@ import pyarrow as pa
 from adam_core.orbits import Orbit
 from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.time import Timestamp
-from adam_core.propagator.adam_assist import ASSISTPropagator
+from adam_assist import ASSISTPropagator
 
 # Define an orbit
 orbits = Orbit.from_kwargs(
@@ -85,7 +85,7 @@ The `ASSISTPropagator` class uses the `adam-core` default ephemeris generator to
 from adam_core.orbits.query.sbdb import query_sbdb
 from adam_core.time import Timestamp
 from adam_core.observers import Observers
-from adam_core.propagator.adam_assist import ASSISTPropagator
+from adam_assist import ASSISTPropagator
 
 # Query the JPL Small Bodies Database for a set of orbits
 sbdb_orbits = query_sbdb(["2020 AV2", "A919 FB", "1993 SB"])
