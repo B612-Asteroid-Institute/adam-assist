@@ -280,16 +280,18 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = None
         sim = rebound.Simulation()
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
 
         backward_propagation = num_days < 0
+        if backward_propagation:
+            sim.dt = sim.dt * -1
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
         start_tdb_time = start_tdb_time - ephem.jd_ref
         sim.t = start_tdb_time
-
-        if backward_propagation:
-            sim.dt = sim.dt * -1
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
 
