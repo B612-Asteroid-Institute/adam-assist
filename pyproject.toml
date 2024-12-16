@@ -64,7 +64,7 @@ dev = [
 check = {composite = ["lint", "typecheck"]}
 format = { composite = ["black ./src/adam_assist", "isort ./src/adam_assist"]}
 lint = { composite = ["ruff check ./src/adam_assist", "black --check ./src/adam_assist", "isort --check-only ./src/adam_assist"] }
-fix = "ruff ./src/adam_assist --fix"
+fix = "ruff check ./src/adam_assist --fix"
 typecheck = "mypy --strict ./src/adam_assist"
 
 test = "pytest --benchmark-disable {args}"
