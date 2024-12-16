@@ -25,7 +25,7 @@ from quivr.concat import concatenate
 C = c.C
 
 try:
-    from adam_core.propagator.adam_assist_version import __version__
+    from adam_assist.version import __version__
 except ImportError:
     __version__ = "0.0.0"
 
@@ -59,6 +59,25 @@ def hash_orbit_ids_to_uint32(
 
 
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
+
+    def __init__(
+        self,
+        *args,
+        min_dt: float = 1e-15,
+        initial_dt: float = 0.001,
+        adaptive_mode: int = 2,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if min_dt <= 0:
+            raise ValueError("min_dt must be positive")
+        if initial_dt <= 0:
+            raise ValueError("initial_dt must be positive")
+        if min_dt > initial_dt:
+            raise ValueError("min_dt must be smaller than initial_dt")
+        self.min_dt = min_dt
+        self.initial_dt = initial_dt
+        self.adaptive_mode = adaptive_mode
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
@@ -109,8 +128,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = None
         sim = rebound.Simulation()
-        sim.ri_ias15.min_dt = 1e-15
-        sim.ri_ias15.adaptive_mode = 2
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
