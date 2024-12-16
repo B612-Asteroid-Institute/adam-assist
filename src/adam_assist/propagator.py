@@ -251,6 +251,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             else:
                 results = concatenate([results, time_step_results])
 
+
+        # Store the last simulation in a private variable for reference
+        self._last_simulation = sim
+        print(sim.steps_done)
         return results
 
     def _detect_impacts(
@@ -323,12 +327,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 vz=coords_df.vz[i],
                 hash=uint_orbit_ids[i],
             )
-
-        # sim.integrator = "ias15"
-        sim.ri_ias15.min_dt = 1e-15
-        # sim.dt = 1e-9
-        # sim.force_is_velocity_dependent = 0
-        sim.ri_ias15.adaptive_mode = 2
 
         # Prepare the times as jd - jd_ref
         final_integrator_time = (
@@ -537,4 +535,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
                 variant_id=[],
             )
+
+        # Store the last simulation in a private variable for reference
+        self._last_simulation = sim
+        print(sim.steps_done)
+
         return results, earth_impacts
