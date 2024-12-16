@@ -62,12 +62,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
     def __init__(
         self,
-        *args,
+        *args: object,  # Generic type for arbitrary positional arguments
         min_dt: float = 1e-15,
         initial_dt: float = 0.001,
         adaptive_mode: int = 2,
-        **kwargs,
-    ):
+        **kwargs: object,  # Generic type for arbitrary keyword arguments
+    ) -> None:
         super().__init__(*args, **kwargs)
         if min_dt <= 0:
             raise ValueError("min_dt must be positive")
