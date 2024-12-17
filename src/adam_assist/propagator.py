@@ -66,6 +66,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         min_dt: float = 1e-15,
         initial_dt: float = 0.001,
         adaptive_mode: int = 2,
+        epsilon: float = 1e-9,
         **kwargs: object,  # Generic type for arbitrary keyword arguments
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -78,7 +79,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.min_dt = min_dt
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
-
+        self.epsilon = epsilon
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
         Propagate the orbits to the specified times.
@@ -128,10 +129,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = None
         sim = rebound.Simulation()
-        sim.dt = self.initial_dt
-        sim.ri_ias15.min_dt = self.min_dt
-        sim.ri_ias15.adaptive_mode = self.adaptive_mode
-
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
         start_tdb_time = start_tdb_time - ephem.jd_ref
@@ -167,8 +164,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 hash=uint_orbit_ids[i],
             )
 
-        sim.ri_ias15.min_dt = 1e-15
-        sim.ri_ias15.adaptive_mode = 2
+        # Set the integrator parameters
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
+        sim.ri_ias15.epsilon = self.epsilon
 
         # Prepare the times as jd - jd_ref
         integrator_times = times.rescale("tdb").jd()
@@ -284,13 +284,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = None
         sim = rebound.Simulation()
-        sim.dt = self.initial_dt
-        sim.ri_ias15.min_dt = self.min_dt
-        sim.ri_ias15.adaptive_mode = self.adaptive_mode
 
         backward_propagation = num_days < 0
-        if backward_propagation:
-            sim.dt = sim.dt * -1
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
@@ -340,6 +335,15 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         earth_impacts = None
         past_integrator_time = False
         time_step_results: Union[None, OrbitType] = None
+
+        # Set the integrator parameters
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
+        sim.ri_ias15.epsilon = self.epsilon
+
+        if backward_propagation:
+            sim.dt = sim.dt * -1
 
         # Step through each time, move the simulation forward and
         # collect the results. End if all orbits are removed from
