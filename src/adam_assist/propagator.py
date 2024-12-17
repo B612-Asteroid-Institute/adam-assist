@@ -80,6 +80,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
+
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
         Propagate the orbits to the specified times.
@@ -129,6 +130,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = None
         sim = rebound.Simulation()
+
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
         start_tdb_time = start_tdb_time - ephem.jd_ref
