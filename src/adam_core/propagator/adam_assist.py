@@ -13,7 +13,7 @@ from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
-from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
+from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin, CollisionConditions, CollisionEvent
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
@@ -33,23 +33,6 @@ except ImportError:
 # Use the Earth's equatorial radius as used in DE4XX ephemerides
 # adam_core defines it in au but we need it in km
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
-
-
-# Will want to move these to adam_core eventually
-class CollisionConditions(qv.Table):
-    collision_object_name = qv.LargeStringColumn()
-    collision_distance = qv.Float64Column()
-    stopping_condition = qv.BooleanColumn()
-
-
-class CollisionEvent(qv.Table):
-    orbit_id = qv.StringColumn()
-    distance = qv.Float64Column()  # Distance from collision object in km
-    coordinates = CartesianCoordinates.as_column()
-    variant_id = qv.LargeStringColumn(nullable=True)
-    collision_object_name = qv.LargeStringColumn()
-    collision_distance = qv.Float64Column()
-    stopping_condition = qv.BooleanColumn()
 
 
 def uint32_hash(s: str) -> c_uint32:
