@@ -254,7 +254,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         # Store the last simulation in a private variable for reference
         self._last_simulation = sim
-        print(sim.steps_done)
         return results
 
     def _detect_impacts(
@@ -542,6 +541,4 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         # Store the last simulation in a private variable for reference
         self._last_simulation = sim
-        print(sim.steps_done)
-
         return results, earth_impacts
