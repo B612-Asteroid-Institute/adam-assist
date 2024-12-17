@@ -34,23 +34,6 @@ except ImportError:
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
 
-# Will want to move these to adam_core eventually
-class CollisionConditions(qv.Table):
-    collision_object_name = qv.LargeStringColumn()
-    collision_distance = qv.Float64Column()
-    stopping_condition = qv.BooleanColumn()
-
-
-class CollisionEvent(qv.Table):
-    orbit_id = qv.StringColumn()
-    distance = qv.Float64Column()  # Distance from collision object in km
-    coordinates = CartesianCoordinates.as_column()
-    variant_id = qv.LargeStringColumn(nullable=True)
-    collision_object_name = qv.LargeStringColumn()
-    collision_distance = qv.Float64Column()
-    stopping_condition = qv.BooleanColumn()
-
-
 def uint32_hash(s: str) -> c_uint32:
     sha256_result = hashlib.sha256(s.encode()).digest()
     # Get the first 4 bytes of the SHA256 hash to obtain a uint32 value.
