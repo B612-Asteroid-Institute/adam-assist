@@ -13,11 +13,7 @@ from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
-from adam_core.dynamics.impacts import (
-    CollisionConditions,
-    CollisionEvent,
-    ImpactMixin,
-)
+from adam_core.dynamics.impacts import CollisionConditions, CollisionEvent, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
