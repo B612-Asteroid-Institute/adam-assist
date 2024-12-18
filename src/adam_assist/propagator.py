@@ -274,7 +274,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
         # KK Note: do we want to specify the version of spice kernels that were used- if we're doing
-        # addtional work down stream, to ensure that the same kernels are used? de440, 441 for asteroid positions
+        # addtional work down stream, to ensure that the same kernels are used? de440, 441 for asteroid position
 
         coords = transform_coordinates(
             orbits.coordinates,
