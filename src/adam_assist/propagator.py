@@ -13,14 +13,20 @@ from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
 from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
 from adam_core.coordinates.origin import OriginCodes
-from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin, CollisionConditions, CollisionEvent
+from adam_core.dynamics.impacts import (
+    CollisionConditions,
+    CollisionEvent,
+    EarthImpacts,
+    ImpactMixin,
+)
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 from quivr.concat import concatenate
+
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 
 C = c.C
 
@@ -252,7 +258,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 results = concatenate([results, time_step_results])
 
         return results
-
 
     def _detect_collisions(
         self,
@@ -530,7 +535,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 )
 
         return results, collision_events
-
 
     def _detect_impacts(
         self, orbits: OrbitType, num_days: int
