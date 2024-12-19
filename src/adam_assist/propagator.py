@@ -253,7 +253,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             else:
                 results = concatenate([results, time_step_results])
 
-
         # Store the last simulation in a private variable for reference
         self._last_simulation = sim
         return results
