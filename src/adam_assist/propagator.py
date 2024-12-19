@@ -66,6 +66,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         min_dt: float = 1e-15,
         initial_dt: float = 0.001,
         adaptive_mode: int = 2,
+        epsilon: float = 1e-9,
         **kwargs: object,  # Generic type for arbitrary keyword arguments
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -78,6 +79,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.min_dt = min_dt
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
+        self.epsilon = epsilon
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
@@ -128,9 +130,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = None
         sim = rebound.Simulation()
-        sim.dt = self.initial_dt
-        sim.ri_ias15.min_dt = self.min_dt
-        sim.ri_ias15.adaptive_mode = self.adaptive_mode
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
@@ -167,8 +166,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 hash=uint_orbit_ids[i],
             )
 
-        sim.ri_ias15.min_dt = 1e-15
-        sim.ri_ias15.adaptive_mode = 2
+        # Set the integrator parameters
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
+        sim.ri_ias15.epsilon = self.epsilon
 
         # Prepare the times as jd - jd_ref
         integrator_times = times.rescale("tdb").jd()
@@ -251,6 +253,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             else:
                 results = concatenate([results, time_step_results])
 
+        # Store the last simulation in a private variable for reference
+        self._last_simulation = sim
         return results
 
     def _detect_impacts(
@@ -288,9 +292,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         start_tdb_time = start_tdb_time - ephem.jd_ref
         sim.t = start_tdb_time
 
-        if backward_propagation:
-            sim.dt = sim.dt * -1
-
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
 
         # Serialize the variantorbit
@@ -322,12 +323,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 hash=uint_orbit_ids[i],
             )
 
-        # sim.integrator = "ias15"
-        sim.ri_ias15.min_dt = 1e-15
-        # sim.dt = 1e-9
-        # sim.force_is_velocity_dependent = 0
-        sim.ri_ias15.adaptive_mode = 2
-
         # Prepare the times as jd - jd_ref
         final_integrator_time = (
             orbits.coordinates.time.add_days(num_days).jd().to_numpy()[0]
@@ -340,6 +335,15 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         earth_impacts = None
         past_integrator_time = False
         time_step_results: Union[None, OrbitType] = None
+
+        # Set the integrator parameters
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
+        sim.ri_ias15.epsilon = self.epsilon
+
+        if backward_propagation:
+            sim.dt = sim.dt * -1
 
         # Step through each time, move the simulation forward and
         # collect the results. End if all orbits are removed from
@@ -535,4 +539,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
                 variant_id=[],
             )
+
+        # Store the last simulation in a private variable for reference
+        self._last_simulation = sim
         return results, earth_impacts
