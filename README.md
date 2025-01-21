@@ -113,3 +113,10 @@ Example:
 propagator = ASSISTPropagator(min_dt=1e-12, initial_dt=0.0001, adaptive_mode=2)
 ```
 
+
+## Default SPK Files
+
+The asteroids SPK file sb441-n16.bsp contains the 16 largest asteroids in the solar system. They are listed here by numberfor reference:
+
+1, 3, 4, 7, 10, 15, 16, 31, 52, 65, 70, 87, 88, 107, 511, 704
+
