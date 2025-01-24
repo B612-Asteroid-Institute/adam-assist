@@ -81,6 +81,14 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_last_simulation", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
         Propagate the orbits to the specified times.

@@ -5,8 +5,8 @@ import pytest
 from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.coordinates.residuals import Residuals
 from adam_core.orbits import Orbits
-from adam_core.orbits.query.horizons import query_horizons
 from adam_core.orbits.query import query_sbdb
+from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
 from astropy import units as u
 
@@ -225,10 +225,7 @@ def test_back_to_back_propagations():
     time = Timestamp.from_mjd([60000], scale="tdb")
     first_prop = prop.propagate_orbits(orbits, time, max_processes=1)
 
-    # This doesn't work (which is problematic here: https://github.com/B612-Asteroid-Institute/adam_core/blob/main/src/adam_core/propagator/propagator.py#L554-L555)
-    first_dict = first_prop.__dict__
+    # Propagator has to be pickleable, which uses __getstate__ and __setstate__
+    # This doesn't work if _last_simulation is in the state
+    first_dict = prop.__getstate__()
     second_prop = ASSISTPropagator(**first_dict)
-
-    # This works
-    first_dict.pop("_last_simulation")
-    third_prop = ASSISTPropagator(**first_dict)
