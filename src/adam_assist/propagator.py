@@ -63,10 +63,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
     def __init__(
         self,
         *args: object,  # Generic type for arbitrary positional arguments
-        min_dt: float = 1e-15,
-        initial_dt: float = 0.001,
-        adaptive_mode: int = 2,
-        epsilon: float = 1e-9,
+        min_dt: float = 1e-9,
+        initial_dt: float = 1e-6,
+        adaptive_mode: int = 1,
+        epsilon: float = 1e-6,
         **kwargs: object,  # Generic type for arbitrary keyword arguments
     ) -> None:
         super().__init__(*args, **kwargs)

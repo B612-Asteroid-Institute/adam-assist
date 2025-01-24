@@ -101,16 +101,22 @@ ephemerides = propagator.generate_ephemeris(sbdb_orbits, observers)
 When initializing the `ASSISTPropagator`, you can configure several parameters that control the integration. 
 These parameters are passed directly to REBOUND's IAS15 integrator. The IAS15 integrator is a high accuracy integrator that uses adaptive timestepping to maintain precision while optimizing performance.
 
-- `min_dt`: Minimum timestep for the integrator (default: 1e-15 days)
-- `initial_dt`: Initial timestep for the integrator (default: 0.001 days)  
-- `adaptive_mode`: Controls the adaptive timestep behavior (default: 2)
+- `min_dt`: Minimum timestep for the integrator (default: 1e-12 days)
+- `initial_dt`: Initial timestep for the integrator (default: 0.001 days)
+- `epsilon`: Controls the adaptive timestep behavior (default: 1e-6)
+- `adaptive_mode`: Controls the adaptive timestep behavior (default: 1)
 
 These parameters are passed directly to REBOUND's IAS15 integrator. The IAS15 integrator is a high accuracy integrator that uses adaptive timestepping to maintain precision while optimizing performance.
 
 Example:
 
 ```python
-propagator = ASSISTPropagator(min_dt=1e-12, initial_dt=0.0001, adaptive_mode=2)
+propagator = ASSISTPropagator(
+  min_dt=1e-12,
+  initial_dt=0.0001,
+  epsilon=1e-6,
+  adaptive_mode=1
+)
 ```
 
 
