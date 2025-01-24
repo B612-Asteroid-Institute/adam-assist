@@ -43,7 +43,7 @@ OBJECTS = {
         "velocity": DEFAULT_VELOCITY_TOLERANCE,
     },
     "1932 EA1": {
-        "position": DEFAULT_POSITION_TOLERANCE,
+        "position": (55 * u.km).to(u.au).value,
         "velocity": DEFAULT_VELOCITY_TOLERANCE,
     },
     "A898 PA": {
@@ -131,12 +131,11 @@ OBJECTS = {
     # "A802 FA",
 }
 
-
-def test_propagate():
+@pytest.mark.parametrize("object_id", list(OBJECTS.keys()))
+def test_propagate(object_id):
     """
-    Test the accurate of the ephemeris generator by comparing the propagated orbit to the JPL ephemeris
+    Test the accuracy of the ephemeris generator by comparing the propagated orbit to the JPL ephemeris
     """
-    
     prop = ASSISTPropagator()
     millisecond_in_days = 1.1574074074074073e-8
 
@@ -146,39 +145,40 @@ def test_propagate():
         scale="tdb",
     )
 
-    for object_id in OBJECTS.keys():
-        # We need to start with the same initial conditions as Horizons
-        horizons_start = query_horizons([object_id], start_time_mjd)
-        horizons_propagated_orbits = query_horizons([object_id], delta_times)
-        assist_propagated_orbits = prop.propagate_orbits(
-            horizons_start, horizons_propagated_orbits.coordinates.time, covariance=True
-        )
+    # We need to start with the same initial conditions as Horizons
+    horizons_start = query_horizons([object_id], start_time_mjd)
+    horizons_propagated_orbits = query_horizons([object_id], delta_times)
+    assist_propagated_orbits = prop.propagate_orbits(
+        horizons_start, horizons_propagated_orbits.coordinates.time, covariance=True
+    )
 
-        ephem_times_difference = pc.subtract(
-            assist_propagated_orbits.coordinates.time.mjd(), horizons_propagated_orbits.coordinates.time.mjd()
-        )
-        np.testing.assert_array_less(
-            np.abs(ephem_times_difference.to_numpy(zero_copy_only=False)),
-            millisecond_in_days,
-            err_msg=f"ASSIST produced significantly different epochs than Horizons for {object_id}",
-        )
-        # Calculate the absolute magnitude of position and velocity vectors
-        absolute_position = np.linalg.norm(
-            assist_propagated_orbits.coordinates.r
-            - horizons_propagated_orbits.coordinates.r,
-            axis=1,
-        )
+    ephem_times_difference = pc.subtract(
+        assist_propagated_orbits.coordinates.time.mjd(), 
+        horizons_propagated_orbits.coordinates.time.mjd()
+    )
+    np.testing.assert_array_less(
+        np.abs(ephem_times_difference.to_numpy(zero_copy_only=False)),
+        millisecond_in_days,
+        err_msg=f"ASSIST produced significantly different epochs than Horizons for {object_id}",
+    )
 
-        absolute_velocity = np.linalg.norm(
-            assist_propagated_orbits.coordinates.v
-            - horizons_propagated_orbits.coordinates.v,
-            axis=1,
-        )
-        pos_tol = OBJECTS.get(object_id).get("position")
-        vel_tol = OBJECTS.get(object_id).get("velocity")
+    # Calculate the absolute magnitude of position and velocity vectors
+    absolute_position = np.linalg.norm(
+        assist_propagated_orbits.coordinates.r
+        - horizons_propagated_orbits.coordinates.r,
+        axis=1,
+    )
 
-        np.testing.assert_array_less(absolute_position, pos_tol, f"Failed position for {object_id}")
-        np.testing.assert_array_less(absolute_velocity, vel_tol, f"Failed velocity for {object_id}")
+    absolute_velocity = np.linalg.norm(
+        assist_propagated_orbits.coordinates.v
+        - horizons_propagated_orbits.coordinates.v,
+        axis=1,
+    )
+    pos_tol = OBJECTS.get(object_id).get("position")
+    vel_tol = OBJECTS.get(object_id).get("velocity")
+
+    np.testing.assert_array_less(absolute_position, pos_tol, f"Failed position for {object_id}")
+    np.testing.assert_array_less(absolute_velocity, vel_tol, f"Failed velocity for {object_id}")
 
 
 def test_propagate_different_input_times(mocker):

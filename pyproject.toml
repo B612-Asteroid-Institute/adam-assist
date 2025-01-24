@@ -67,7 +67,7 @@ lint = { composite = ["ruff check ./src/adam_assist", "black --check ./src/adam_
 fix = "ruff check ./src/adam_assist --fix"
 typecheck = "mypy --strict ./src/adam_assist"
 
-test = "pytest --benchmark-disable {args}"
+test = "pytest --benchmark-skip {args}"
 doctest = "pytest --doctest-plus --doctest-only"
 benchmark = "pytest --benchmark-only"
 coverage = "pytest --cov=src --cov-report=xml"

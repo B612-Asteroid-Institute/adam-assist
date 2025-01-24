@@ -28,16 +28,18 @@ def basic_orbit():
 def test_default_settings():
     """Test that default settings are applied correctly"""
     prop = ASSISTPropagator()
-    assert prop.min_dt == 1e-15
-    assert prop.initial_dt == 0.001
-    assert prop.adaptive_mode == 2
+    assert prop.min_dt == 1e-9
+    assert prop.initial_dt == 1e-6
+    assert prop.adaptive_mode == 1
+    assert prop.epsilon == 1e-6
 
 def test_custom_settings():
     """Test that custom settings are applied correctly"""
-    prop = ASSISTPropagator(min_dt=1e-12, initial_dt=0.01, adaptive_mode=1)
+    prop = ASSISTPropagator(min_dt=1e-12, initial_dt=0.01, adaptive_mode=2, epsilon=1e-4)
     assert prop.min_dt == 1e-12
     assert prop.initial_dt == 0.01
-    assert prop.adaptive_mode == 1
+    assert prop.adaptive_mode == 2
+    assert prop.epsilon == 1e-4
 
 def test_invalid_min_dt():
     """Test that invalid min_dt raises ValueError"""
