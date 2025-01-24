@@ -6,6 +6,7 @@ from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.coordinates.residuals import Residuals
 from adam_core.orbits import Orbits
 from adam_core.orbits.query.horizons import query_horizons
+from adam_core.orbits.query import query_sbdb
 from adam_core.time import Timestamp
 from astropy import units as u
 
@@ -209,3 +210,25 @@ def test_propagate_different_input_times(mocker):
 
     assert len(propagated_orbits.coordinates.time.unique()) == 2
     assert len(propagated_orbits) == 8, "Should have input orbits x epochs number of results"
+
+
+def test_back_to_back_propagations():
+    """
+    Ensure that back-to-back multiprocessed propagations work. This test should 
+    fail at the moment since the ray remote cannot initialize a propagator object with an already
+    defined simulation.
+
+    """
+    prop = ASSISTPropagator()
+    orbits = query_sbdb(["2013 RR165"])
+
+    time = Timestamp.from_mjd([60000], scale="tdb")
+    first_prop = prop.propagate_orbits(orbits, time, max_processes=1)
+
+    # This doesn't work (which is problematic here: https://github.com/B612-Asteroid-Institute/adam_core/blob/main/src/adam_core/propagator/propagator.py#L554-L555)
+    first_dict = first_prop.__dict__
+    second_prop = ASSISTPropagator(**first_dict)
+
+    # This works
+    first_dict.pop("_last_simulation")
+    third_prop = ASSISTPropagator(**first_dict)
