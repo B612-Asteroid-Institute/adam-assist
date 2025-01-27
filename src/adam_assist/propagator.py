@@ -1,6 +1,6 @@
 import hashlib
 from ctypes import c_uint32
-from typing import Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import assist
 import numpy as np
@@ -81,12 +81,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
 
-    def __getstate__(self):
+    def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
         state.pop("_last_simulation", None)
         return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
@@ -433,18 +433,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 )
 
             assert isinstance(time_step_results, OrbitType)
-            time_step_results = time_step_results.set_column(
-                "coordinates",
-                transform_coordinates(
-                    time_step_results.coordinates,
-                    origin_out=OriginCodes.SUN,
-                    frame_out="ecliptic",
-                ),
-            )
 
             # Get the Earth's position at the current time
-            # earth_geo = get_perturber_state(OriginCodes.EARTH, results.coordinates.time[0], origin=OriginCodes.SUN)
-            # diff = time_step_results.coordinates.values - earth_geo.coordinates.values
             earth_geo = ephem.get_particle("Earth", sim.t)
             earth_geo = CartesianCoordinates.from_kwargs(
                 x=[earth_geo.x],
@@ -459,11 +449,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
                 frame="equatorial",
             )
-            earth_geo = transform_coordinates(
-                earth_geo,
-                origin_out=OriginCodes.SUN,
-                frame_out="ecliptic",
-            )
+
+            # Compute the geocentric state vector using the Earth's state vector
+            # and the results from the simulation.
+            # Note: ASSIST already computes the geocentric state vector, and so
+            # we can just subtract the Earth's state vector from the simulation rather than
+            # using our adam_core's transform_coordinates.
             diff = time_step_results.coordinates.values - earth_geo.values
 
             # Calculate the distance in KM
@@ -543,7 +534,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     origin=Origin.from_kwargs(
                         code=[],
                     ),
-                    frame="ecliptic",
+                    frame="equatorial",
                 ),
                 variant_id=[],
             )
