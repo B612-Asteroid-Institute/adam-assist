@@ -11,8 +11,13 @@ import quivr as qv
 import rebound
 from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
-from adam_core.coordinates import CartesianCoordinates, Origin, transform_coordinates
-from adam_core.coordinates.origin import OriginCodes
+from adam_core.coordinates import (
+    CartesianCoordinates,
+    Origin,
+    OriginCodes,
+    SphericalCoordinates,
+    transform_coordinates,
+)
 from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
@@ -467,21 +472,30 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             # If any are within our earth radius, we record the impact
             # and do bookkeeping to remove the particle from the simulation
             if np.any(within_radius):
-                distances = normalized_distance[within_radius]
                 impacting_orbits = time_step_results.apply_mask(within_radius)
 
                 if isinstance(orbits, VariantOrbits):
                     new_impacts = EarthImpacts.from_kwargs(
                         orbit_id=impacting_orbits.orbit_id,
-                        distance=distances,
-                        coordinates=impacting_orbits.coordinates,
                         variant_id=impacting_orbits.variant_id,
+                        coordinates=impacting_orbits.coordinates,
+                        impact_coordinates=transform_coordinates(
+                            impacting_orbits.coordinates,
+                            representation_out=SphericalCoordinates,
+                            origin_out=OriginCodes.EARTH,
+                            frame_out="itrf93",
+                        ),
                     )
                 elif isinstance(orbits, Orbits):
                     new_impacts = EarthImpacts.from_kwargs(
                         orbit_id=impacting_orbits.orbit_id,
-                        distance=distances,
                         coordinates=impacting_orbits.coordinates,
+                        impact_coordinates=transform_coordinates(
+                            impacting_orbits.coordinates,
+                            representation_out=SphericalCoordinates,
+                            origin_out=OriginCodes.EARTH,
+                            frame_out="itrf93",
+                        ),
                     )
                 if earth_impacts is None:
                     earth_impacts = new_impacts
@@ -522,7 +536,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         if earth_impacts is None:
             earth_impacts = EarthImpacts.from_kwargs(
                 orbit_id=[],
-                distance=[],
+                variant_id=[],
                 coordinates=CartesianCoordinates.from_kwargs(
                     x=[],
                     y=[],
@@ -536,7 +550,19 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     ),
                     frame="equatorial",
                 ),
-                variant_id=[],
+                impact_coordinates=CartesianCoordinates.from_kwargs(
+                    x=[],
+                    y=[],
+                    z=[],
+                    vx=[],
+                    vy=[],
+                    vz=[],
+                    time=Timestamp.from_jd([], scale="tdb"),
+                    origin=Origin.from_kwargs(
+                        code=[],
+                    ),
+                    frame="itrf93",
+                ),
             )
 
         # Store the last simulation in a private variable for reference
