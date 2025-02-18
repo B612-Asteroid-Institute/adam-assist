@@ -1,6 +1,10 @@
 import pytest
+import pyarrow.compute as pc
+
+from adam_core.constants import Constants as c
+from adam_core.constants import KM_P_AU
 from adam_core.dynamics.impacts import calculate_impacts
-from adam_core.orbits import Orbits
+from adam_core.orbits import Orbits, VariantOrbits
 from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
 
@@ -12,6 +16,8 @@ IMPACTOR_FILE_PATH_60 = "tests/data/I00007_orbit.parquet"
 IMPACTOR_FILE_PATH_100 = "tests/data/I00008_orbit.parquet"
 # Contains a likely impactor with 0% chance of impact in 30 days
 IMPACTOR_FILE_PATH_0 = "tests/data/I00009_orbit.parquet"
+
+R_EARTH_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
 
 @pytest.mark.benchmark
@@ -30,6 +36,24 @@ def test_calculate_impacts_benchmark(benchmark, processes):
     )
     assert len(variants) == 200, "Should have 200 variants"
     assert len(impacts) == 138, "Should have exactly 138 impactors"
+
+@pytest.mark.parametrize("processes", [1, 2])
+def test_calculate_impacts(processes):
+    impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_60)[0]
+    propagator = ASSISTPropagator()
+
+    variants_orbits = VariantOrbits.create(impactor, method="monte-carlo", num_samples=200, seed=42)
+    variants, impacts = propagator.detect_impacts(
+        variants_orbits,
+        60,
+        max_processes=processes,
+    )
+    assert len(variants) == 200, "Should have 200 variants"
+    assert len(impacts) == 138, "Should have exactly 138 impactors"
+
+    assert impacts.impact_coordinates.frame == "itrf93"
+    assert pc.all(pc.equal(impacts.impact_coordinates.origin.code, "EARTH")).as_py()
+    assert pc.all(pc.less_equal(impacts.impact_coordinates.rho, R_EARTH_KM)).as_py()
 
 
 @pytest.mark.benchmark
