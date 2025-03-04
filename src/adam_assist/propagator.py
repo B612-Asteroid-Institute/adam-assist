@@ -447,11 +447,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
             for condition in conditions:
 
-                collision_object_name = condition.collision_object_name.to_numpy(
-                    zero_copy_only=False
-                ).astype(str)[0]
+                collision_object_code = condition.collision_object.code[0].as_py()
                 particle_location = ephem.get_particle(
-                    collision_object_name,
+                    collision_object_code,
                     sim.t,
                 )
                 particle_location = CartesianCoordinates.from_kwargs(
@@ -492,12 +490,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                             collision_coordinates=transform_coordinates(
                                 colliding_orbits.coordinates,
                                 representation_out=SphericalCoordinates,
-                                origin_out=OriginCodes[collision_object_name.upper()],
+                                origin_out=condition.collision_object.as_OriginCodes(),
                                 frame_out="ecliptic",
                             ),
-                            collision_object_name=pa.repeat(
-                                condition.collision_object_name[0].as_py(),
-                                len(colliding_orbits),
+                            collision_object=condition.collision_object.take(
+                                [0 for _ in range(len(colliding_orbits))]
                             ),
                             stopping_condition=pa.repeat(
                                 condition.stopping_condition[0].as_py(),
@@ -514,12 +511,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                             collision_coordinates=transform_coordinates(
                                 colliding_orbits.coordinates,
                                 representation_out=SphericalCoordinates,
-                                origin_out=OriginCodes[collision_object_name.upper()],
+                                origin_out=condition.collision_object.as_OriginCodes(),
                                 frame_out="ecliptic",
                             ),
-                            collision_object_name=pa.repeat(
-                                condition.collision_object_name[0].as_py(),
-                                len(colliding_orbits),
+                            collision_object=condition.collision_object.take(
+                                [0 for _ in range(len(colliding_orbits))]
                             ),
                             stopping_condition=pa.repeat(
                                 condition.stopping_condition[0].as_py(),

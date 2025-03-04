@@ -3,6 +3,7 @@ import pyarrow.compute as pc
 
 from adam_core.constants import Constants as c
 from adam_core.constants import KM_P_AU
+from adam_core.coordinates import Origin
 from adam_core.orbits import Orbits, VariantOrbits
 from adam_core.dynamics.impacts import calculate_impacts, CollisionConditions, EARTH_RADIUS_KM
 from adam_core.orbits import Orbits
@@ -23,7 +24,7 @@ R_EARTH_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
-def test_calculate_impacts_benchmark(benchmark, processes):
+def test_calculate_impacts_benchmark_some_impacts(benchmark, processes):
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_60)[0]
     propagator = ASSISTPropagator()
     variants, impacts = benchmark(
@@ -59,7 +60,7 @@ def test_calculate_impacts(processes):
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
-def test_calculate_impacts_benchmark(benchmark, processes):
+def test_calculate_impacts_benchmark_impacts(benchmark, processes):
 
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_100)[0]
     propagator = ASSISTPropagator()
@@ -71,6 +72,7 @@ def test_calculate_impacts_benchmark(benchmark, processes):
         num_samples=200,
         processes=processes,
         seed=42,  # This allows us to predict exact number of impactors empirically
+        conditions=CollisionConditions.default(),
     )
     assert len(variants) == 200, "Should have 200 variants"
     assert len(impacts) == 200, "Should have exactly 200 impactors"
@@ -78,7 +80,7 @@ def test_calculate_impacts_benchmark(benchmark, processes):
 
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
-def test_calculate_impacts_benchmark(benchmark, processes):
+def test_calculate_impacts_benchmark_no_impacts(benchmark, processes):
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_0)[0]
     propagator = ASSISTPropagator()
     variants, impacts = benchmark(
@@ -89,6 +91,7 @@ def test_calculate_impacts_benchmark(benchmark, processes):
         num_samples=200,
         processes=processes,
         seed=42,  # This allows us to predict exact number of impactors empirically
+        conditions=CollisionConditions.default(),
     )
     assert len(variants) == 200, "Should have 200 variants"
     assert len(impacts) == 0, "Should have exactly 0 impactors"
@@ -98,12 +101,7 @@ def test_detect_collisions_time_direction():
     start_time = Timestamp.from_mjd([60000], scale="utc")
     orbit = query_horizons(["1980 PA"], start_time)
 
-    conditions = CollisionConditions.from_kwargs(
-        condition_id=["Default - Earth"],
-        collision_object_name=["Earth"],
-        collision_distance=[EARTH_RADIUS_KM],
-        stopping_condition=[True],
-    )
+    conditions = CollisionConditions.default()
 
     propagator = ASSISTPropagator()
 

@@ -1,5 +1,6 @@
 from adam_core.orbits import Orbits
 from adam_core.constants import KM_P_AU
+from adam_core.coordinates import Origin
 from src.adam_assist.propagator import ASSISTPropagator, CollisionConditions
 
 IMPACTOR_FILE_PATH_60 = "tests/data/I00007_orbit.parquet"
@@ -15,7 +16,7 @@ def test_detect_collisions():
 
     collision_conditions = CollisionConditions.from_kwargs(
         condition_id=["Default - Earth"],
-        collision_object_name=["Earth"],
+        collision_object=Origin.from_kwargs(code=["EARTH"]),
         collision_distance=[7000],
         stopping_condition=[True],
     )
@@ -28,7 +29,7 @@ def test_detect_collisions():
 
     collision_conditions = CollisionConditions.from_kwargs(
         condition_id=["Default - Earth", "Default - Earth"],
-        collision_object_name=["Earth", "Earth"],
+        collision_object=Origin.from_kwargs(code=["EARTH", "EARTH"]),
         collision_distance=[10000, 7000],
         stopping_condition=[False, True],
     )
