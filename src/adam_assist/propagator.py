@@ -1,4 +1,5 @@
 import hashlib
+import random
 from ctypes import c_uint32
 from typing import Any, Dict, List, Tuple, Union
 
@@ -21,11 +22,12 @@ from adam_core.coordinates import (
 from adam_core.dynamics.impacts import CollisionConditions, CollisionEvent, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 from quivr.concat import concatenate
+
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 
 C = c.C
 
@@ -61,6 +63,61 @@ def hash_orbit_ids_to_uint32(
     mapping = {hashes[i].value: orbit_ids[i] for i in range(len(orbit_ids))}
 
     return mapping, hashes
+
+
+def generate_unique_separator(
+    *string_arrays: npt.NDArray[np.str_],
+    alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    length: int = 4,
+) -> str:
+    """
+    Generate a random string of specified length that is not present as a substring in any of the input arrays.
+    All characters in the generated string will be different to prevent misplaced substring matches when splitting.
+
+    Parameters
+    ----------
+    *string_arrays : npt.NDArray[np.str_]
+        One or more numpy arrays of strings to check against
+    alphabet : str, optional
+        Characters to use for generating the random string, by default includes letters and digits
+    length : int, optional
+        Length of the random string to generate, by default 4
+
+    Returns
+    -------
+    str
+        A random string that is not present as a substring in any of the input arrays
+
+    Raises
+    ------
+    ValueError
+        If unable to generate a unique string after many attempts
+    """
+    # Combine all arrays into a single numpy array for vectorized operations
+    all_strings = (
+        np.concatenate([arr.astype(str) for arr in string_arrays])
+        if string_arrays
+        else np.array([])
+    )
+
+    max_attempts = 1000
+    for _ in range(max_attempts):
+        # Generate a random string with all different characters
+        chars = random.sample(alphabet, length)
+        candidate = "".join(chars)
+
+        # Vectorized substring check using numpy
+        if len(all_strings) == 0:
+            return candidate
+
+        # Use numpy's vectorized string operations for faster substring checking
+        contains_candidate = np.char.find(all_strings, candidate) >= 0
+        if not np.any(contains_candidate):
+            return candidate
+
+    raise ValueError(
+        f"Could not generate a unique {length}-character string after {max_attempts} attempts"
+    )
 
 
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
@@ -150,14 +207,20 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim.t = start_tdb_time
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
+        separator = None
 
         # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+
+            # Generate a unique separator that doesn't appear in either array
+            separator = generate_unique_separator(orbit_ids, variant_ids)
+
             # Use numpy string operations to concatenate the orbit_id and variant_id
             particle_ids = np.char.add(
-                np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids
+                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
+                variant_ids,
             )
             particle_ids = np.array(particle_ids, dtype="object")
 
@@ -231,8 +294,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+
+                # Use the saved separator instead of trying to extract it
                 orbit_ids, variant_ids = zip(
-                    *[particle_id.split("-") for particle_id in particle_ids]
+                    *[particle_id.split(separator) for particle_id in particle_ids]
                 )
 
                 time_step_results = VariantOrbits.from_kwargs(
@@ -313,14 +378,20 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             sim.dt = sim.dt * -1
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
+        separator = None
 
         # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+
+            # Generate a unique separator that doesn't appear in either array
+            separator = generate_unique_separator(orbit_ids, variant_ids)
+
             # Use numpy string operations to concatenate the orbit_id and variant_id
             particle_ids = np.char.add(
-                np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids
+                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
+                variant_ids,
             )
             particle_ids = np.array(particle_ids, dtype="object")
 
@@ -408,8 +479,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+
                 orbit_ids, variant_ids = zip(
-                    *[particle_id.split("-") for particle_id in particle_ids]
+                    *[particle_id.split(separator) for particle_id in particle_ids]
                 )
 
                 # Historically we've done a check here to make sure the orbit of the orbits
