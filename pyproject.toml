@@ -19,7 +19,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core@6091a59ab16245638e5753adf4ad18e905248223",
+    "adam-core>=0.4.0",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     # Temporary until SPK support is merged and released upstream
