@@ -19,7 +19,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.13"
 dependencies = [
-    "adam-core>=0.3.7",
+    "adam-core>=0.4.0",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     # Temporary until SPK support is merged and released upstream

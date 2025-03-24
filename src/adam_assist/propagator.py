@@ -1,4 +1,5 @@
 import hashlib
+import random
 from ctypes import c_uint32
 from typing import Any, Dict, List, Tuple, Union
 
@@ -18,14 +19,15 @@ from adam_core.coordinates import (
     SphericalCoordinates,
     transform_coordinates,
 )
-from adam_core.dynamics.impacts import EarthImpacts, ImpactMixin
+from adam_core.dynamics.impacts import CollisionConditions, CollisionEvent, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 from quivr.concat import concatenate
+
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 
 C = c.C
 
@@ -61,6 +63,61 @@ def hash_orbit_ids_to_uint32(
     mapping = {hashes[i].value: orbit_ids[i] for i in range(len(orbit_ids))}
 
     return mapping, hashes
+
+
+def generate_unique_separator(
+    *string_arrays: npt.NDArray[np.str_],
+    alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    length: int = 4,
+) -> str:
+    """
+    Generate a random string of specified length that is not present as a substring in any of the input arrays.
+    All characters in the generated string will be different to prevent misplaced substring matches when splitting.
+
+    Parameters
+    ----------
+    *string_arrays : npt.NDArray[np.str_]
+        One or more numpy arrays of strings to check against
+    alphabet : str, optional
+        Characters to use for generating the random string, by default includes letters and digits
+    length : int, optional
+        Length of the random string to generate, by default 4
+
+    Returns
+    -------
+    str
+        A random string that is not present as a substring in any of the input arrays
+
+    Raises
+    ------
+    ValueError
+        If unable to generate a unique string after many attempts
+    """
+    # Combine all arrays into a single numpy array for vectorized operations
+    all_strings = (
+        np.concatenate([arr.astype(str) for arr in string_arrays])
+        if string_arrays
+        else np.array([])
+    )
+
+    max_attempts = 1000
+    for _ in range(max_attempts):
+        # Generate a random string with all different characters
+        chars = random.sample(alphabet, length)
+        candidate = "".join(chars)
+
+        # Vectorized substring check using numpy
+        if len(all_strings) == 0:
+            return candidate
+
+        # Use numpy's vectorized string operations for faster substring checking
+        contains_candidate = np.char.find(all_strings, candidate) >= 0
+        if not np.any(contains_candidate):
+            return candidate
+
+    raise ValueError(
+        f"Could not generate a unique {length}-character string after {max_attempts} attempts"
+    )
 
 
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
@@ -150,14 +207,20 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim.t = start_tdb_time
 
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
+        separator = None
 
         # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+
+            # Generate a unique separator that doesn't appear in either array
+            separator = generate_unique_separator(orbit_ids, variant_ids)
+
             # Use numpy string operations to concatenate the orbit_id and variant_id
             particle_ids = np.char.add(
-                np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids
+                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
+                variant_ids,
             )
             particle_ids = np.array(particle_ids, dtype="object")
 
@@ -231,8 +294,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+
+                # Use the saved separator instead of trying to extract it
                 orbit_ids, variant_ids = zip(
-                    *[particle_id.split("-") for particle_id in particle_ids]
+                    *[particle_id.split(separator) for particle_id in particle_ids]
                 )
 
                 time_step_results = VariantOrbits.from_kwargs(
@@ -270,9 +335,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self._last_simulation = sim
         return results
 
-    def _detect_impacts(
-        self, orbits: OrbitType, num_days: int
-    ) -> Tuple[VariantOrbits, EarthImpacts]:
+    def _detect_collisions(
+        self,
+        orbits: OrbitType,
+        num_days: int,
+        conditions: CollisionConditions,
+    ) -> Tuple[VariantOrbits, CollisionEvent]:
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
@@ -281,7 +349,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # For units we use solar masses, astronomical units, and days.
         # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
 
-        # Convert coordinates to ICRF using TDB time
+        # KK Note: do we want to specify the version of spice kernels that were used- if we're doing
+        # addtional work down stream, to ensure that the same kernels are used? de440, 441 for asteroid position
+
         coords = transform_coordinates(
             orbits.coordinates,
             origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
@@ -298,22 +368,30 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim = None
         sim = rebound.Simulation()
 
-        backward_propagation = num_days < 0
-
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
         start_tdb_time = start_tdb_time - ephem.jd_ref
         sim.t = start_tdb_time
 
+        backward_propagation = num_days < 0
+        if backward_propagation:
+            sim.dt = sim.dt * -1
+
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
+        separator = None
 
         # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+
+            # Generate a unique separator that doesn't appear in either array
+            separator = generate_unique_separator(orbit_ids, variant_ids)
+
             # Use numpy string operations to concatenate the orbit_id and variant_id
             particle_ids = np.char.add(
-                np.char.add(orbit_ids, np.repeat("-", len(orbit_ids))), variant_ids
+                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
+                variant_ids,
             )
             particle_ids = np.array(particle_ids, dtype="object")
 
@@ -322,7 +400,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # Add the orbits as particles to the simulation
         coords_df = orbits.coordinates.to_dataframe()
 
-        # ASSIST _must_ be initialized before adding particles
         assist.Extras(sim, ephem)
 
         for i in range(len(coords_df)):
@@ -345,7 +422,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # Results stores the final positions of the objects
         # If an object is an impactor, this represents its position at impact time
         results = None
-        earth_impacts = None
+        collision_events = CollisionEvent.empty()
         past_integrator_time = False
         time_step_results: Union[None, OrbitType] = None
 
@@ -402,8 +479,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+
                 orbit_ids, variant_ids = zip(
-                    *[particle_id.split("-") for particle_id in particle_ids]
+                    *[particle_id.split(separator) for particle_id in particle_ids]
                 )
 
                 # Historically we've done a check here to make sure the orbit of the orbits
@@ -439,82 +517,110 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
             assert isinstance(time_step_results, OrbitType)
 
-            # Get the Earth's position at the current time
-            earth_geo = ephem.get_particle("Earth", sim.t)
-            earth_geo = CartesianCoordinates.from_kwargs(
-                x=[earth_geo.x],
-                y=[earth_geo.y],
-                z=[earth_geo.z],
-                vx=[earth_geo.vx],
-                vy=[earth_geo.vy],
-                vz=[earth_geo.vz],
-                time=Timestamp.from_jd([sim.t + ephem.jd_ref], scale="tdb"),
-                origin=Origin.from_kwargs(
-                    code=["SOLAR_SYSTEM_BARYCENTER"],
-                ),
-                frame="equatorial",
-            )
+            for condition in conditions:
 
-            # Compute the geocentric state vector using the Earth's state vector
-            # and the results from the simulation.
-            # Note: ASSIST already computes the geocentric state vector, and so
-            # we can just subtract the Earth's state vector from the simulation rather than
-            # using our adam_core's transform_coordinates.
-            diff = time_step_results.coordinates.values - earth_geo.values
+                collision_object_code = condition.collision_object.code[0].as_py()
+                particle_location = ephem.get_particle(
+                    collision_object_code,
+                    sim.t,
+                )
+                particle_location = CartesianCoordinates.from_kwargs(
+                    x=[particle_location.x],
+                    y=[particle_location.y],
+                    z=[particle_location.z],
+                    vx=[particle_location.vx],
+                    vy=[particle_location.vy],
+                    vz=[particle_location.vz],
+                    time=Timestamp.from_jd([sim.t + ephem.jd_ref], scale="tdb"),
+                    origin=Origin.from_kwargs(
+                        code=["SOLAR_SYSTEM_BARYCENTER"],
+                    ),
+                    frame="equatorial",
+                )
+                diff = time_step_results.coordinates.values - particle_location.values
 
-            # Calculate the distance in KM
-            # We use the IAU definition of the astronomical unit (149_597_870.7 km)
-            normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * KM_P_AU
+                # Calculate the distance in KM
+                # We use the IAU definition of the astronomical unit (149_597_870.7 km)
+                normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * KM_P_AU
 
-            # Calculate which particles are within an Earth radius
-            within_radius = normalized_distance < EARTH_RADIUS_KM
+                # Calculate which particles are within the collision distance
+                within_radius = normalized_distance < condition.collision_distance
 
-            # If any are within our earth radius, we record the impact
-            # and do bookkeeping to remove the particle from the simulation
-            if np.any(within_radius):
-                impacting_orbits = time_step_results.apply_mask(within_radius)
+                # If any are within our collision distance, we record the impact
+                # and do bookkeeping to remove the particle from the simulation
+                if np.any(within_radius):
+                    colliding_orbits = time_step_results.apply_mask(within_radius)
 
-                if isinstance(orbits, VariantOrbits):
-                    new_impacts = EarthImpacts.from_kwargs(
-                        orbit_id=impacting_orbits.orbit_id,
-                        variant_id=impacting_orbits.variant_id,
-                        coordinates=impacting_orbits.coordinates,
-                        impact_coordinates=transform_coordinates(
-                            impacting_orbits.coordinates,
-                            representation_out=SphericalCoordinates,
-                            origin_out=OriginCodes.EARTH,
-                            frame_out="itrf93",
-                        ),
-                    )
-                elif isinstance(orbits, Orbits):
-                    new_impacts = EarthImpacts.from_kwargs(
-                        orbit_id=impacting_orbits.orbit_id,
-                        coordinates=impacting_orbits.coordinates,
-                        impact_coordinates=transform_coordinates(
-                            impacting_orbits.coordinates,
-                            representation_out=SphericalCoordinates,
-                            origin_out=OriginCodes.EARTH,
-                            frame_out="itrf93",
-                        ),
-                    )
-                if earth_impacts is None:
-                    earth_impacts = new_impacts
-                else:
-                    earth_impacts = qv.concatenate([earth_impacts, new_impacts])
+                    if isinstance(orbits, VariantOrbits):
+                        new_impacts = CollisionEvent.from_kwargs(
+                            orbit_id=colliding_orbits.orbit_id,
+                            coordinates=colliding_orbits.coordinates,
+                            variant_id=colliding_orbits.variant_id,
+                            condition_id=pa.repeat(
+                                condition.condition_id[0].as_py(), len(colliding_orbits)
+                            ),
+                            collision_coordinates=transform_coordinates(
+                                colliding_orbits.coordinates,
+                                representation_out=SphericalCoordinates,
+                                origin_out=condition.collision_object.as_OriginCodes(),
+                                frame_out="ecliptic",
+                            ),
+                            collision_object=condition.collision_object.take(
+                                [0 for _ in range(len(colliding_orbits))]
+                            ),
+                            stopping_condition=pa.repeat(
+                                condition.stopping_condition[0].as_py(),
+                                len(colliding_orbits),
+                            ),
+                        )
+                    elif isinstance(orbits, Orbits):
+                        new_impacts = CollisionEvent.from_kwargs(
+                            orbit_id=colliding_orbits.orbit_id,
+                            coordinates=colliding_orbits.coordinates,
+                            condition_id=pa.repeat(
+                                condition.condition_id[0].as_py(), len(colliding_orbits)
+                            ),
+                            collision_coordinates=transform_coordinates(
+                                colliding_orbits.coordinates,
+                                representation_out=SphericalCoordinates,
+                                origin_out=condition.collision_object.as_OriginCodes(),
+                                frame_out="ecliptic",
+                            ),
+                            collision_object=condition.collision_object.take(
+                                [0 for _ in range(len(colliding_orbits))]
+                            ),
+                            stopping_condition=pa.repeat(
+                                condition.stopping_condition[0].as_py(),
+                                len(colliding_orbits),
+                            ),
+                        )
+                    collision_events = qv.concatenate([collision_events, new_impacts])
 
-                # Remove the particle from the simulation, orbits, and store in results
-                for hash_id in orbit_id_hashes[within_radius]:
-                    sim.remove(hash=c_uint32(hash_id))
-                    # For some reason, it fails if we let rebound convert the hash to c_uint32
+                    stopping_condition = condition.stopping_condition.to_numpy(
+                        zero_copy_only=False
+                    )[0]
 
-                # Remove the particle from the input / running orbits
-                # This allows us to carry through object_id, weights, and weights_cov
-                orbits = orbits.apply_mask(~within_radius)
-                # Put the orbits / variants of the impactors into the results set
-                if results is None:
-                    results = impacting_orbits
-                else:
-                    results = qv.concatenate([results, impacting_orbits])
+                    if stopping_condition:
+                        removed_hashes = orbit_id_hashes[within_radius]
+                        for hash_id in removed_hashes:
+                            sim.remove(hash=c_uint32(hash_id))
+                            # For some reason, it fails if we let rebound convert the hash to c_uint32
+
+                        if isinstance(orbits, VariantOrbits):
+                            keep_mask = pc.invert(
+                                pc.is_in(orbits.variant_id, colliding_orbits.variant_id)
+                            )
+                        else:
+                            keep_mask = pc.invert(
+                                pc.is_in(orbits.orbit_id, colliding_orbits.orbit_id)
+                            )
+
+                        orbits = orbits.apply_mask(keep_mask)
+                        # Put the orbits / variants of the impactors into the results set
+                        if results is None:
+                            results = colliding_orbits
+                        else:
+                            results = qv.concatenate([results, colliding_orbits])
 
         # Add the final positions of the particles that are not already in the results
         if time_step_results is not None:
@@ -533,38 +639,4 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     [results, time_step_results.apply_mask(still_in_simulation)]
                 )
 
-        if earth_impacts is None:
-            earth_impacts = EarthImpacts.from_kwargs(
-                orbit_id=[],
-                variant_id=[],
-                coordinates=CartesianCoordinates.from_kwargs(
-                    x=[],
-                    y=[],
-                    z=[],
-                    vx=[],
-                    vy=[],
-                    vz=[],
-                    time=Timestamp.from_jd([], scale="tdb"),
-                    origin=Origin.from_kwargs(
-                        code=[],
-                    ),
-                    frame="equatorial",
-                ),
-                impact_coordinates=CartesianCoordinates.from_kwargs(
-                    x=[],
-                    y=[],
-                    z=[],
-                    vx=[],
-                    vy=[],
-                    vz=[],
-                    time=Timestamp.from_jd([], scale="tdb"),
-                    origin=Origin.from_kwargs(
-                        code=[],
-                    ),
-                    frame="itrf93",
-                ),
-            )
-
-        # Store the last simulation in a private variable for reference
-        self._last_simulation = sim
-        return results, earth_impacts
+        return results, collision_events
