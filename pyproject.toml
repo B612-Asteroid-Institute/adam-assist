@@ -23,7 +23,7 @@ dependencies = [
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     # Temporary until SPK support is merged and released upstream
-    "assist-adam-fork==1.1.9a2",
+    "assist-adam-fork==1.1.9.post1",
     "numpy",
     "ray",
     "spiceypy>=6.0.0"
