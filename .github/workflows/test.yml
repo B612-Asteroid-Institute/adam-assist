@@ -37,7 +37,7 @@ jobs:
       # Run tests
       - name: Run tests
         run: |
-          pdm run coverage
+          pdm run coverage -v
       - name: Coveralls
         uses: coverallsapp/github-action@v2
         with:
