@@ -19,6 +19,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "rebound==4.4.10", # Pinned to show less accuracy in latest release
     "adam-core>=0.4.0",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
