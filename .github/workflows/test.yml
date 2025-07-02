@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout git repo
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref || github.ref }}
       - name: Get git tags
         run:  git fetch --prune --unshallow --tags
       
