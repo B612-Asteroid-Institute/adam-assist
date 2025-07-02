@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12"]
     defaults:
       run:
         shell: bash -l {0}
@@ -21,15 +21,59 @@ jobs:
         uses: actions/checkout@v3
       - name: Get git tags
         run:  git fetch --prune --unshallow --tags
+      
+      # Add diagnostic steps for environment debugging
+      - name: System and Environment Info
+        run: |
+          echo "=== System Information ==="
+          uname -a
+          echo "=== Python Information ==="
+          which python3
+          python3 --version
+          echo "=== Git Information ==="
+          git --version
+          git log --oneline -5
+          git status
+          echo "=== Current commit hash ==="
+          git rev-parse HEAD
+          git rev-parse --short HEAD
+          echo "=== Environment variables ==="
+          env | grep -E "(PYTHON|PIP|PATH)" | sort
+        
       - uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
+          
+      # Add pre-installation diagnostics
+      - name: Pre-installation Package Check
+        run: |
+          echo "=== Pip Information ==="
+          python -m pip --version
+          echo "=== Pre-installation package list ==="
+          pip list || echo "No packages installed yet"
+          
       # Use pip to install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install ".[dev]"
+          
+      # Add post-installation diagnostics
+      - name: Post-installation Package Analysis
+        run: |
+          echo "=== Installed Package Versions ==="
+          pip list
+          echo ""
+          echo "=== Key Package Versions ==="
+          pip show adam-assist adam-core rebound assist-adam-fork || true
+          echo ""
+          echo "=== Package dependency tree for adam-assist ==="
+          pip show adam-assist | grep "Requires:" || true
+          echo ""
+          echo "=== Check for version conflicts ==="
+          pip check || echo "Some dependency conflicts detected"
+          
       # Run linter
       - name: Run linter
         run: |
