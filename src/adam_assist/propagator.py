@@ -194,162 +194,145 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         """
         Propagates one or more orbits with the same epoch to the specified times.
         """
-        ephem = None
-        sim = None
-        try:
-            ephem = assist.Ephem(
-                planets_path=de440,
-                asteroids_path=de441_n16,
+        ephem = assist.Ephem(
+            planets_path=de440,
+            asteroids_path=de441_n16,
+        )
+        sim = rebound.Simulation()
+
+        # Set the simulation time, relative to the jd_ref
+        start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
+        start_tdb_time = start_tdb_time - ephem.jd_ref
+        sim.t = start_tdb_time
+
+        particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
+        separator = None
+
+        # Serialize the variantorbit
+        if isinstance(orbits, VariantOrbits):
+            orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
+            variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+
+            # Generate a unique separator that doesn't appear in either array
+            separator = generate_unique_separator(orbit_ids, variant_ids)
+
+            # Use numpy string operations to concatenate the orbit_id and variant_id
+            particle_ids = np.char.add(
+                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
+                variant_ids,
             )
-            sim = rebound.Simulation()
+            particle_ids = np.array(particle_ids, dtype="object")
 
-            # Set the simulation time, relative to the jd_ref
-            start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
-            start_tdb_time = start_tdb_time - ephem.jd_ref
-            sim.t = start_tdb_time
+        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
-            particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
-            separator = None
+        # Add the orbits as particles to the simulation
+        coords_df = orbits.coordinates.to_dataframe()
 
-            # Serialize the variantorbit
-            if isinstance(orbits, VariantOrbits):
-                orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
-                variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
+        assist.Extras(sim, ephem)
 
-                # Generate a unique separator that doesn't appear in either array
-                separator = generate_unique_separator(orbit_ids, variant_ids)
+        for i in range(len(coords_df)):
+            sim.add(
+                x=coords_df.x[i],
+                y=coords_df.y[i],
+                z=coords_df.z[i],
+                vx=coords_df.vx[i],
+                vy=coords_df.vy[i],
+                vz=coords_df.vz[i],
+                hash=uint_orbit_ids[i],
+            )
 
-                # Use numpy string operations to concatenate the orbit_id and variant_id
-                particle_ids = np.char.add(
-                    np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
-                    variant_ids,
-                )
-                particle_ids = np.array(particle_ids, dtype="object")
+        # Set the integrator parameters
+        sim.dt = self.initial_dt
+        sim.ri_ias15.min_dt = self.min_dt
+        sim.ri_ias15.adaptive_mode = self.adaptive_mode
+        sim.ri_ias15.epsilon = self.epsilon
 
-            orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
+        # Prepare the times as jd - jd_ref
+        integrator_times = times.rescale("tdb").jd()
+        integrator_times = pc.subtract(integrator_times, ephem.jd_ref)
+        integrator_times = integrator_times.to_numpy()
 
-            # Add the orbits as particles to the simulation
-            coords_df = orbits.coordinates.to_dataframe()
+        results = None
 
-            assist.Extras(sim, ephem)
+        # Step through each time, move the simulation forward and
+        # collect the results.
+        for i in range(len(integrator_times)):
+            sim.integrate(integrator_times[i])
 
-            for i in range(len(coords_df)):
-                sim.add(
-                    x=coords_df.x[i],
-                    y=coords_df.y[i],
-                    z=coords_df.z[i],
-                    vx=coords_df.vx[i],
-                    vy=coords_df.vy[i],
-                    vz=coords_df.vz[i],
-                    hash=uint_orbit_ids[i],
-                )
+            # Get serialized particle data as numpy arrays
+            orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
+            step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
 
-            # Set the integrator parameters
-            sim.dt = self.initial_dt
-            sim.ri_ias15.min_dt = self.min_dt
-            sim.ri_ias15.adaptive_mode = self.adaptive_mode
-            sim.ri_ias15.epsilon = self.epsilon
+            sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
 
-            # Prepare the times as jd - jd_ref
-            integrator_times = times.rescale("tdb").jd()
-            integrator_times = pc.subtract(integrator_times, ephem.jd_ref)
-            integrator_times = integrator_times.to_numpy()
-
-            results = None
-
-            # Step through each time, move the simulation forward and
-            # collect the results.
-            for i in range(len(integrator_times)):
-                sim.integrate(integrator_times[i])
-
-                # Get serialized particle data as numpy arrays
-                orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
-                step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
-
-                sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
-
-                if isinstance(orbits, Orbits):
-                    # Retrieve original orbit id from hash
-                    orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                    time_step_results = Orbits.from_kwargs(
-                        coordinates=CartesianCoordinates.from_kwargs(
-                            x=step_xyzvxvyvz[:, 0],
-                            y=step_xyzvxvyvz[:, 1],
-                            z=step_xyzvxvyvz[:, 2],
-                            vx=step_xyzvxvyvz[:, 3],
-                            vy=step_xyzvxvyvz[:, 4],
-                            vz=step_xyzvxvyvz[:, 5],
-                            time=Timestamp.from_jd(
-                                pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
-                            ),
-                            origin=Origin.from_kwargs(
-                                code=pa.repeat(
-                                    "SOLAR_SYSTEM_BARYCENTER",
-                                    sim.N,
-                                )
-                            ),
-                            frame="equatorial",
+            if isinstance(orbits, Orbits):
+                # Retrieve original orbit id from hash
+                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                time_step_results = Orbits.from_kwargs(
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=step_xyzvxvyvz[:, 0],
+                        y=step_xyzvxvyvz[:, 1],
+                        z=step_xyzvxvyvz[:, 2],
+                        vx=step_xyzvxvyvz[:, 3],
+                        vy=step_xyzvxvyvz[:, 4],
+                        vz=step_xyzvxvyvz[:, 5],
+                        time=Timestamp.from_jd(
+                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
                         ),
-                        orbit_id=orbit_ids,
-                        object_id=orbits.object_id,
-                    )
-                elif isinstance(orbits, VariantOrbits):
-                    # Retrieve the orbit id and weights from hash
-                    particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-
-                    # Use the saved separator instead of trying to extract it
-                    orbit_ids, variant_ids = zip(
-                        *[particle_id.split(separator) for particle_id in particle_ids]
-                    )
-
-                    time_step_results = VariantOrbits.from_kwargs(
-                        orbit_id=orbit_ids,
-                        variant_id=variant_ids,
-                        object_id=orbits.object_id,
-                        weights=orbits.weights,
-                        weights_cov=orbits.weights_cov,
-                        coordinates=CartesianCoordinates.from_kwargs(
-                            x=step_xyzvxvyvz[:, 0],
-                            y=step_xyzvxvyvz[:, 1],
-                            z=step_xyzvxvyvz[:, 2],
-                            vx=step_xyzvxvyvz[:, 3],
-                            vy=step_xyzvxvyvz[:, 4],
-                            vz=step_xyzvxvyvz[:, 5],
-                            time=Timestamp.from_jd(
-                                pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
-                            ),
-                            origin=Origin.from_kwargs(
-                                code=pa.repeat(
-                                    "SOLAR_SYSTEM_BARYCENTER",
-                                    sim.N,
-                                )
-                            ),
-                            frame="equatorial",
+                        origin=Origin.from_kwargs(
+                            code=pa.repeat(
+                                "SOLAR_SYSTEM_BARYCENTER",
+                                sim.N,
+                            )
                         ),
-                    )
+                        frame="equatorial",
+                    ),
+                    orbit_id=orbit_ids,
+                    object_id=orbits.object_id,
+                )
+            elif isinstance(orbits, VariantOrbits):
+                # Retrieve the orbit id and weights from hash
+                particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
 
-                if results is None:
-                    results = time_step_results
-                else:
-                    results = concatenate([results, time_step_results])
+                # Use the saved separator instead of trying to extract it
+                orbit_ids, variant_ids = zip(
+                    *[particle_id.split(separator) for particle_id in particle_ids]
+                )
 
-            # Store the last simulation in a private variable for reference
-            self._last_simulation = sim
-            return results
-        finally:
-            # Ensure proper cleanup order: simulation first, then ephemeris
-            if hasattr(self, '_last_simulation') and self._last_simulation is not None:
-                try:
-                    # Don't store the simulation if we're in cleanup
-                    if sim is not None and sim != self._last_simulation:
-                        del sim
-                except:
-                    pass
-            # Let ephem be garbage collected naturally after simulation cleanup
-            if ephem is not None:
-                # Force garbage collection to ensure proper cleanup order
-                import gc
-                gc.collect()
+                time_step_results = VariantOrbits.from_kwargs(
+                    orbit_id=orbit_ids,
+                    variant_id=variant_ids,
+                    object_id=orbits.object_id,
+                    weights=orbits.weights,
+                    weights_cov=orbits.weights_cov,
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=step_xyzvxvyvz[:, 0],
+                        y=step_xyzvxvyvz[:, 1],
+                        z=step_xyzvxvyvz[:, 2],
+                        vx=step_xyzvxvyvz[:, 3],
+                        vy=step_xyzvxvyvz[:, 4],
+                        vz=step_xyzvxvyvz[:, 5],
+                        time=Timestamp.from_jd(
+                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
+                        ),
+                        origin=Origin.from_kwargs(
+                            code=pa.repeat(
+                                "SOLAR_SYSTEM_BARYCENTER",
+                                sim.N,
+                            )
+                        ),
+                        frame="equatorial",
+                    ),
+                )
+
+            if results is None:
+                results = time_step_results
+            else:
+                results = concatenate([results, time_step_results])
+
+        # Store the last simulation in a private variable for reference
+        self._last_simulation = sim
+        return results
 
     def _detect_collisions(
         self,
