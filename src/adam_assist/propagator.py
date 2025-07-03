@@ -366,9 +366,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = rebound.Simulation()
 
-        # Enable collision detection for impact analysis using REBOUND's constants
-        sim.collision = "direct"
-        sim.collision_resolve = "halt"
+        # Temporarily disable collision detection here too
+        sim.collision = None  # This completely disables collision detection without needing to set collision_resolve
         sim.integrator = "ias15"  # Make sure we're using IAS15 integrator
 
         # Set the simulation time, relative to the jd_ref
