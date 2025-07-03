@@ -201,8 +201,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim = rebound.Simulation()
 
         # Disable collision detection since we don't need it for regular propagation
-        sim.collision = None
-        sim.collision_resolve = None
+        sim.collision = None  # This completely disables collision detection without needing to set collision_resolve
+        sim.integrator = "ias15"  # Make sure we're using IAS15 integrator
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
@@ -366,9 +366,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         sim = rebound.Simulation()
 
-        # Enable collision detection for impact analysis
+        # Enable collision detection for impact analysis using REBOUND's constants
         sim.collision = "direct"
         sim.collision_resolve = "halt"
+        sim.integrator = "ias15"  # Make sure we're using IAS15 integrator
 
         # Set the simulation time, relative to the jd_ref
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
