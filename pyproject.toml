@@ -27,7 +27,6 @@ dependencies = [
     "numpy",
     "ray",
     "spiceypy>=6.0.0",
-    "rebound>=4.4.10",
 ]
 
 [build-system]
