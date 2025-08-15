@@ -279,7 +279,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 step_variant_ids.append(np.asarray(variant_ids, dtype=object))
             else:
                 step_orbit_ids.append(
-                    np.asarray([orbit_id_mapping[h] for h in orbit_id_hashes], dtype=object)
+                    np.asarray(
+                        [orbit_id_mapping[h] for h in orbit_id_hashes], dtype=object
+                    )
                 )
 
         # Build a single result table
@@ -297,7 +299,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
                 variant_ids_out = np.concatenate(step_variant_ids, axis=0)
                 object_id_out = np.tile(
-                    orbits.object_id.to_numpy(zero_copy_only=False), len(integrator_times)
+                    orbits.object_id.to_numpy(zero_copy_only=False),
+                    len(integrator_times),
                 )
 
                 results = VariantOrbits.from_kwargs(
@@ -321,7 +324,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             else:
                 orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
                 object_id_out = np.tile(
-                    orbits.object_id.to_numpy(zero_copy_only=False), len(integrator_times)
+                    orbits.object_id.to_numpy(zero_copy_only=False),
+                    len(integrator_times),
                 )
 
                 results = Orbits.from_kwargs(
@@ -663,6 +667,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         if len(results_list) > 0:
             results = qv.concatenate(results_list)
         else:
-            results = Orbits.empty() if isinstance(orbits, Orbits) else VariantOrbits.empty()
+            results = (
+                Orbits.empty() if isinstance(orbits, Orbits) else VariantOrbits.empty()
+            )
 
         return results, collision_events
