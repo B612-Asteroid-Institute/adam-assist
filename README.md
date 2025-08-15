@@ -124,7 +124,21 @@ These parameters are passed directly to REBOUND's IAS15 integrator. The IAS15 in
 
 ## Default SPK Files
 
-The asteroids SPK file sb441-n16.bsp contains the 16 largest asteroids in the solar system. They are listed here by numberfor reference:
+The asteroids SPK file sb441-n16.bsp contains the 16 largest asteroids in the solar system. They are listed here by number for reference:
 
-1, 3, 4, 7, 10, 15, 16, 31, 52, 65, 70, 87, 88, 107, 511, 704
-
+1 Ceres
+3 Juno
+4 Vesta
+7 Iris
+10 Hygiea
+15 Eunomia
+16 Psyche
+31 Euphrosyne
+52 Europa
+65 Cybele
+70 Panopaea
+87 Sylvia
+88 Thisbe
+107 Camilla
+511 Davida
+704 Interamnia
