@@ -253,83 +253,96 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         integrator_times = pc.subtract(integrator_times, ephem.jd_ref)
         integrator_times = integrator_times.to_numpy()
 
+        # Unified accumulation for both Orbits and VariantOrbits
         results = None
+        is_variant = isinstance(orbits, VariantOrbits)
+        step_states: List[npt.NDArray[np.float64]] = []
+        step_orbit_ids: List[npt.NDArray[np.object_]] = []
+        step_variant_ids: List[npt.NDArray[np.object_]] = []
 
-        # Step through each time, move the simulation forward and
-        # collect the results.
+        # Step through each time, move the simulation forward and collect state
         for i in range(len(integrator_times)):
             sim.integrate(integrator_times[i])
 
-            # Get serialized particle data as numpy arrays
             orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
             step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
-
             sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
 
-            if isinstance(orbits, Orbits):
-                # Retrieve original orbit id from hash
-                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                time_step_results = Orbits.from_kwargs(
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=step_xyzvxvyvz[:, 0],
-                        y=step_xyzvxvyvz[:, 1],
-                        z=step_xyzvxvyvz[:, 2],
-                        vx=step_xyzvxvyvz[:, 3],
-                        vy=step_xyzvxvyvz[:, 4],
-                        vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(
-                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
-                        ),
-                        origin=Origin.from_kwargs(
-                            code=pa.repeat(
-                                "SOLAR_SYSTEM_BARYCENTER",
-                                sim.N,
-                            )
-                        ),
-                        frame="equatorial",
-                    ),
-                    orbit_id=orbit_ids,
-                    object_id=orbits.object_id,
-                )
-            elif isinstance(orbits, VariantOrbits):
-                # Retrieve the orbit id and weights from hash
+            step_states.append(step_xyzvxvyvz)
+
+            if is_variant:
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-
-                # Use the saved separator instead of trying to extract it
                 orbit_ids, variant_ids = zip(
-                    *[particle_id.split(separator) for particle_id in particle_ids]
+                    *[pid.split(separator) for pid in particle_ids]
+                )
+                step_orbit_ids.append(np.asarray(orbit_ids, dtype=object))
+                step_variant_ids.append(np.asarray(variant_ids, dtype=object))
+            else:
+                step_orbit_ids.append(
+                    np.asarray(
+                        [orbit_id_mapping[h] for h in orbit_id_hashes], dtype=object
+                    )
                 )
 
-                time_step_results = VariantOrbits.from_kwargs(
-                    orbit_id=orbit_ids,
-                    variant_id=variant_ids,
-                    object_id=orbits.object_id,
+        # Build a single result table
+        if len(step_states) == 0:
+            results = VariantOrbits.empty() if is_variant else Orbits.empty()
+        else:
+            xyzvxvyvz = np.concatenate(step_states, axis=0)
+            jd_times = integrator_times + ephem.jd_ref
+            times_out = Timestamp.from_jd(np.repeat(jd_times, sim.N), scale="tdb")
+            origin_codes = Origin.from_kwargs(
+                code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", xyzvxvyvz.shape[0])
+            )
+
+            if is_variant:
+                orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
+                variant_ids_out = np.concatenate(step_variant_ids, axis=0)
+                object_id_out = np.tile(
+                    orbits.object_id.to_numpy(zero_copy_only=False),
+                    len(integrator_times),
+                )
+
+                results = VariantOrbits.from_kwargs(
+                    orbit_id=orbit_ids_out,
+                    variant_id=variant_ids_out,
+                    object_id=object_id_out,
                     weights=orbits.weights,
                     weights_cov=orbits.weights_cov,
                     coordinates=CartesianCoordinates.from_kwargs(
-                        x=step_xyzvxvyvz[:, 0],
-                        y=step_xyzvxvyvz[:, 1],
-                        z=step_xyzvxvyvz[:, 2],
-                        vx=step_xyzvxvyvz[:, 3],
-                        vy=step_xyzvxvyvz[:, 4],
-                        vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(
-                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
-                        ),
-                        origin=Origin.from_kwargs(
-                            code=pa.repeat(
-                                "SOLAR_SYSTEM_BARYCENTER",
-                                sim.N,
-                            )
-                        ),
+                        x=xyzvxvyvz[:, 0],
+                        y=xyzvxvyvz[:, 1],
+                        z=xyzvxvyvz[:, 2],
+                        vx=xyzvxvyvz[:, 3],
+                        vy=xyzvxvyvz[:, 4],
+                        vz=xyzvxvyvz[:, 5],
+                        time=times_out,
+                        origin=origin_codes,
                         frame="equatorial",
                     ),
                 )
-
-            if results is None:
-                results = time_step_results
             else:
-                results = concatenate([results, time_step_results])
+                orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
+                object_id_out = np.tile(
+                    orbits.object_id.to_numpy(zero_copy_only=False),
+                    len(integrator_times),
+                )
+
+                results = Orbits.from_kwargs(
+                    coordinates=CartesianCoordinates.from_kwargs(
+                        x=xyzvxvyvz[:, 0],
+                        y=xyzvxvyvz[:, 1],
+                        z=xyzvxvyvz[:, 2],
+                        vx=xyzvxvyvz[:, 3],
+                        vy=xyzvxvyvz[:, 4],
+                        vz=xyzvxvyvz[:, 5],
+                        time=times_out,
+                        origin=origin_codes,
+                        frame="equatorial",
+                    ),
+                    orbit_id=orbit_ids_out,
+                    object_id=object_id_out,
+                )
 
         # Store the last simulation in a private variable for reference
         self._last_simulation = sim
@@ -423,6 +436,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # If an object is an impactor, this represents its position at impact time
         results = None
         collision_events = CollisionEvent.empty()
+        # Accumulators to reduce per-iteration concatenation
+        collisions_list: List[CollisionEvent] = []
+        colliders_list: List[OrbitType] = []
+        results_list: List[OrbitType] = []
         past_integrator_time = False
         time_step_results: Union[None, OrbitType] = None
 
@@ -616,27 +633,42 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                             )
 
                         orbits = orbits.apply_mask(keep_mask)
-                        # Put the orbits / variants of the impactors into the results set
-                        if results is None:
-                            results = colliding_orbits
-                        else:
-                            results = qv.concatenate([results, colliding_orbits])
+                        # Accumulate impactors: add to results and colliders lists
+                        results_list.append(colliding_orbits)
+                        colliders_list.append(colliding_orbits)
+                    # Accumulate new impacts regardless of stopping condition
+                    collisions_list.append(new_impacts)
+
+        # Build collisions and colliders once
+        if len(collisions_list) > 0:
+            collision_events = qv.concatenate(collisions_list)
+        if len(colliders_list) > 0:
+            colliders = qv.concatenate(colliders_list)
+        else:
+            colliders = None
 
         # Add the final positions of the particles that are not already in the results
         if time_step_results is not None:
-            if results is None:
-                results = time_step_results
+            if colliders is None:
+                results_list.append(time_step_results)
             else:
                 if isinstance(orbits, Orbits):
                     still_in_simulation = pc.invert(
-                        pc.is_in(time_step_results.orbit_id, results.orbit_id)
+                        pc.is_in(time_step_results.orbit_id, colliders.orbit_id)
                     )
                 elif isinstance(orbits, VariantOrbits):
                     still_in_simulation = pc.invert(
-                        pc.is_in(time_step_results.variant_id, results.variant_id)
+                        pc.is_in(time_step_results.variant_id, colliders.variant_id)
                     )
-                results = qv.concatenate(
-                    [results, time_step_results.apply_mask(still_in_simulation)]
-                )
+                addl = time_step_results.apply_mask(still_in_simulation)
+                results_list.append(addl)
+
+        # Build results once
+        if len(results_list) > 0:
+            results = qv.concatenate(results_list)
+        else:
+            results = (
+                Orbits.empty() if isinstance(orbits, Orbits) else VariantOrbits.empty()
+            )
 
         return results, collision_events

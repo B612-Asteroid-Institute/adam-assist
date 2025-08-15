@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Astronomy"
 ]
-requires-python = ">=3.11,<3.13"
+requires-python = ">3.11.0,<3.13"
 dependencies = [
     "adam-core>=0.4.0",
     "naif-de440",
@@ -56,6 +56,10 @@ dev = [
     "pytest-cov",
     "pytest-mock",
     "pytest-benchmark",
+    "scalene>=1.5.53",
+    "py-spy>=0.4.1",
+    "snakeviz>=2.2.2",
+    "line-profiler>=5.0.0",
     "black",
     "isort",
     "ipython",
@@ -70,8 +74,17 @@ typecheck = "mypy --strict ./src/adam_assist"
 
 test = "pytest --benchmark-skip {args}"
 doctest = "pytest --doctest-plus --doctest-only"
-benchmark = "pytest --benchmark-only"
+benchmark = "pytest --benchmark-only {args}"
 coverage = "pytest --cov=src --cov-report=xml"
+
+# Convenience scripts for local and CI benchmark workflows (pytest-benchmark)
+# Save a named run for later comparison
+bench_save = "pytest --benchmark-only --benchmark-save={args}"
+# Export the latest run to JSON (useful for CI artifacts)
+bench_export = "pytest --benchmark-only --benchmark-autosave --benchmark-json=benchmark.json {args}"
+# Compare two saved runs (ref and contender). Example usage:
+# pdm run bench_compare --benchmark-compare=0001 --benchmark-compare=0002
+bench_compare = "pytest --benchmark-only --benchmark-compare {args}"
 
 [tool.black]
 line-length = 88
