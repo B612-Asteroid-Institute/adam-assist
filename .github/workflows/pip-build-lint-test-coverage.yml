@@ -1,0 +1,68 @@
+name: Build Lint Test and Coverage
+
+on:
+  push:
+    branches: [ main, "v*" ]
+  pull_request:
+    branches: [ main, "v*" ]
+
+jobs:
+  build-lint-test-coverage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+      - name: Checkout git repo
+        uses: actions/checkout@v3
+      - name: Get git tags
+        run: git fetch --prune --unshallow --tags
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Testing Dependencies
+        run: |
+          pip install pdm
+          pdm install -G dev
+      - name: Lint
+        run: pdm run lint
+      - name: Test with coverage
+        run: pdm run coverage
+      - name: Coverage report to coveralls
+        uses: coverallsapp/github-action@v2.0.0
+        with:
+          path-to-lcov: coverage.xml
+      - name: Run benchmarks
+        run: |
+          pdm run benchmark --benchmark-json bench.json
+      - name: Store main benchmark result
+        if: github.ref == 'refs/heads/main'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Python Benchmark
+          tool: 'pytest'
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          gh-pages-branch: gh-pages
+      - name: Compare benchmarks
+        if: github.event_name == 'pull_request'
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Python Benchmark
+          tool: 'pytest'
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment-always: true
+          fail-threshold: '200%'
+          alert-threshold: '150%'
+          auto-push: false
+
+
