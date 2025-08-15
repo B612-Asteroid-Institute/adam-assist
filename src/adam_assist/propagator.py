@@ -256,9 +256,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # Unified accumulation for both Orbits and VariantOrbits
         results = None
         is_variant = isinstance(orbits, VariantOrbits)
-        step_states: List[np.ndarray] = []
-        step_orbit_ids: List[np.ndarray] = []
-        step_variant_ids: List[np.ndarray] = []
+        step_states: List[npt.NDArray[np.float64]] = []
+        step_orbit_ids: List[npt.NDArray[np.object_]] = []
+        step_variant_ids: List[npt.NDArray[np.object_]] = []
 
         # Step through each time, move the simulation forward and collect state
         for i in range(len(integrator_times)):
