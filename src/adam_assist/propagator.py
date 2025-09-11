@@ -227,18 +227,21 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
         # Add the orbits as particles to the simulation
-        coords_df = orbits.coordinates.to_dataframe()
+        # OPTIMIZED: Use direct array access instead of DataFrame conversion
+        coords = orbits.coordinates
+        position_arrays = coords.r  # x, y, z columns
+        velocity_arrays = coords.v  # vx, vy, vz columns
 
         assist.Extras(sim, ephem)
 
-        for i in range(len(coords_df)):
+        for i in range(len(position_arrays)):
             sim.add(
-                x=coords_df.x[i],
-                y=coords_df.y[i],
-                z=coords_df.z[i],
-                vx=coords_df.vx[i],
-                vy=coords_df.vy[i],
-                vz=coords_df.vz[i],
+                x=position_arrays[i, 0],
+                y=position_arrays[i, 1],
+                z=position_arrays[i, 2],
+                vx=velocity_arrays[i, 0],
+                vy=velocity_arrays[i, 1],
+                vz=velocity_arrays[i, 2],
                 hash=uint_orbit_ids[i],
             )
 
@@ -411,18 +414,21 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
         # Add the orbits as particles to the simulation
-        coords_df = orbits.coordinates.to_dataframe()
+        # OPTIMIZED: Use direct array access instead of DataFrame conversion
+        coords = orbits.coordinates
+        position_arrays = coords.r  # x, y, z columns
+        velocity_arrays = coords.v  # vx, vy, vz columns
 
         assist.Extras(sim, ephem)
 
-        for i in range(len(coords_df)):
+        for i in range(len(position_arrays)):
             sim.add(
-                x=coords_df.x[i],
-                y=coords_df.y[i],
-                z=coords_df.z[i],
-                vx=coords_df.vx[i],
-                vy=coords_df.vy[i],
-                vz=coords_df.vz[i],
+                x=position_arrays[i, 0],
+                y=position_arrays[i, 1],
+                z=position_arrays[i, 2],
+                vx=velocity_arrays[i, 0],
+                vy=velocity_arrays[i, 1],
+                vz=velocity_arrays[i, 2],
                 hash=uint_orbit_ids[i],
             )
 
