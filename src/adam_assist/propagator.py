@@ -277,26 +277,19 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         transformed_orbits = orbits.set_column("coordinates", transformed_coords)
 
-        # Group orbits by unique time, then propagate them (numpy-based grouping)
-        # Build numpy JD array once to avoid repeated equality checks
-        t_jd = transformed_orbits.coordinates.time.jd().to_numpy()
-        if t_jd.size == 0:
-            return Orbits.empty() if not isinstance(orbits, VariantOrbits) else VariantOrbits.empty()
-
-        unique_vals, inverse_idx = np.unique(t_jd, return_inverse=True)
-
-        # Accumulate results and concatenate once at the end to reduce table churn
-        propagated_list: List[OrbitType] = []
-        for group_idx in range(unique_vals.size):
-            mask = inverse_idx == group_idx
+        # Group orbits by unique time, then propagate them
+        results = None
+        unique_times = transformed_orbits.coordinates.time.unique()
+        for epoch in unique_times:
+            mask = transformed_orbits.coordinates.time.equals(epoch)
             epoch_orbits = transformed_orbits.apply_mask(mask)
-            propagated_list.append(self._propagate_orbits_inner(epoch_orbits, times))
+            propagated_orbits = self._propagate_orbits_inner(epoch_orbits, times)
+            if results is None:
+                results = propagated_orbits
+            else:
+                results = concatenate([results, propagated_orbits])
 
         # Sanity check that the results are of the correct type
-        if len(propagated_list) == 0:
-            return Orbits.empty() if not isinstance(orbits, VariantOrbits) else VariantOrbits.empty()
-        results = concatenate(propagated_list)
-
         assert isinstance(results, OrbitType)
 
         return results
@@ -487,8 +480,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
         separator = None
 
-        # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
+            is_variant = True
+        else:
+            is_variant = False
+
+        # Serialize the variantorbit
+        if is_variant:
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
 
@@ -559,7 +557,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         # If no times, return empty
         if len(integrator_times) == 0:
-            return VariantOrbits.empty() if isinstance(orbits, VariantOrbits) else Orbits.empty()
+            return VariantOrbits.empty() if is_variant else Orbits.empty()
 
         # Preallocate result buffers for all steps to minimize allocations
         num_steps = len(integrator_times)
@@ -568,7 +566,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         xyzvxvyvz_all = np.empty((total_rows, 6), dtype="float64")
         orbit_ids_out_obj = np.empty((total_rows,), dtype=object)
         variant_ids_out_obj = None
-        if isinstance(orbits, VariantOrbits):
+        if is_variant:
             variant_ids_out_obj = np.empty((total_rows,), dtype=object)
 
         if self.enable_profiling:
@@ -599,9 +597,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             end_row = start_row + num_particles
             xyzvxvyvz_all[start_row:end_row, :] = step_xyzvxvyvz
 
-            if isinstance(orbits, VariantOrbits):
+            if is_variant:
                 particle_ids_strings = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                orbit_ids, variant_ids = zip(*[pid.split(separator) for pid in particle_ids_strings])
+                orbit_ids, variant_ids = zip(*[pid.split(separator) for pid in particle_ids_strings]) # do this better 
                 orbit_ids_out_obj[start_row:end_row] = np.asarray(orbit_ids, dtype=object)
                 variant_ids_out_obj[start_row:end_row] = np.asarray(variant_ids, dtype=object)
             else:
@@ -623,7 +621,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         times_out = Timestamp.from_jd(jd_times_out, scale="tdb")
         origin_codes = Origin.from_kwargs(code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", total_rows))
 
-        if isinstance(orbits, VariantOrbits):
+        if is_variant:
             object_id_out = np.tile(orbits.object_id.to_numpy(zero_copy_only=False), num_steps)
             coordinates = CartesianCoordinates.from_kwargs(
                 x=xyzvxvyvz_all[:, 0],
@@ -732,8 +730,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
         separator = None
 
-        # Serialize the variantorbit
         if isinstance(orbits, VariantOrbits):
+            is_variant = True
+        else:
+            is_variant = False
+
+        # Serialize the variantorbit
+        if is_variant:
             orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
             variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
 
@@ -832,7 +835,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbit_id=orbit_ids,
                     object_id=orbits.object_id,
                 )
-            elif isinstance(orbits, VariantOrbits):
+            elif is_variant:
                 # Retrieve the orbit id and weights from hash
                 particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
 
@@ -907,7 +910,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 if np.any(within_radius):
                     colliding_orbits = time_step_results.apply_mask(within_radius)
 
-                    if isinstance(orbits, VariantOrbits):
+                    if is_variant:
                         new_impacts = CollisionEvent.from_kwargs(
                             orbit_id=colliding_orbits.orbit_id,
                             coordinates=colliding_orbits.coordinates,
@@ -962,7 +965,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                             sim.remove(hash=c_uint32(hash_id))
                             # For some reason, it fails if we let rebound convert the hash to c_uint32
 
-                        if isinstance(orbits, VariantOrbits):
+                        if is_variant:
                             keep_mask = pc.invert(
                                 pc.is_in(orbits.variant_id, colliding_orbits.variant_id)
                             )
@@ -995,7 +998,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     still_in_simulation = pc.invert(
                         pc.is_in(time_step_results.orbit_id, colliders.orbit_id)
                     )
-                elif isinstance(orbits, VariantOrbits):
+                elif is_variant:
                     still_in_simulation = pc.invert(
                         pc.is_in(time_step_results.variant_id, colliders.variant_id)
                     )
