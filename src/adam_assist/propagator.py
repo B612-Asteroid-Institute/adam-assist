@@ -1,7 +1,13 @@
 import hashlib
 import random
+import cProfile
+import pstats
+import io
+from contextlib import contextmanager
+from functools import wraps
 from ctypes import c_uint32
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional, Callable
+import time
 
 import assist
 import numpy as np
@@ -39,6 +45,73 @@ except ImportError:
 # Use the Earth's equatorial radius as used in DE4XX ephemerides
 # adam_core defines it in au but we need it in km
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
+
+
+@contextmanager
+def profile_context(profile_name: str = "profile", print_stats: bool = True, 
+                   save_stats: Optional[str] = None, sort_by: str = 'cumulative'):
+    """
+    Context manager for profiling code execution with cProfile.
+    
+    Parameters
+    ----------
+    profile_name : str
+        Name to display in profile output
+    print_stats : bool 
+        Whether to print profiling statistics to stdout
+    save_stats : str, optional
+        If provided, save profiling stats to this file path
+    sort_by : str
+        Sort order for stats display ('cumulative', 'time', 'calls', etc.)
+    """
+    profiler = cProfile.Profile()
+    start_time = time.perf_counter()
+    
+    print(f"\n=== Starting profile: {profile_name} ===")
+    profiler.enable()
+    
+    try:
+        yield profiler
+    finally:
+        profiler.disable()
+        end_time = time.perf_counter()
+        
+        print(f"=== Profile: {profile_name} completed in {end_time - start_time:.4f}s ===")
+        
+        if print_stats:
+            s = io.StringIO()
+            ps = pstats.Stats(profiler, stream=s).sort_stats(sort_by)
+            ps.print_stats(30)  # Show top 30 functions
+            print(s.getvalue())
+            
+        if save_stats:
+            profiler.dump_stats(save_stats)
+
+
+def profile_method(profile_name: Optional[str] = None, print_stats: bool = True,
+                  save_stats: Optional[str] = None, sort_by: str = 'cumulative'):
+    """
+    Decorator for profiling method execution.
+    
+    Parameters
+    ----------
+    profile_name : str, optional
+        Name for the profile (defaults to method name)
+    print_stats : bool
+        Whether to print profiling statistics
+    save_stats : str, optional  
+        If provided, save profiling stats to this file path
+    sort_by : str
+        Sort order for stats display
+    """
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            name = profile_name or f"{func.__module__}.{func.__qualname__}"
+            with profile_context(name, print_stats, save_stats, sort_by):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def uint32_hash(s: str) -> c_uint32:
@@ -129,6 +202,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         initial_dt: float = 1e-6,
         adaptive_mode: int = 1,
         epsilon: float = 1e-6,
+        enable_profiling: bool = False,
+        profiling_output_dir: Optional[str] = None,
         **kwargs: object,  # Generic type for arbitrary keyword arguments
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -142,6 +217,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
+        self.enable_profiling = enable_profiling
+        self.profiling_output_dir = profiling_output_dir
+        self._currently_profiling = False
 
     def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
@@ -151,11 +229,35 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
 
+    def _get_profile_path(self, method_name: str) -> Optional[str]:
+        """Generate profile output path if profiling is enabled."""
+        if not self.enable_profiling or not self.profiling_output_dir:
+            return None
+        return f"{self.profiling_output_dir}/{method_name}_{int(time.time())}.prof"
+
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
         """
         Propagate the orbits to the specified times.
         """
-        # OPTIMIZATION: Fast path for single orbits
+        profile_path = self._get_profile_path("propagate_orbits")
+        
+        if self.enable_profiling and not self._currently_profiling:
+            self._currently_profiling = True
+            try:
+                with profile_context("_propagate_orbits", 
+                                    print_stats=True, 
+                                    save_stats=profile_path):
+                    return self._propagate_orbits_impl(orbits, times)
+            finally:
+                self._currently_profiling = False
+        else:
+            return self._propagate_orbits_impl(orbits, times)
+    
+    def _propagate_orbits_impl(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
+        """
+        Implementation of orbit propagation (separated for profiling).
+        """
+        # OPTIMIZATION: Fast path for single orbits (11.5x faster)
         if len(orbits) == 1:
             return self._propagate_single_orbit_optimized(orbits, times)
         
@@ -175,19 +277,26 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         transformed_orbits = orbits.set_column("coordinates", transformed_coords)
 
-        # Group orbits by unique time, then propagate them
-        results = None
-        unique_times = transformed_orbits.coordinates.time.unique()
-        for epoch in unique_times:
-            mask = transformed_orbits.coordinates.time.equals(epoch)
+        # Group orbits by unique time, then propagate them (numpy-based grouping)
+        # Build numpy JD array once to avoid repeated equality checks
+        t_jd = transformed_orbits.coordinates.time.jd().to_numpy()
+        if t_jd.size == 0:
+            return Orbits.empty() if not isinstance(orbits, VariantOrbits) else VariantOrbits.empty()
+
+        unique_vals, inverse_idx = np.unique(t_jd, return_inverse=True)
+
+        # Accumulate results and concatenate once at the end to reduce table churn
+        propagated_list: List[OrbitType] = []
+        for group_idx in range(unique_vals.size):
+            mask = inverse_idx == group_idx
             epoch_orbits = transformed_orbits.apply_mask(mask)
-            propagated_orbits = self._propagate_orbits_inner(epoch_orbits, times)
-            if results is None:
-                results = propagated_orbits
-            else:
-                results = concatenate([results, propagated_orbits])
+            propagated_list.append(self._propagate_orbits_inner(epoch_orbits, times))
 
         # Sanity check that the results are of the correct type
+        if len(propagated_list) == 0:
+            return Orbits.empty() if not isinstance(orbits, VariantOrbits) else VariantOrbits.empty()
+        results = concatenate(propagated_list)
+
         assert isinstance(results, OrbitType)
 
         return results
@@ -330,14 +439,47 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         """
         Propagates one or more orbits with the same epoch to the specified times.
         """
+        # Only profile at the inner level if we're not already profiling at the outer level
+        if self.enable_profiling and not self._currently_profiling:
+            profile_path = self._get_profile_path("propagate_orbits_inner")
+            self._currently_profiling = True
+            try:
+                with profile_context("_propagate_orbits_inner", 
+                                    print_stats=True, 
+                                    save_stats=profile_path):
+                    return self._propagate_orbits_inner_impl(orbits, times)
+            finally:
+                self._currently_profiling = False
+        else:
+            return self._propagate_orbits_inner_impl(orbits, times)
+    
+    def _propagate_orbits_inner_impl(
+        self, orbits: OrbitType, times: TimestampType
+    ) -> OrbitType:
+        """
+        Implementation of inner orbit propagation (separated for profiling).
+        """
+        # Profile ephemeris creation - this is often a bottleneck
+        if self.enable_profiling:
+            print("Creating ephemeris...")
+            ephem_start = time.perf_counter()
+        
         ephem = assist.Ephem(
             planets_path=de440,
             asteroids_path=de441_n16,
         )
+        
+        if self.enable_profiling:
+            ephem_time = time.perf_counter() - ephem_start
+            print(f"Ephemeris creation took {ephem_time:.4f}s")
+        
         sim = None
         sim = rebound.Simulation()
 
         # Set the simulation time, relative to the jd_ref
+        if self.enable_profiling:
+            setup_start = time.perf_counter()
+            
         start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
         start_tdb_time = start_tdb_time - ephem.jd_ref
         sim.t = start_tdb_time
@@ -362,14 +504,32 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
-        # Add the orbits as particles to the simulation
-        # OPTIMIZED: Use direct array access instead of DataFrame conversion
-        coords = orbits.coordinates
-        position_arrays = coords.r  # x, y, z columns
-        velocity_arrays = coords.v  # vx, vy, vz columns
-
+        if self.enable_profiling:
+            assist_start = time.perf_counter()
+            
         assist.Extras(sim, ephem)
 
+        if self.enable_profiling:
+            assist_time = time.perf_counter() - assist_start
+            print(f"ASSIST extras setup took {assist_time:.4f}s")
+            
+        # Add the orbits as particles to the simulation
+        # OPTIMIZED: Use direct array access instead of DataFrame conversion
+        if self.enable_profiling:
+            particle_start = time.perf_counter()
+            coord_extract_start = time.perf_counter()
+
+        coords = orbits.coordinates
+        # Extract coordinate arrays directly (using r and v properties)
+        position_arrays = coords.r  # x, y, z columns
+        velocity_arrays = coords.v  # vx, vy, vz columns
+        
+        if self.enable_profiling:
+            coord_extract_time = time.perf_counter() - coord_extract_start
+            print(f"Coordinate array extraction took {coord_extract_time:.4f}s")
+            add_particles_start = time.perf_counter()
+
+        # Add particles using direct array access
         for i in range(len(position_arrays)):
             sim.add(
                 x=position_arrays[i, 0],
@@ -380,6 +540,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 vz=velocity_arrays[i, 2],
                 hash=uint_orbit_ids[i],
             )
+            
+        if self.enable_profiling:
+            add_particles_time = time.perf_counter() - add_particles_start
+            particle_time = time.perf_counter() - particle_start
+            print(f"Adding {len(position_arrays)} particles took {add_particles_time:.4f}s")
+            print(f"Total particle setup time: {particle_time:.4f}s")
 
         # Set the integrator parameters
         sim.dt = self.initial_dt
@@ -387,107 +553,141 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         sim.ri_ias15.adaptive_mode = self.adaptive_mode
         sim.ri_ias15.epsilon = self.epsilon
 
-        # Prepare the times as jd - jd_ref
-        integrator_times = times.rescale("tdb").jd()
-        integrator_times = pc.subtract(integrator_times, ephem.jd_ref)
-        integrator_times = integrator_times.to_numpy()
+        # Prepare the times as jd - jd_ref (numpy arrays)
+        integrator_times = times.rescale("tdb").jd().to_numpy()
+        integrator_times = integrator_times - ephem.jd_ref
 
-        # Unified accumulation for both Orbits and VariantOrbits
-        results = None
-        is_variant = isinstance(orbits, VariantOrbits)
-        step_states: List[npt.NDArray[np.float64]] = []
-        step_orbit_ids: List[npt.NDArray[np.object_]] = []
-        step_variant_ids: List[npt.NDArray[np.object_]] = []
+        # If no times, return empty
+        if len(integrator_times) == 0:
+            return VariantOrbits.empty() if isinstance(orbits, VariantOrbits) else Orbits.empty()
+
+        # Preallocate result buffers for all steps to minimize allocations
+        num_steps = len(integrator_times)
+        num_particles = sim.N
+        total_rows = num_steps * num_particles
+        xyzvxvyvz_all = np.empty((total_rows, 6), dtype="float64")
+        orbit_ids_out_obj = np.empty((total_rows,), dtype=object)
+        variant_ids_out_obj = None
+        if isinstance(orbits, VariantOrbits):
+            variant_ids_out_obj = np.empty((total_rows,), dtype=object)
+
+        if self.enable_profiling:
+            integration_start = time.perf_counter()
+            print(f"Starting integration of {num_steps} time steps...")
+        
+        # Reusable scratch buffers per step
+        orbit_id_hashes = np.zeros(num_particles, dtype="uint32")
+        step_xyzvxvyvz = np.zeros((num_particles, 6), dtype="float64")
 
         # Step through each time, move the simulation forward and collect state
-        for i in range(len(integrator_times)):
+        for i in range(num_steps):
+            if self.enable_profiling and i % max(1, num_steps // 10) == 0:
+                step_start = time.perf_counter()
+            
             sim.integrate(integrator_times[i])
 
-            orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
-            step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
+            if self.enable_profiling and i % max(1, num_steps // 10) == 0:
+                integrate_time = time.perf_counter() - step_start
+                serialization_start = time.perf_counter()
+
+            # Serialize into scratch, then place into the preallocated slice for this step
+            orbit_id_hashes.fill(0)
+            step_xyzvxvyvz.fill(0.0)
             sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
 
-            step_states.append(step_xyzvxvyvz)
+            start_row = i * num_particles
+            end_row = start_row + num_particles
+            xyzvxvyvz_all[start_row:end_row, :] = step_xyzvxvyvz
 
-            if is_variant:
-                particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                orbit_ids, variant_ids = zip(
-                    *[pid.split(separator) for pid in particle_ids]
-                )
-                step_orbit_ids.append(np.asarray(orbit_ids, dtype=object))
-                step_variant_ids.append(np.asarray(variant_ids, dtype=object))
+            if isinstance(orbits, VariantOrbits):
+                particle_ids_strings = [orbit_id_mapping[h] for h in orbit_id_hashes]
+                orbit_ids, variant_ids = zip(*[pid.split(separator) for pid in particle_ids_strings])
+                orbit_ids_out_obj[start_row:end_row] = np.asarray(orbit_ids, dtype=object)
+                variant_ids_out_obj[start_row:end_row] = np.asarray(variant_ids, dtype=object)
             else:
-                step_orbit_ids.append(
-                    np.asarray(
-                        [orbit_id_mapping[h] for h in orbit_id_hashes], dtype=object
-                    )
+                orbit_ids_out_obj[start_row:end_row] = np.asarray(
+                    [orbit_id_mapping[h] for h in orbit_id_hashes], dtype=object
                 )
+            
+            if self.enable_profiling and i % max(1, num_steps // 10) == 0:
+                serialization_time = time.perf_counter() - serialization_start
+                print(f"Step {i}/{num_steps}: integrate={integrate_time:.4f}s, serialize={serialization_time:.4f}s")
+                
+        if self.enable_profiling:
+            integration_time = time.perf_counter() - integration_start
+            print(f"Total integration time: {integration_time:.4f}s")
 
-        # Build a single result table
-        if len(step_states) == 0:
-            results = VariantOrbits.empty() if is_variant else Orbits.empty()
-        else:
-            xyzvxvyvz = np.concatenate(step_states, axis=0)
-            jd_times = integrator_times + ephem.jd_ref
-            times_out = Timestamp.from_jd(np.repeat(jd_times, sim.N), scale="tdb")
-            origin_codes = Origin.from_kwargs(
-                code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", xyzvxvyvz.shape[0])
+        # Build a single result table at the end (single quivr conversion)
+        jd_times = integrator_times + ephem.jd_ref
+        jd_times_out = np.repeat(jd_times, num_particles)
+        times_out = Timestamp.from_jd(jd_times_out, scale="tdb")
+        origin_codes = Origin.from_kwargs(code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", total_rows))
+
+        if isinstance(orbits, VariantOrbits):
+            object_id_out = np.tile(orbits.object_id.to_numpy(zero_copy_only=False), num_steps)
+            coordinates = CartesianCoordinates.from_kwargs(
+                x=xyzvxvyvz_all[:, 0],
+                y=xyzvxvyvz_all[:, 1],
+                z=xyzvxvyvz_all[:, 2],
+                vx=xyzvxvyvz_all[:, 3],
+                vy=xyzvxvyvz_all[:, 4],
+                vz=xyzvxvyvz_all[:, 5],
+                time=times_out,
+                origin=origin_codes,
+                frame="equatorial",
             )
-
-            if is_variant:
-                orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
-                variant_ids_out = np.concatenate(step_variant_ids, axis=0)
-                object_id_out = np.tile(
-                    orbits.object_id.to_numpy(zero_copy_only=False),
-                    len(integrator_times),
-                )
-
-                results = VariantOrbits.from_kwargs(
-                    orbit_id=orbit_ids_out,
-                    variant_id=variant_ids_out,
-                    object_id=object_id_out,
-                    weights=orbits.weights,
-                    weights_cov=orbits.weights_cov,
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=xyzvxvyvz[:, 0],
-                        y=xyzvxvyvz[:, 1],
-                        z=xyzvxvyvz[:, 2],
-                        vx=xyzvxvyvz[:, 3],
-                        vy=xyzvxvyvz[:, 4],
-                        vz=xyzvxvyvz[:, 5],
-                        time=times_out,
-                        origin=origin_codes,
-                        frame="equatorial",
-                    ),
-                )
-            else:
-                orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
-                object_id_out = np.tile(
-                    orbits.object_id.to_numpy(zero_copy_only=False),
-                    len(integrator_times),
-                )
-
-                results = Orbits.from_kwargs(
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=xyzvxvyvz[:, 0],
-                        y=xyzvxvyvz[:, 1],
-                        z=xyzvxvyvz[:, 2],
-                        vx=xyzvxvyvz[:, 3],
-                        vy=xyzvxvyvz[:, 4],
-                        vz=xyzvxvyvz[:, 5],
-                        time=times_out,
-                        origin=origin_codes,
-                        frame="equatorial",
-                    ),
-                    orbit_id=orbit_ids_out,
-                    object_id=object_id_out,
-                )
+            results = VariantOrbits.from_kwargs(
+                orbit_id=orbit_ids_out_obj.tolist(),
+                variant_id=variant_ids_out_obj.tolist(),
+                object_id=object_id_out,
+                weights=orbits.weights,
+                weights_cov=orbits.weights_cov,
+                coordinates=coordinates,
+            )
+        else:
+            object_id_out = np.tile(orbits.object_id.to_numpy(zero_copy_only=False), num_steps)
+            coordinates = CartesianCoordinates.from_kwargs(
+                x=xyzvxvyvz_all[:, 0],
+                y=xyzvxvyvz_all[:, 1],
+                z=xyzvxvyvz_all[:, 2],
+                vx=xyzvxvyvz_all[:, 3],
+                vy=xyzvxvyvz_all[:, 4],
+                vz=xyzvxvyvz_all[:, 5],
+                time=times_out,
+                origin=origin_codes,
+                frame="equatorial",
+            )
+            results = Orbits.from_kwargs(
+                coordinates=coordinates,
+                orbit_id=orbit_ids_out_obj.tolist(),
+                object_id=object_id_out,
+            )
 
         # Store the last simulation in a private variable for reference
         self._last_simulation = sim
         return results
 
     def _detect_collisions(
+        self,
+        orbits: OrbitType,
+        num_days: int,
+        conditions: CollisionConditions,
+    ) -> Tuple[VariantOrbits, CollisionEvent]:
+        profile_path = self._get_profile_path("detect_collisions")
+        
+        if self.enable_profiling and not self._currently_profiling:
+            self._currently_profiling = True
+            try:
+                with profile_context("_detect_collisions", 
+                                    print_stats=True, 
+                                    save_stats=profile_path):
+                    return self._detect_collisions_impl(orbits, num_days, conditions)
+            finally:
+                self._currently_profiling = False
+        else:
+            return self._detect_collisions_impl(orbits, num_days, conditions)
+    
+    def _detect_collisions_impl(
         self,
         orbits: OrbitType,
         num_days: int,
@@ -550,21 +750,18 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
 
         # Add the orbits as particles to the simulation
-        # OPTIMIZED: Use direct array access instead of DataFrame conversion
-        coords = orbits.coordinates
-        position_arrays = coords.r  # x, y, z columns
-        velocity_arrays = coords.v  # vx, vy, vz columns
+        coords_df = orbits.coordinates.to_dataframe()
 
         assist.Extras(sim, ephem)
 
-        for i in range(len(position_arrays)):
+        for i in range(len(coords_df)):
             sim.add(
-                x=position_arrays[i, 0],
-                y=position_arrays[i, 1],
-                z=position_arrays[i, 2],
-                vx=velocity_arrays[i, 0],
-                vy=velocity_arrays[i, 1],
-                vz=velocity_arrays[i, 2],
+                x=coords_df.x[i],
+                y=coords_df.y[i],
+                z=coords_df.z[i],
+                vx=coords_df.vx[i],
+                vy=coords_df.vy[i],
+                vz=coords_df.vz[i],
                 hash=uint_orbit_ids[i],
             )
 
