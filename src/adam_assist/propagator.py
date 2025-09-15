@@ -1,7 +1,7 @@
 import hashlib
 import random
 from ctypes import c_uint32
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 
 import assist
 import numpy as np
@@ -142,6 +142,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
+
 
     def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
@@ -361,6 +362,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             particle_ids = np.array(particle_ids, dtype="object")
 
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
+        hash_to_index = {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
 
         # Add the orbits as particles to the simulation
         # OPTIMIZED: Use direct array access instead of DataFrame conversion
@@ -410,18 +412,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             step_states.append(step_xyzvxvyvz)
 
             if is_variant:
-                particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                orbit_ids, variant_ids = zip(
-                    *[pid.split(separator) for pid in particle_ids]
-                )
-                step_orbit_ids.append(np.asarray(orbit_ids, dtype=object))
-                step_variant_ids.append(np.asarray(variant_ids, dtype=object))
+                indices = np.fromiter((hash_to_index[h] for h in orbit_id_hashes), dtype=np.int64, count=sim.N)
+                step_orbit_ids.append(orbit_ids[indices])
+                step_variant_ids.append(variant_ids[indices])
             else:
-                step_orbit_ids.append(
-                    np.asarray(
-                        [orbit_id_mapping[h] for h in orbit_id_hashes], dtype=object
-                    )
-                )
+                indices = np.fromiter((hash_to_index[h] for h in orbit_id_hashes), dtype=np.int64, count=sim.N)
+                step_orbit_ids.append(particle_ids[indices])
 
         # Build a single result table
         if len(step_states) == 0:
@@ -548,6 +544,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             particle_ids = np.array(particle_ids, dtype="object")
 
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
+        hash_to_index = {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
 
         # Add the orbits as particles to the simulation
         # OPTIMIZED: Use direct array access instead of DataFrame conversion
