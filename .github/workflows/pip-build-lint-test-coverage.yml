@@ -9,7 +9,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install -G dev --no-isolation
       - name: Lint
         run: pdm run lint
       - name: Typecheck
@@ -71,7 +71,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install -G dev --no-isolation
       - name: Run tests (no coverage)
         if: matrix.python-version != '3.12'
         run: pdm run test
@@ -117,7 +117,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install -G dev --no-isolation
       - name: Run benchmarks
         run: pdm run benchmark --benchmark-json bench.json
       - name: Upload benchmark artifact
