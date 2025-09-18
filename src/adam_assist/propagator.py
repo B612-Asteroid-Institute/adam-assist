@@ -1,7 +1,7 @@
 import hashlib
 import random
 from ctypes import c_uint32
-from typing import Any, Dict, List, Tuple, Union, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import assist
 import numpy as np
@@ -143,7 +143,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
 
-
     def __getstate__(self) -> Dict[str, Any]:
         state = self.__dict__.copy()
         state.pop("_last_simulation", None)
@@ -159,7 +158,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # OPTIMIZATION: Fast path for single orbits
         if len(orbits) == 1:
             return self._propagate_single_orbit_optimized(orbits, times)
-        
+
         # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
         # This is also the native coordinate system for the JPL binary files.
         # For units we use solar masses, astronomical units, and days.
@@ -193,14 +192,16 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         return results
 
-    def _propagate_single_orbit_optimized(self, orbit: OrbitType, times: TimestampType) -> OrbitType:
+    def _propagate_single_orbit_optimized(
+        self, orbit: OrbitType, times: TimestampType
+    ) -> OrbitType:
         """
         Optimized propagation for a single orbit, bypassing grouping overhead.
         """
         # Validate assumption
         if len(orbit) != 1:
             raise ValueError(f"Expected exactly 1 orbit, got {len(orbit)}")
-        
+
         # Transform coordinates directly without grouping
         transformed_coords = transform_coordinates(
             orbit.coordinates,
@@ -208,22 +209,26 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             frame_out="equatorial",
         )
         transformed_input_orbit_times = transformed_coords.time.rescale("tdb")
-        transformed_coords = transformed_coords.set_column("time", transformed_input_orbit_times)
+        transformed_coords = transformed_coords.set_column(
+            "time", transformed_input_orbit_times
+        )
         transformed_orbit = orbit.set_column("coordinates", transformed_coords)
-        
+
         return self._propagate_single_orbit_inner_optimized(transformed_orbit, times)
 
-    def _propagate_single_orbit_inner_optimized(self, orbit: OrbitType, times: TimestampType) -> OrbitType:
+    def _propagate_single_orbit_inner_optimized(
+        self, orbit: OrbitType, times: TimestampType
+    ) -> OrbitType:
         """
         Inner propagation optimized for exactly one orbit.
         """
         # Setup ephemeris and simulation
         ephem = assist.Ephem(planets_path=de440, asteroids_path=de441_n16)
         sim = rebound.Simulation()
-        
+
         start_tdb_time = orbit.coordinates.time.jd().to_numpy()[0]
         sim.t = start_tdb_time - ephem.jd_ref
-        
+
         # Handle particle ID creation (optimized for single orbit)
         is_variant = isinstance(orbit, VariantOrbits)
         if is_variant:
@@ -233,60 +238,60 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         else:
             orbit_id = str(orbit.orbit_id.to_numpy(zero_copy_only=False)[0])
             particle_hash = uint32_hash(orbit_id)
-        
+
         assist.Extras(sim, ephem)
-        
+
         # Add single particle
         coords = orbit.coordinates
         position_arrays = coords.r
         velocity_arrays = coords.v
-        
+
         sim.add(
             x=position_arrays[0, 0],
-            y=position_arrays[0, 1], 
+            y=position_arrays[0, 1],
             z=position_arrays[0, 2],
             vx=velocity_arrays[0, 0],
             vy=velocity_arrays[0, 1],
             vz=velocity_arrays[0, 2],
             hash=particle_hash,
         )
-        
+
         # Set integrator parameters
         sim.dt = self.initial_dt
         sim.ri_ias15.min_dt = self.min_dt
         sim.ri_ias15.adaptive_mode = self.adaptive_mode
         sim.ri_ias15.epsilon = self.epsilon
-        
+
         # Prepare integration times (numpy only)
         integrator_times = times.rescale("tdb").jd().to_numpy()
         integrator_times = integrator_times - ephem.jd_ref
-        
+
         # Integration loop (preallocate state array)
         N = len(integrator_times)
         if N == 0:
             return VariantOrbits.empty() if is_variant else Orbits.empty()
-        
+
         xyzvxvyvz = np.zeros((N, 6), dtype="float64")
         scratch = np.zeros((1, 6), dtype="float64")
-        
+
         for i in range(N):
             sim.integrate(integrator_times[i])
             scratch.fill(0.0)
             sim.serialize_particle_data(xyzvxvyvz=scratch)
             xyzvxvyvz[i, :] = scratch[0, :]
-        
+
         # Build results
         jd_times = integrator_times + ephem.jd_ref
         times_out = Timestamp.from_jd(jd_times, scale="tdb")
         origin_codes = Origin.from_kwargs(
             code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", xyzvxvyvz.shape[0])
         )
-        
+
         if is_variant:
             orbit_ids_out = [orbit_id] * N
             variant_ids_out = [variant_id] * N
             object_id_out = np.tile(orbit.object_id.to_numpy(zero_copy_only=False), N)
-            
+
             return VariantOrbits.from_kwargs(
                 orbit_id=orbit_ids_out,
                 variant_id=variant_ids_out,
@@ -308,7 +313,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         else:
             orbit_ids_out = [orbit_id] * N
             object_id_out = np.tile(orbit.object_id.to_numpy(zero_copy_only=False), N)
-            
+
             return Orbits.from_kwargs(
                 coordinates=CartesianCoordinates.from_kwargs(
                     x=xyzvxvyvz[:, 0],
@@ -412,11 +417,19 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             step_states.append(step_xyzvxvyvz)
 
             if is_variant:
-                indices = np.fromiter((hash_to_index[h] for h in orbit_id_hashes), dtype=np.int64, count=sim.N)
+                indices = np.fromiter(
+                    (hash_to_index[h] for h in orbit_id_hashes),
+                    dtype=np.int64,
+                    count=sim.N,
+                )
                 step_orbit_ids.append(orbit_ids[indices])
                 step_variant_ids.append(variant_ids[indices])
             else:
-                indices = np.fromiter((hash_to_index[h] for h in orbit_id_hashes), dtype=np.int64, count=sim.N)
+                indices = np.fromiter(
+                    (hash_to_index[h] for h in orbit_id_hashes),
+                    dtype=np.int64,
+                    count=sim.N,
+                )
                 step_orbit_ids.append(particle_ids[indices])
 
         # Build a single result table
