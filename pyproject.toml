@@ -28,6 +28,7 @@ dependencies = [
     "ray",
     "spiceypy>=6.0.0",
     "rebound>=4.4.10",
+    "timezonefinder==8.0.0",
 ]
 
 [build-system]
