@@ -1,7 +1,7 @@
 import hashlib
 import random
 from ctypes import c_uint32
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import assist
 import numpy as np
@@ -557,7 +557,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             particle_ids = np.array(particle_ids, dtype="object")
 
         orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
-        hash_to_index = {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
+        {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
 
         # Add the orbits as particles to the simulation
         # OPTIMIZED: Use direct array access instead of DataFrame conversion
