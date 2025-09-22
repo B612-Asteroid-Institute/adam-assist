@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -94,6 +95,7 @@ jobs:
     needs: [ test ]
     permissions:
       contents: write
+      pull-requests: write
     defaults:
       run:
         shell: bash -l {0}
