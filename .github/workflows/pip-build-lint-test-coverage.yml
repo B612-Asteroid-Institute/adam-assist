@@ -38,10 +38,8 @@ jobs:
         uses: pdm-project/setup-pdm@v4
         with:
           python-version: '3.12'
-      - name: Ensure setuptools and wheel
-        run: pip install --upgrade pip setuptools wheel
       - name: Install dev dependencies
-        run: pdm install -G dev --no-isolation
+        run: pdm install -G dev
       - name: Lint
         run: pdm run lint
       - name: Typecheck
@@ -73,7 +71,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
-        run: pdm install -G dev --no-isolation
+        run: pdm install -G dev
       - name: Run tests (no coverage)
         if: matrix.python-version != '3.12'
         run: pdm run test
@@ -119,7 +117,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dev dependencies
-        run: pdm install -G dev --no-isolation
+        run: pdm install -G dev
       - name: Run benchmarks
         run: pdm run benchmark --benchmark-json bench.json
       - name: Upload benchmark artifact
