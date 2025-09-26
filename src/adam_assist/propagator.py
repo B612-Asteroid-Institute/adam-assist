@@ -450,13 +450,21 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbits.object_id.to_numpy(zero_copy_only=False),
                     len(integrator_times),
                 )
+                # Repeat variant weights across all output time steps
+                num_steps = len(integrator_times)
+                weights_out = np.tile(
+                    orbits.weights.to_numpy(zero_copy_only=False), num_steps
+                )
+                weights_cov_out = np.tile(
+                    orbits.weights_cov.to_numpy(zero_copy_only=False), num_steps
+                )
 
                 results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids_out,
                     variant_id=variant_ids_out,
                     object_id=object_id_out,
-                    weights=orbits.weights,
-                    weights_cov=orbits.weights_cov,
+                    weights=weights_out,
+                    weights_cov=weights_cov_out,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=xyzvxvyvz[:, 0],
                         y=xyzvxvyvz[:, 1],
