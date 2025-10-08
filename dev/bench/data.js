@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1758569906679,
+  "lastUpdate": 1759944129540,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -174,6 +174,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.04212338607365955",
             "extra": "mean: 23.10413697060003 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "moeyensj@users.noreply.github.com",
+            "name": "Joachim Moeyens",
+            "username": "moeyensj"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "04014c6145521d6599c838e99ba854dd1974879f",
+          "message": "Hot fix: Correctly stack weights for variants in single orbit optimized case (#27)",
+          "timestamp": "2025-10-08T09:52:45-07:00",
+          "tree_id": "f6168cfb36e8b8708c44dfa231425cf96d99d97b",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/04014c6145521d6599c838e99ba854dd1974879f"
+        },
+        "date": 1759944128794,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.2609378525444893,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00591067424722134",
+            "extra": "mean: 3.832330151599996 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 0.2605506514058546,
+            "unit": "iter/sec",
+            "range": "stddev: 0.024783881424884253",
+            "extra": "mean: 3.8380253305999985 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 0.4572806345960656,
+            "unit": "iter/sec",
+            "range": "stddev: 0.015465702680704687",
+            "extra": "mean: 2.1868409120000023 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 0.4519280527925962,
+            "unit": "iter/sec",
+            "range": "stddev: 0.009620669746837889",
+            "extra": "mean: 2.2127415942000197 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 0.6559902426646864,
+            "unit": "iter/sec",
+            "range": "stddev: 0.011978843906961405",
+            "extra": "mean: 1.524412917999996 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 1.9841516946891786,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0015677325841989742",
+            "extra": "mean: 503.99372320000566 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 2.720076769618902,
+            "unit": "iter/sec",
+            "range": "stddev: 0.007618752348717668",
+            "extra": "mean: 367.6366825999935 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.02079553304060629,
+            "unit": "iter/sec",
+            "range": "stddev: 0.04050047723717871",
+            "extra": "mean: 48.0872501824 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.04238862064987924,
+            "unit": "iter/sec",
+            "range": "stddev: 0.12772508891503104",
+            "extra": "mean: 23.591237097799944 sec\nrounds: 5"
           }
         ]
       }
