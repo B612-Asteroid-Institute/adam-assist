@@ -222,6 +222,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         """
         Inner propagation optimized for exactly one orbit.
         """
+        assert len(orbit) == 1, f"Expected exactly 1 orbit, got {len(orbit)}"
+
         # Setup ephemeris and simulation
         ephem = assist.Ephem(planets_path=de440, asteroids_path=de441_n16)
         sim = rebound.Simulation()
@@ -288,16 +290,18 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
 
         if is_variant:
-            orbit_ids_out = [orbit_id] * N
-            variant_ids_out = [variant_id] * N
-            object_id_out = np.tile(orbit.object_id.to_numpy(zero_copy_only=False), N)
+            orbit_ids_out = pa.repeat(pc.cast(orbit_id, pa.large_string()), N)
+            variant_ids_out = pa.repeat(pc.cast(variant_id, pa.large_string()), N)
+            object_id_out = pa.repeat(orbit.object_id[0], N)
+            weights_out = pa.repeat(orbit.weights[0], N)
+            weights_cov_out = pa.repeat(orbit.weights_cov[0], N)
 
             return VariantOrbits.from_kwargs(
                 orbit_id=orbit_ids_out,
                 variant_id=variant_ids_out,
                 object_id=object_id_out,
-                weights=orbit.weights,
-                weights_cov=orbit.weights_cov,
+                weights=weights_out,
+                weights_cov=weights_cov_out,
                 coordinates=CartesianCoordinates.from_kwargs(
                     x=xyzvxvyvz[:, 0],
                     y=xyzvxvyvz[:, 1],
@@ -311,8 +315,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
             )
         else:
-            orbit_ids_out = [orbit_id] * N
-            object_id_out = np.tile(orbit.object_id.to_numpy(zero_copy_only=False), N)
+            orbit_ids_out = pa.repeat(pc.cast(orbit_id, pa.large_string()), N)
+            object_id_out = pa.repeat(orbit.object_id[0], N)
 
             return Orbits.from_kwargs(
                 coordinates=CartesianCoordinates.from_kwargs(
