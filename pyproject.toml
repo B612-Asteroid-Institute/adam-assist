@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Astronomy"
 ]
-requires-python = ">3.11.0,<3.13"
+requires-python = ">=3.11"
 dependencies = [
     "adam-core>=0.4.0",
     "naif-de440",
@@ -57,7 +57,6 @@ dev = [
     "pytest-cov",
     "pytest-mock",
     "pytest-benchmark",
-    "scalene>=1.5.53",
     "py-spy>=0.4.1",
     "snakeviz>=2.2.2",
     "line-profiler>=5.0.0",
