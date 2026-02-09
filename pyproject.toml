@@ -17,9 +17,9 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Astronomy"
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
-    "adam-core>=0.4.0",
+    "adam-core>=0.5.4",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     # Temporary until SPK support is merged and released upstream

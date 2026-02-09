@@ -295,6 +295,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             object_id_out = pa.repeat(orbit.object_id[0], N)
             weights_out = pa.repeat(orbit.weights[0], N)
             weights_cov_out = pa.repeat(orbit.weights_cov[0], N)
+            physical_parameters_out = orbit.physical_parameters.take(
+                np.zeros(N, dtype=np.int64)
+            )
 
             return VariantOrbits.from_kwargs(
                 orbit_id=orbit_ids_out,
@@ -302,6 +305,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 object_id=object_id_out,
                 weights=weights_out,
                 weights_cov=weights_cov_out,
+                physical_parameters=physical_parameters_out,
                 coordinates=CartesianCoordinates.from_kwargs(
                     x=xyzvxvyvz[:, 0],
                     y=xyzvxvyvz[:, 1],
@@ -317,6 +321,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         else:
             orbit_ids_out = pa.repeat(pc.cast(orbit_id, pa.large_string()), N)
             object_id_out = pa.repeat(orbit.object_id[0], N)
+            physical_parameters_out = orbit.physical_parameters.take(
+                np.zeros(N, dtype=np.int64)
+            )
 
             return Orbits.from_kwargs(
                 coordinates=CartesianCoordinates.from_kwargs(
@@ -332,6 +339,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
                 orbit_id=orbit_ids_out,
                 object_id=object_id_out,
+                physical_parameters=physical_parameters_out,
             )
 
     def _propagate_orbits_inner(
@@ -462,6 +470,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 weights_cov_out = np.tile(
                     orbits.weights_cov.to_numpy(zero_copy_only=False), num_steps
                 )
+                physical_parameters_out = orbits.physical_parameters.take(
+                    np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
+                )
 
                 results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids_out,
@@ -469,6 +480,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     object_id=object_id_out,
                     weights=weights_out,
                     weights_cov=weights_cov_out,
+                    physical_parameters=physical_parameters_out,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=xyzvxvyvz[:, 0],
                         y=xyzvxvyvz[:, 1],
@@ -487,6 +499,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbits.object_id.to_numpy(zero_copy_only=False),
                     len(integrator_times),
                 )
+                num_steps = len(integrator_times)
+                physical_parameters_out = orbits.physical_parameters.take(
+                    np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
+                )
 
                 results = Orbits.from_kwargs(
                     coordinates=CartesianCoordinates.from_kwargs(
@@ -502,6 +518,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     ),
                     orbit_id=orbit_ids_out,
                     object_id=object_id_out,
+                    physical_parameters=physical_parameters_out,
                 )
 
         # Store the last simulation in a private variable for reference
@@ -656,6 +673,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     ),
                     orbit_id=orbit_ids,
                     object_id=orbits.object_id,
+                    physical_parameters=orbits.physical_parameters,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
@@ -676,6 +694,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     object_id=orbits.object_id,
                     weights=orbits.weights,
                     weights_cov=orbits.weights_cov,
+                    physical_parameters=orbits.physical_parameters,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=step_xyzvxvyvz[:, 0],
                         y=step_xyzvxvyvz[:, 1],
