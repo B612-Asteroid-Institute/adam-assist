@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1759944129540,
+  "lastUpdate": 1770738932686,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -261,6 +261,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.12772508891503104",
             "extra": "mean: 23.591237097799944 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "akoumjian@users.noreply.github.com",
+            "name": "Alec Koumjian",
+            "username": "akoumjian"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "82519c45f42b7f000b84b33b3a7d13705b75f37d",
+          "message": "Updates for physical parameters (#29)\n\n* Updates for physical parameters\n\n* match python requirements",
+          "timestamp": "2026-02-09T11:55:16-05:00",
+          "tree_id": "8a52afdede19de4152c130308f564743999ecd13",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/82519c45f42b7f000b84b33b3a7d13705b75f37d"
+        },
+        "date": 1770738931722,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.26459478734114167,
+            "unit": "iter/sec",
+            "range": "stddev: 0.007905790338419597",
+            "extra": "mean: 3.779363947600001 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 11.026815492890405,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0005918404777347898",
+            "extra": "mean: 90.68801419999772 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 0.4580732562566025,
+            "unit": "iter/sec",
+            "range": "stddev: 0.005886419911694673",
+            "extra": "mean: 2.1830569376000026 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 0.4572171756784997,
+            "unit": "iter/sec",
+            "range": "stddev: 0.011856849991387579",
+            "extra": "mean: 2.187144432000008 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 0.6550525038482036,
+            "unit": "iter/sec",
+            "range": "stddev: 0.01783919613774613",
+            "extra": "mean: 1.526595187600003 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 2.012351951508372,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0030746122579690897",
+            "extra": "mean: 496.9309664000093 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 2.7229843348901346,
+            "unit": "iter/sec",
+            "range": "stddev: 0.004604785079638328",
+            "extra": "mean: 367.2441251999885 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.0208977512753504,
+            "unit": "iter/sec",
+            "range": "stddev: 0.10638253401747454",
+            "extra": "mean: 47.85203856740001 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.04193404410609062,
+            "unit": "iter/sec",
+            "range": "stddev: 0.12273139868794902",
+            "extra": "mean: 23.846972580799978 sec\nrounds: 5"
           }
         ]
       }
