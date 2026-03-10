@@ -10,7 +10,7 @@ to results without changing the propagator return type.
 
 from __future__ import annotations
 
-from typing import Union
+from typing import overload
 
 import numpy as np
 import numpy.typing as npt
@@ -93,15 +93,31 @@ def _match_one(orbit_id: str | None | float, *, normalize: bool) -> str | None:
         return None
     if not str(orbit_id).strip():
         return None
-    s = _normalize(orbit_id) if normalize else str(orbit_id).strip()
+    s = _normalize(str(orbit_id)) if normalize else str(orbit_id).strip()
     return s if s in PERTURBER_DESIGNATIONS else None
 
 
+@overload
 def is_perturber(
-    orbit_id: Union[str, npt.NDArray[np.str_]],
+    orbit_id: str,
     *,
     normalize: bool = True,
-) -> Union[str | None, npt.NDArray[np.object_]]:
+) -> str | None: ...
+
+
+@overload
+def is_perturber(
+    orbit_id: npt.NDArray[np.str_] | npt.NDArray[np.object_],
+    *,
+    normalize: bool = True,
+) -> npt.NDArray[np.object_]: ...
+
+
+def is_perturber(
+    orbit_id: str | npt.NDArray[np.str_] | npt.NDArray[np.object_],
+    *,
+    normalize: bool = True,
+) -> str | None | npt.NDArray[np.object_]:
     """Return the matched ASSIST perturber designation, or None if not a perturber.
 
     None, nan, and empty string are treated as non-match (return None). Accepts a single
