@@ -17,15 +17,54 @@ import numpy.typing as npt
 
 # DE440: Sun, Moon, Mercury–Neptune, Pluto. de441_n16: 16 massive asteroids.
 # Normalized lowercase for case-insensitive matching; orbit_id may be "134340", "Pluto", "1", "Ceres".
-PERTURBER_DESIGNATIONS: frozenset[str] = frozenset({
-    "sun", "mercury", "venus", "earth", "mars", "jupiter", "saturn", "uranus", "neptune",
-    "moon",
-    "pluto", "134340",
-    "1", "ceres", "2", "pallas", "3", "juno", "4", "vesta", "5", "astraea",
-    "6", "hebe", "7", "iris", "8", "flora", "9", "metis", "10", "hygiea",
-    "11", "parthenope", "12", "victoria", "13", "egeria", "14", "irene",
-    "15", "eunomia", "16", "psyche",
-})
+PERTURBER_DESIGNATIONS: frozenset[str] = frozenset(
+    {
+        "sun",
+        "mercury",
+        "venus",
+        "earth",
+        "mars",
+        "jupiter",
+        "saturn",
+        "uranus",
+        "neptune",
+        "moon",
+        "pluto",
+        "134340",
+        "1",
+        "ceres",
+        "2",
+        "pallas",
+        "3",
+        "juno",
+        "4",
+        "vesta",
+        "5",
+        "astraea",
+        "6",
+        "hebe",
+        "7",
+        "iris",
+        "8",
+        "flora",
+        "9",
+        "metis",
+        "10",
+        "hygiea",
+        "11",
+        "parthenope",
+        "12",
+        "victoria",
+        "13",
+        "egeria",
+        "14",
+        "irene",
+        "15",
+        "eunomia",
+        "16",
+        "psyche",
+    }
+)
 
 
 def get_perturber_designations() -> frozenset[str]:
