@@ -16,60 +16,64 @@ import numpy as np
 import numpy.typing as npt
 
 # DE440: Sun, Moon, Mercury–Neptune, Pluto. de441_n16: 16 massive asteroids.
-# Normalized lowercase for case-insensitive matching; orbit_id may be "134340", "Pluto", "1", "Ceres".
-PERTURBER_DESIGNATIONS: frozenset[str] = frozenset(
-    {
-        "sun",
-        "mercury",
-        "venus",
-        "earth",
-        "mars",
-        "jupiter",
-        "saturn",
-        "uranus",
-        "neptune",
-        "moon",
-        "pluto",
-        "134340",
-        "1",
-        "ceres",
-        "2",
-        "pallas",
-        "3",
-        "juno",
-        "4",
-        "vesta",
-        "5",
-        "astraea",
-        "6",
-        "hebe",
-        "7",
-        "iris",
-        "8",
-        "flora",
-        "9",
-        "metis",
-        "10",
-        "hygiea",
-        "11",
-        "parthenope",
-        "12",
-        "victoria",
-        "13",
-        "egeria",
-        "14",
-        "irene",
-        "15",
-        "eunomia",
-        "16",
-        "psyche",
-    }
-)
+# Canonical orbit_id-like designations mapped to NAIF body IDs for warning/reporting.
+PERTURBER_NAIF_IDS: dict[str, int] = {
+    "sun": 10,
+    "mercury": 199,
+    "venus": 299,
+    "earth": 399,
+    "mars": 499,
+    "jupiter": 599,
+    "saturn": 699,
+    "uranus": 799,
+    "neptune": 899,
+    "moon": 301,
+    "pluto": 999,
+    "134340": 999,
+    "1": 2000001,
+    "ceres": 2000001,
+    "2": 2000002,
+    "pallas": 2000002,
+    "3": 2000003,
+    "juno": 2000003,
+    "4": 2000004,
+    "vesta": 2000004,
+    "5": 2000005,
+    "astraea": 2000005,
+    "6": 2000006,
+    "hebe": 2000006,
+    "7": 2000007,
+    "iris": 2000007,
+    "8": 2000008,
+    "flora": 2000008,
+    "9": 2000009,
+    "metis": 2000009,
+    "10": 2000010,
+    "hygiea": 2000010,
+    "11": 2000011,
+    "parthenope": 2000011,
+    "12": 2000012,
+    "victoria": 2000012,
+    "13": 2000013,
+    "egeria": 2000013,
+    "14": 2000014,
+    "irene": 2000014,
+    "15": 2000015,
+    "eunomia": 2000015,
+    "16": 2000016,
+    "psyche": 2000016,
+}
+PERTURBER_DESIGNATIONS: frozenset[str] = frozenset(PERTURBER_NAIF_IDS)
 
 
 def get_perturber_designations() -> frozenset[str]:
     """Return the set of orbit_id-like strings that are ASSIST perturbers (read-only)."""
     return PERTURBER_DESIGNATIONS
+
+
+def get_perturber_naif_ids() -> dict[str, int]:
+    """Return a copy of canonical designation -> NAIF body ID mappings."""
+    return dict(PERTURBER_NAIF_IDS)
 
 
 def _normalize(orbit_id: str) -> str:
@@ -169,6 +173,39 @@ def is_perturber(
     result[mask] = normalized[mask]
     result[~mask] = None
     return result
+
+
+@overload
+def get_perturber_naif_id(
+    orbit_id: str | None | float,
+    *,
+    normalize: bool = True,
+) -> int | None: ...
+
+
+@overload
+def get_perturber_naif_id(
+    orbit_id: npt.NDArray[np.str_] | npt.NDArray[np.object_],
+    *,
+    normalize: bool = True,
+) -> npt.NDArray[np.object_]: ...
+
+
+def get_perturber_naif_id(
+    orbit_id: str | None | float | npt.NDArray[np.str_] | npt.NDArray[np.object_],
+    *,
+    normalize: bool = True,
+) -> int | None | npt.NDArray[np.object_]:
+    """Return the NAIF body ID for matched perturber designation(s), else None."""
+    if isinstance(orbit_id, np.ndarray):
+        matched = is_perturber(orbit_id, normalize=normalize)
+        flat = matched.ravel()
+        return np.array(
+            [PERTURBER_NAIF_IDS[x] if isinstance(x, str) else None for x in flat],
+            dtype=object,
+        ).reshape(matched.shape)
+    matched_scalar = _match_one(orbit_id, normalize=normalize)
+    return PERTURBER_NAIF_IDS[matched_scalar] if matched_scalar is not None else None
 
 
 def unique_perturber_ids_from_candidates(

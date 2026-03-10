@@ -6,6 +6,8 @@ import numpy as np
 
 from adam_assist.perturbers import (
     get_perturber_designations,
+    get_perturber_naif_id,
+    get_perturber_naif_ids,
     is_perturber,
     unique_perturber_ids_from_candidates,
 )
@@ -19,6 +21,36 @@ def test_get_perturber_designations_returns_frozenset() -> None:
     assert "psyche" in out
     assert "ceres" in out
     assert "sun" in out
+
+
+def test_get_perturber_naif_ids_returns_expected_values() -> None:
+    out = get_perturber_naif_ids()
+    assert isinstance(out, dict)
+    assert out["sun"] == 10
+    assert out["pluto"] == 999
+    assert out["134340"] == 999
+    assert out["16"] == 2000016
+    assert out["psyche"] == 2000016
+
+
+def test_get_perturber_naif_id_scalar_matches() -> None:
+    assert get_perturber_naif_id("pluto") == 999
+    assert get_perturber_naif_id("Pluto") == 999
+    assert get_perturber_naif_id("16 Psyche") == 2000016
+    assert get_perturber_naif_id("random") is None
+    assert get_perturber_naif_id(None) is None
+    assert get_perturber_naif_id(np.nan) is None
+
+
+def test_get_perturber_naif_id_array_matches() -> None:
+    arr = np.array(["pluto", "16", "2019 QU127", "Psyche", None], dtype=object)
+    out = get_perturber_naif_id(arr)
+    assert out.shape == arr.shape
+    assert out[0] == 999
+    assert out[1] == 2000016
+    assert out[2] is None
+    assert out[3] == 2000016
+    assert out[4] is None
 
 
 def test_is_perturber_scalar_matches() -> None:
