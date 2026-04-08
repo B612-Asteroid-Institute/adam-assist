@@ -22,8 +22,7 @@ dependencies = [
     "adam-core>=0.5.4",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
-    # Temporary until SPK support is merged and released upstream
-    "assist-adam-fork==1.1.9.post1",
+    "assist==1.2.0",
     "numpy",
     "ray",
     "spiceypy>=6.0.0",
@@ -94,4 +93,3 @@ profile = "black"
 
 [tool.mypy]
 ignore_missing_imports = true
-
