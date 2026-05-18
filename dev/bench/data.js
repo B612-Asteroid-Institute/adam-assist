@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1773168647791,
+  "lastUpdate": 1779121694081,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -435,6 +435,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.11497080193893268",
             "extra": "mean: 21.395467612200015 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "akoumjian@users.noreply.github.com",
+            "name": "Alec Koumjian",
+            "username": "akoumjian"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "37015f44758cd9abbb82514092ee0f00b553bcbc",
+          "message": "Cap ASSIST dependencies for REBOUND 5 (#32)\n\nRequire ASSIST and REBOUND versions that remain compatible with the REBOUND 4 API used by ASSIST.\n\nAlso adds dependency metadata tests, satisfies mypy for pyarrow compute calls, and uses a serialized SBDB orbit fixture for the back-to-back propagation test while retaining broader Horizons/SBDB integration coverage.",
+          "timestamp": "2026-05-18T12:02:16-04:00",
+          "tree_id": "ef47f4c081187991ea8d68125bd3ab41214b6609",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/37015f44758cd9abbb82514092ee0f00b553bcbc"
+        },
+        "date": 1779121693701,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.3748847933949987,
+            "unit": "iter/sec",
+            "range": "stddev: 0.01021727221880276",
+            "extra": "mean: 2.6674861654000095 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 19.447595106111716,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0003552882681716145",
+            "extra": "mean: 51.42023959999733 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 0.4841547353615207,
+            "unit": "iter/sec",
+            "range": "stddev: 0.014178404442531479",
+            "extra": "mean: 2.065455373999998 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 0.47677378194090797,
+            "unit": "iter/sec",
+            "range": "stddev: 0.08018798489000321",
+            "extra": "mean: 2.0974307687999953 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 0.7021259204533791,
+            "unit": "iter/sec",
+            "range": "stddev: 0.012404938552725883",
+            "extra": "mean: 1.424245952000001 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 2.2343225824571054,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0026389258447328677",
+            "extra": "mean: 447.5629471999923 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 2.9961305327712267,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0038249526551335502",
+            "extra": "mean: 333.7638294000044 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.023424052593763078,
+            "unit": "iter/sec",
+            "range": "stddev: 0.20800249704731094",
+            "extra": "mean: 42.69116097640002 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.04596577436502597,
+            "unit": "iter/sec",
+            "range": "stddev: 0.07775436835637452",
+            "extra": "mean: 21.755317163999983 sec\nrounds: 5"
           }
         ]
       }
