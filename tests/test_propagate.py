@@ -5,7 +5,6 @@ import pytest
 from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.coordinates.residuals import Residuals
 from adam_core.orbits import Orbits
-from adam_core.orbits.query import query_sbdb
 from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
 from astropy import units as u
@@ -14,6 +13,7 @@ from adam_assist import ASSISTPropagator
 
 DEFAULT_POSITION_TOLERANCE = (50 * u.m).to(u.au).value
 DEFAULT_VELOCITY_TOLERANCE = (1 * u.mm / u.s).to(u.au / u.day).value
+BACK_TO_BACK_ORBIT_FILE_PATH = "tests/data/2013_RR165_orbit.parquet"
 
 
 OBJECTS = {
@@ -35,7 +35,7 @@ OBJECTS = {
     },
     "2000 PH5": {
         # Accomodate 2 km uncertainty
-        "position": (2 * u.km).to(u.au).value, 
+        "position": (2 * u.km).to(u.au).value,
         "velocity": DEFAULT_VELOCITY_TOLERANCE,
     },
     "1977 HB": {
@@ -131,6 +131,7 @@ OBJECTS = {
     # "A802 FA",
 }
 
+
 @pytest.mark.parametrize("object_id", list(OBJECTS.keys()))
 def test_propagate(object_id):
     """
@@ -153,8 +154,8 @@ def test_propagate(object_id):
     )
 
     ephem_times_difference = pc.subtract(
-        assist_propagated_orbits.coordinates.time.mjd(), 
-        horizons_propagated_orbits.coordinates.time.mjd()
+        assist_propagated_orbits.coordinates.time.mjd(),
+        horizons_propagated_orbits.coordinates.time.mjd(),
     )
     np.testing.assert_array_less(
         np.abs(ephem_times_difference.to_numpy(zero_copy_only=False)),
@@ -177,15 +178,19 @@ def test_propagate(object_id):
     pos_tol = OBJECTS.get(object_id).get("position")
     vel_tol = OBJECTS.get(object_id).get("velocity")
 
-    np.testing.assert_array_less(absolute_position, pos_tol, f"Failed position for {object_id}")
-    np.testing.assert_array_less(absolute_velocity, vel_tol, f"Failed velocity for {object_id}")
+    np.testing.assert_array_less(
+        absolute_position, pos_tol, f"Failed position for {object_id}"
+    )
+    np.testing.assert_array_less(
+        absolute_velocity, vel_tol, f"Failed velocity for {object_id}"
+    )
 
 
 def test_propagate_different_input_times(mocker):
     """
     Ensure that we can pass in vectors with different epochs
     """
-    
+
     prop = ASSISTPropagator()
     watched_propagate_orbits_inner = mocker.spy(prop, "_propagate_orbits_inner")
     orbits = Orbits.from_kwargs(
@@ -204,23 +209,29 @@ def test_propagate_different_input_times(mocker):
         ),
     )
 
-    propagated_orbits = prop.propagate_orbits(orbits, Timestamp.from_mjd([60005, 60006], scale="tdb"))
+    propagated_orbits = prop.propagate_orbits(
+        orbits, Timestamp.from_mjd([60005, 60006], scale="tdb")
+    )
 
-    assert watched_propagate_orbits_inner.call_count == 2, "Inner function should be called once for each unique input epoch"
+    assert (
+        watched_propagate_orbits_inner.call_count == 2
+    ), "Inner function should be called once for each unique input epoch"
 
     assert len(propagated_orbits.coordinates.time.unique()) == 2
-    assert len(propagated_orbits) == 8, "Should have input orbits x epochs number of results"
+    assert (
+        len(propagated_orbits) == 8
+    ), "Should have input orbits x epochs number of results"
 
 
 def test_back_to_back_propagations():
     """
-    Ensure that back-to-back multiprocessed propagations work. This test should 
+    Ensure that back-to-back multiprocessed propagations work. This test should
     fail at the moment since the ray remote cannot initialize a propagator object with an already
     defined simulation.
 
     """
     prop = ASSISTPropagator()
-    orbits = query_sbdb(["2013 RR165"])
+    orbits = Orbits.from_parquet(BACK_TO_BACK_ORBIT_FILE_PATH)
 
     time = Timestamp.from_mjd([60000], scale="tdb")
     first_prop = prop.propagate_orbits(orbits, time, max_processes=1)
