@@ -13,6 +13,7 @@ from adam_assist import ASSISTPropagator
 
 DEFAULT_POSITION_TOLERANCE = (50 * u.m).to(u.au).value
 DEFAULT_VELOCITY_TOLERANCE = (1 * u.mm / u.s).to(u.au / u.day).value
+BACK_TO_BACK_ORBIT_FILE_PATH = "tests/data/2013_RR165_orbit.parquet"
 
 
 OBJECTS = {
@@ -230,23 +231,9 @@ def test_back_to_back_propagations():
 
     """
     prop = ASSISTPropagator()
-    orbits = Orbits.from_kwargs(
-        orbit_id=["1"],
-        object_id=["1"],
-        coordinates=CartesianCoordinates.from_kwargs(
-            x=[1],
-            y=[1],
-            z=[1],
-            vx=[1],
-            vy=[1],
-            vz=[1],
-            time=Timestamp.from_mjd([60000], scale="tdb"),
-            frame="ecliptic",
-            origin=Origin.from_kwargs(code=["SOLAR_SYSTEM_BARYCENTER"]),
-        ),
-    )
+    orbits = Orbits.from_parquet(BACK_TO_BACK_ORBIT_FILE_PATH)
 
-    time = Timestamp.from_mjd([60001], scale="tdb")
+    time = Timestamp.from_mjd([60000], scale="tdb")
     first_prop = prop.propagate_orbits(orbits, time, max_processes=1)
 
     # Propagator has to be pickleable, which uses __getstate__ and __setstate__
