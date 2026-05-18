@@ -40,6 +40,13 @@ except ImportError:
 # adam_core defines it in au but we need it in km
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
+# pyarrow.compute type stubs are incomplete for the functions used here.
+pc_cast: Any = pc.cast
+pc_invert: Any = pc.invert  # type: ignore[attr-defined]
+pc_is_in: Any = pc.is_in  # type: ignore[attr-defined]
+pc_subtract: Any = pc.subtract  # type: ignore[attr-defined]
+pc_unique: Any = pc.unique  # type: ignore[attr-defined]
+
 
 def uint32_hash(s: str) -> c_uint32:
     sha256_result = hashlib.sha256(s.encode()).digest()
@@ -290,8 +297,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
 
         if is_variant:
-            orbit_ids_out = pa.repeat(pc.cast(orbit_id, pa.large_string()), N)
-            variant_ids_out = pa.repeat(pc.cast(variant_id, pa.large_string()), N)
+            orbit_ids_out = pa.repeat(pc_cast(orbit_id, pa.large_string()), N)
+            variant_ids_out = pa.repeat(pc_cast(variant_id, pa.large_string()), N)
             object_id_out = pa.repeat(orbit.object_id[0], N)
             weights_out = pa.repeat(orbit.weights[0], N)
             weights_cov_out = pa.repeat(orbit.weights_cov[0], N)
@@ -319,7 +326,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 ),
             )
         else:
-            orbit_ids_out = pa.repeat(pc.cast(orbit_id, pa.large_string()), N)
+            orbit_ids_out = pa.repeat(pc_cast(orbit_id, pa.large_string()), N)
             object_id_out = pa.repeat(orbit.object_id[0], N)
             physical_parameters_out = orbit.physical_parameters.take(
                 np.zeros(N, dtype=np.int64)
@@ -408,7 +415,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
         # Prepare the times as jd - jd_ref
         integrator_times = times.rescale("tdb").jd()
-        integrator_times = pc.subtract(integrator_times, ephem.jd_ref)
+        integrator_times = pc_subtract(integrator_times, ephem.jd_ref)
         integrator_times = integrator_times.to_numpy()
 
         # Unified accumulation for both Orbits and VariantOrbits
@@ -532,7 +539,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         conditions: CollisionConditions,
     ) -> Tuple[VariantOrbits, CollisionEvent]:
         # Assert that the time for each orbit definition is the same for the simulator to work
-        assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
+        assert len(pc_unique(orbits.coordinates.time.mjd())) == 1
 
         # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
         # This is also the native coordinate system for the JPL binary files.
@@ -807,12 +814,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                             # For some reason, it fails if we let rebound convert the hash to c_uint32
 
                         if isinstance(orbits, VariantOrbits):
-                            keep_mask = pc.invert(
-                                pc.is_in(orbits.variant_id, colliding_orbits.variant_id)
+                            keep_mask = pc_invert(
+                                pc_is_in(orbits.variant_id, colliding_orbits.variant_id)
                             )
                         else:
-                            keep_mask = pc.invert(
-                                pc.is_in(orbits.orbit_id, colliding_orbits.orbit_id)
+                            keep_mask = pc_invert(
+                                pc_is_in(orbits.orbit_id, colliding_orbits.orbit_id)
                             )
 
                         orbits = orbits.apply_mask(keep_mask)
@@ -836,12 +843,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 results_list.append(time_step_results)
             else:
                 if isinstance(orbits, Orbits):
-                    still_in_simulation = pc.invert(
-                        pc.is_in(time_step_results.orbit_id, colliders.orbit_id)
+                    still_in_simulation = pc_invert(
+                        pc_is_in(time_step_results.orbit_id, colliders.orbit_id)
                     )
                 elif isinstance(orbits, VariantOrbits):
-                    still_in_simulation = pc.invert(
-                        pc.is_in(time_step_results.variant_id, colliders.variant_id)
+                    still_in_simulation = pc_invert(
+                        pc_is_in(time_step_results.variant_id, colliders.variant_id)
                     )
                 addl = time_step_results.apply_mask(still_in_simulation)
                 results_list.append(addl)
