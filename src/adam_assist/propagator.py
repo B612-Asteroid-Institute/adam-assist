@@ -127,6 +127,94 @@ def generate_unique_separator(
     )
 
 
+def _nongrav_column_to_numpy(column: Any, length: int) -> npt.NDArray[np.object_]:
+    values = column.to_pylist()
+    if len(values) != length:
+        raise ValueError(
+            f"Expected non-gravitational parameter column of length {length}, got {len(values)}"
+        )
+    return np.array(values, dtype=object)
+
+
+def _extract_assist_particle_params(
+    orbits: OrbitType,
+) -> Union[None, npt.NDArray[np.float64]]:
+    nongrav = getattr(orbits, "non_gravitational_parameters", None)
+    if nongrav is None or len(orbits) == 0:
+        return None
+
+    estimated_parameter_names = _nongrav_column_to_numpy(
+        nongrav.estimated_parameter_names, len(orbits)
+    )
+    unsupported_estimated = set()
+    for names in estimated_parameter_names:
+        if names is None:
+            continue
+        for name in str(names).split(","):
+            stripped = name.strip()
+            if stripped and stripped not in {"A1", "A2", "A3"}:
+                unsupported_estimated.add(stripped)
+    if unsupported_estimated:
+        raise ValueError(
+            "ASSISTPropagator only supports Marsden-style A1/A2/A3 non-gravitational "
+            f"parameters. Unsupported estimated parameters are present: {', '.join(sorted(unsupported_estimated))}."
+        )
+
+    a1 = _nongrav_column_to_numpy(nongrav.A1, len(orbits))
+    a2 = _nongrav_column_to_numpy(nongrav.A2, len(orbits))
+    a3 = _nongrav_column_to_numpy(nongrav.A3, len(orbits))
+    has_supported_values = np.array(
+        [
+            (a1_i is not None) or (a2_i is not None) or (a3_i is not None)
+            for a1_i, a2_i, a3_i in zip(a1, a2, a3)
+        ],
+        dtype=bool,
+    )
+    if not np.any(has_supported_values):
+        metadata_fields = (
+            "source",
+            "model",
+            "solution_dimension",
+            "parameter_count",
+            "estimated_parameter_names",
+        )
+        if any(
+            any(
+                v is not None
+                for v in _nongrav_column_to_numpy(
+                    getattr(nongrav, field), len(orbits)
+                )
+            )
+            for field in metadata_fields
+        ):
+            raise ValueError(
+                "ASSISTPropagator received non-gravitational metadata without usable "
+                "A1/A2/A3 values. Only Marsden-style A1/A2/A3 propagation is supported."
+            )
+        return None
+
+    particle_params = np.zeros((len(orbits), 3), dtype=np.float64)
+    for i, (a1_i, a2_i, a3_i) in enumerate(zip(a1, a2, a3)):
+        particle_params[i, 0] = 0.0 if a1_i is None else float(a1_i)
+        particle_params[i, 1] = 0.0 if a2_i is None else float(a2_i)
+        particle_params[i, 2] = 0.0 if a3_i is None else float(a3_i)
+    return particle_params.reshape(-1)
+
+
+def _configure_assist_non_gravitational_forces(
+    extras: assist.Extras, orbits: OrbitType
+) -> None:
+    particle_params = _extract_assist_particle_params(orbits)
+    if particle_params is None:
+        return
+
+    current_forces = list(extras.forces)
+    if "NON_GRAVITATIONAL" not in current_forces:
+        current_forces.append("NON_GRAVITATIONAL")
+        extras.forces = current_forces
+    extras.particle_params = particle_params
+
+
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
 
     def __init__(
@@ -248,7 +336,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             orbit_id = str(orbit.orbit_id.to_numpy(zero_copy_only=False)[0])
             particle_hash = uint32_hash(orbit_id)
 
-        assist.Extras(sim, ephem)
+        extras = assist.Extras(sim, ephem)
+        _configure_assist_non_gravitational_forces(extras, orbit)
 
         # Add single particle
         coords = orbit.coordinates
@@ -305,6 +394,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             physical_parameters_out = orbit.physical_parameters.take(
                 np.zeros(N, dtype=np.int64)
             )
+            non_gravitational_parameters_out = orbit.non_gravitational_parameters.take(
+                np.zeros(N, dtype=np.int64)
+            )
 
             return VariantOrbits.from_kwargs(
                 orbit_id=orbit_ids_out,
@@ -313,6 +405,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 weights=weights_out,
                 weights_cov=weights_cov_out,
                 physical_parameters=physical_parameters_out,
+                non_gravitational_parameters=non_gravitational_parameters_out,
                 coordinates=CartesianCoordinates.from_kwargs(
                     x=xyzvxvyvz[:, 0],
                     y=xyzvxvyvz[:, 1],
@@ -331,6 +424,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             physical_parameters_out = orbit.physical_parameters.take(
                 np.zeros(N, dtype=np.int64)
             )
+            non_gravitational_parameters_out = orbit.non_gravitational_parameters.take(
+                np.zeros(N, dtype=np.int64)
+            )
 
             return Orbits.from_kwargs(
                 coordinates=CartesianCoordinates.from_kwargs(
@@ -347,6 +443,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 orbit_id=orbit_ids_out,
                 object_id=object_id_out,
                 physical_parameters=physical_parameters_out,
+                non_gravitational_parameters=non_gravitational_parameters_out,
             )
 
     def _propagate_orbits_inner(
@@ -394,7 +491,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         position_arrays = coords.r  # x, y, z columns
         velocity_arrays = coords.v  # vx, vy, vz columns
 
-        assist.Extras(sim, ephem)
+        extras = assist.Extras(sim, ephem)
+        _configure_assist_non_gravitational_forces(extras, orbits)
 
         for i in range(len(position_arrays)):
             sim.add(
@@ -480,6 +578,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 physical_parameters_out = orbits.physical_parameters.take(
                     np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
                 )
+                non_gravitational_parameters_out = (
+                    orbits.non_gravitational_parameters.take(
+                        np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
+                    )
+                )
 
                 results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids_out,
@@ -488,6 +591,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     weights=weights_out,
                     weights_cov=weights_cov_out,
                     physical_parameters=physical_parameters_out,
+                    non_gravitational_parameters=non_gravitational_parameters_out,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=xyzvxvyvz[:, 0],
                         y=xyzvxvyvz[:, 1],
@@ -510,6 +614,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 physical_parameters_out = orbits.physical_parameters.take(
                     np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
                 )
+                non_gravitational_parameters_out = (
+                    orbits.non_gravitational_parameters.take(
+                        np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
+                    )
+                )
 
                 results = Orbits.from_kwargs(
                     coordinates=CartesianCoordinates.from_kwargs(
@@ -526,6 +635,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbit_id=orbit_ids_out,
                     object_id=object_id_out,
                     physical_parameters=physical_parameters_out,
+                    non_gravitational_parameters=non_gravitational_parameters_out,
                 )
 
         # Store the last simulation in a private variable for reference
@@ -601,7 +711,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         position_arrays = coords.r  # x, y, z columns
         velocity_arrays = coords.v  # vx, vy, vz columns
 
-        assist.Extras(sim, ephem)
+        extras = assist.Extras(sim, ephem)
+        _configure_assist_non_gravitational_forces(extras, orbits)
 
         for i in range(len(position_arrays)):
             sim.add(
@@ -681,6 +792,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbit_id=orbit_ids,
                     object_id=orbits.object_id,
                     physical_parameters=orbits.physical_parameters,
+                    non_gravitational_parameters=orbits.non_gravitational_parameters,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
@@ -702,6 +814,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     weights=orbits.weights,
                     weights_cov=orbits.weights_cov,
                     physical_parameters=orbits.physical_parameters,
+                    non_gravitational_parameters=orbits.non_gravitational_parameters,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=step_xyzvxvyvz[:, 0],
                         y=step_xyzvxvyvz[:, 1],
