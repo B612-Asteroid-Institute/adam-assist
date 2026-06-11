@@ -237,3 +237,82 @@ def test_configure_assist_non_gravitational_forces_appends_force_and_params():
         extras.particle_params,
         [0.0, -8.72e-14, 0.0, 0.0, -2.90e-14, 0.0],
     )
+
+
+def test_extract_assist_particle_params_ignores_source_metadata_without_estimates():
+    # Catalogs commonly stamp source/dimension metadata on every row (NEOCC
+    # always emits an LSP line; mpcq stamps its source). Rows without
+    # estimated parameters and without A1/A2/A3 values are gravity-only and
+    # must not raise.
+    orbits = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["NEOCC", "MPCQ"],
+            model=[None, None],
+            solution_dimension=[6, None],
+            parameter_count=[None, None],
+            estimated_parameter_names=[None, None],
+            A1=[None, None],
+            A1_sigma=[None, None],
+            A2=[None, None],
+            A2_sigma=[None, None],
+            A3=[None, None],
+            A3_sigma=[None, None],
+            DT=[None, None],
+            DT_sigma=[None, None],
+            R0=[None, None],
+            R0_sigma=[None, None],
+            ALN=[None, None],
+            ALN_sigma=[None, None],
+            NK=[None, None],
+            NK_sigma=[None, None],
+            NM=[None, None],
+            NM_sigma=[None, None],
+            NN=[None, None],
+            NN_sigma=[None, None],
+            AMRAT=[None, None],
+            AMRAT_sigma=[None, None],
+            RHO=[None, None],
+            RHO_sigma=[None, None],
+        )
+    )
+
+    assert _extract_assist_particle_params(orbits) is None
+
+
+def test_extract_assist_particle_params_rejects_non_default_marsden_constants():
+    # A cometary solution fit with the Marsden g(r) constants is not valid
+    # under ASSIST's g(r) = (1 au / r)^2 force law.
+    orbits = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "SBDB"],
+            model=["nongrav", "cometary"],
+            solution_dimension=[7, 9],
+            parameter_count=[1, 3],
+            estimated_parameter_names=["A2", "A1,A2,A3"],
+            A1=[None, 1.04e-9],
+            A1_sigma=[None, None],
+            A2=[-2.9e-14, -6.7e-11],
+            A2_sigma=[None, None],
+            A3=[None, 2.9e-10],
+            A3_sigma=[None, None],
+            DT=[None, None],
+            DT_sigma=[None, None],
+            R0=[None, 2.808],
+            R0_sigma=[None, None],
+            ALN=[None, 0.1112620426],
+            ALN_sigma=[None, None],
+            NK=[None, 4.6142],
+            NK_sigma=[None, None],
+            NM=[None, 2.15],
+            NM_sigma=[None, None],
+            NN=[None, 5.093],
+            NN_sigma=[None, None],
+            AMRAT=[None, None],
+            AMRAT_sigma=[None, None],
+            RHO=[None, None],
+            RHO_sigma=[None, None],
+        )
+    )
+
+    with pytest.raises(ValueError, match="not valid under ASSIST"):
+        _extract_assist_particle_params(orbits)

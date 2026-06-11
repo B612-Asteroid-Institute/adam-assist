@@ -19,6 +19,9 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
+    # TODO: bump to the first adam-core release that includes
+    # non_gravitational_parameters / solved_state_covariance columns
+    # (adam_core PR #201) before releasing this package.
     "adam-core>=0.5.4",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
