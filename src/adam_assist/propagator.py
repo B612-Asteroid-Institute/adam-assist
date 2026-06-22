@@ -192,9 +192,7 @@ def _extract_assist_particle_params(
     missing_value_rows = [
         i
         for i, names in enumerate(estimated_parameter_names)
-        if names is not None
-        and str(names).strip()
-        and not has_supported_values[i]
+        if names is not None and str(names).strip() and not has_supported_values[i]
     ]
     if missing_value_rows:
         raise ValueError(
