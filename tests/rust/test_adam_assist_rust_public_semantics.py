@@ -65,12 +65,16 @@ def test_same_epoch_multi_orbit_fast_path_matches_python_public(
         max_processes=1,
         chunk_size=10,
     )
-    actual = RustASSISTPropagator().propagate_orbits(
+    propagator = RustASSISTPropagator()
+    actual = propagator.propagate_orbits(
         orbits,
         times,
         max_processes=1,
         chunk_size=10,
     )
+    operation, samples = propagator.benchmark_last_native(2, 2, 1)
+    assert operation == "propagation"
+    assert all(sample > 0.0 for trial in samples for sample in trial)
 
     assert actual.orbit_id.to_pylist() == expected.orbit_id.to_pylist()
     np.testing.assert_array_equal(

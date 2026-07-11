@@ -27,8 +27,8 @@ from adam_core.utils.helpers.orbits import make_real_orbits  # noqa: E402
 
 from adam_assist import ASSISTPropagator as RustASSISTPropagator  # noqa: E402
 from migration.parity._assist_bench import (  # noqa: E402
-    NATIVE_RUST_TODO,
     percentiles,
+    time_native_rust,
     time_rust,
 )
 from migration.parity._assist_oracle import (  # noqa: E402
@@ -55,7 +55,7 @@ def main() -> int:
 
     legacy = LegacyAssistPropagator()
     rust = RustASSISTPropagator()
-    rows: list[tuple[str, list[float], list[float]]] = []
+    rows: list[tuple[str, list[float], list[float], list[float]]] = []
 
     targets = Timestamp.from_mjd([EPOCH_MJD + 0.5, EPOCH_MJD + 1.0], scale="tdb")
     for label, n in [("propagate 1x2", 1), ("propagate 20x2", 20)]:
@@ -68,7 +68,8 @@ def main() -> int:
             repeats=REPEATS,
             warmups=WARMUPS,
         )
-        rows.append((label, legacy_s, rust_s))
+        _, native_s = time_native_rust(rust, repeats=REPEATS, warmups=WARMUPS)
+        rows.append((label, legacy_s, rust_s, native_s))
 
     orbits = _common_epoch_orbits(5)
     eph_times = Timestamp.from_mjd([EPOCH_MJD + 0.5, EPOCH_MJD + 1.0], scale="utc")
@@ -84,7 +85,8 @@ def main() -> int:
         repeats=REPEATS,
         warmups=WARMUPS,
     )
-    rows.append(("ephemeris 5x2obs", legacy_s, rust_s))
+    _, native_s = time_native_rust(rust, repeats=REPEATS, warmups=WARMUPS)
+    rows.append(("ephemeris 5x2obs", legacy_s, rust_s, native_s))
 
     header = (
         f"{'lane':18} {'legacy50':>11} {'current-py50':>13} {'native-rust50':>22} "
@@ -95,12 +97,13 @@ def main() -> int:
     )
     print(header)
     print("-" * len(header))
-    for label, legacy_s, rust_s in rows:
+    for label, legacy_s, rust_s, native_s in rows:
         lp50, lp95 = percentiles(legacy_s)
         rp50, rp95 = percentiles(rust_s)
+        np50, _ = percentiles(native_s)
         print(
             f"{label:18} {lp50 * 1e3:>9.2f}ms {rp50 * 1e3:>11.2f}ms "
-            f"{'— (' + NATIVE_RUST_TODO + ')':>22} {lp50 / rp50:>10.2f}x "
+            f"{np50 * 1e3:>20.2f}ms {lp50 / rp50:>10.2f}x "
             f"{lp95 * 1e3:>9.2f}ms {rp95 * 1e3:>11.2f}ms {lp95 / rp95:>10.2f}x"
         )
     return 0

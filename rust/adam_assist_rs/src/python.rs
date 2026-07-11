@@ -1,7 +1,7 @@
 #![allow(clippy::useless_conversion)] // PyO3 0.22 macro expansion trips this lint on generated wrappers.
 
 use crate::AssistPropagator as RustAssistPropagator;
-use crate::{map_origin_code_to_assist_body, CollisionConditionSpec};
+use crate::{map_origin_code_to_assist_body, CollisionConditionSpec, CollisionDetectionOutput};
 use adam_core_rs_coords::propagation::fit_orbit_least_squares_barycentric;
 use adam_core_rs_coords::propagation::{
     CovariancePropagation, EpochPolicy, PropagationOptions, PropagationRequest, PropagationResult,
@@ -24,8 +24,10 @@ use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::hint::black_box;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 struct PythonTimeProvider;
 
@@ -39,10 +41,60 @@ impl TimeScaleProvider for PythonTimeProvider {
     }
 }
 
+#[derive(Clone)]
+enum PreparedPropagationInput {
+    Orbits(OrbitBatch),
+    Variants(OrbitVariantBatch),
+}
+
+#[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
+enum NativeBenchmark {
+    Propagation {
+        input: PreparedPropagationInput,
+        target_times: TimeArray,
+        options: PropagationOptions,
+        covariance_method: OrbitVariantSamplingMethod,
+        num_samples: usize,
+        seed: Option<u64>,
+        sampled_covariance: bool,
+    },
+    Ephemeris {
+        orbits: OrbitBatch,
+        observers: ObserverBatch,
+        options: EphemerisOptions,
+        covariance_method: OrbitVariantSamplingMethod,
+        num_samples: usize,
+        seed: Option<u64>,
+        sampled_covariance: bool,
+    },
+    Collisions {
+        states: Vec<[f64; 6]>,
+        epoch_jd_tdb: f64,
+        final_jd_tdb: f64,
+        conditions: Vec<CollisionConditionSpec>,
+    },
+}
+
+impl NativeBenchmark {
+    fn operation(&self) -> &'static str {
+        match self {
+            Self::Propagation {
+                sampled_covariance: true,
+                ..
+            } => "sampled_covariance",
+            Self::Propagation { .. } => "propagation",
+            Self::Ephemeris { .. } => "ephemeris",
+            Self::Collisions { .. } => "collisions",
+        }
+    }
+}
+
 #[pyclass]
 struct NativeAssistPropagator {
     inner: RustAssistPropagator,
     spice: AdamCoreSpiceBackend,
+    benchmark: Mutex<Option<NativeBenchmark>>,
 }
 
 #[pymethods]
@@ -89,7 +141,53 @@ impl NativeAssistPropagator {
                 integrator,
             ),
             spice,
+            benchmark: Mutex::new(None),
         })
+    }
+
+    /// Time the most recently prepared public ASSIST operation entirely in
+    /// Rust. PyO3/NumPy input and output conversion stay outside samples.
+    #[pyo3(signature = (reps, trials, warmup_reps=1))]
+    fn benchmark_last_native(
+        &self,
+        py: Python<'_>,
+        reps: usize,
+        trials: usize,
+        warmup_reps: usize,
+    ) -> PyResult<(String, Vec<Vec<f64>>)> {
+        if reps == 0 || trials == 0 {
+            return Err(PyValueError::new_err("reps and trials must be >= 1"));
+        }
+        let benchmark = self
+            .benchmark
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("native benchmark lock is poisoned"))?
+            .clone()
+            .ok_or_else(|| {
+                PyValueError::new_err(
+                    "no prepared ASSIST operation; call a public backend method first",
+                )
+            })?;
+        let operation = benchmark.operation().to_string();
+        let samples = py
+            .allow_threads(|| {
+                let mut trial_samples = Vec::with_capacity(trials);
+                for _ in 0..trials {
+                    for _ in 0..warmup_reps {
+                        run_native_benchmark(self, &benchmark)?;
+                    }
+                    let mut samples = Vec::with_capacity(reps);
+                    for _ in 0..reps {
+                        let started = Instant::now();
+                        run_native_benchmark(self, &benchmark)?;
+                        samples.push(started.elapsed().as_secs_f64());
+                    }
+                    trial_samples.push(samples);
+                }
+                Ok::<_, String>(trial_samples)
+            })
+            .map_err(py_runtime_error)?;
+        Ok((operation, samples))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -240,60 +338,19 @@ impl NativeAssistPropagator {
                 g,
             },
         };
-        let result = py
-            .allow_threads(|| {
-                self.inner.generate_ephemeris(
-                    &orbits,
-                    &observers,
-                    &options,
-                    &PythonTimeProvider,
-                    &self.spice,
-                )
-            })
-            .map_err(py_runtime_error)?;
-        // Public covariance ephemeris mirrors Python adam_assist / adam_core:
-        // sample orbit variants, generate ephemeris for each, and collapse the
-        // variant topocentric-spherical (+ aberrated) coordinates to per-row
-        // covariance on the nominal ephemeris -- all inside this one crossing.
-        let result = if covariance {
-            let method = parse_covariance_method(covariance_method)?;
-            let variant_samples =
-                create_sampled_orbit_variants(&orbits, method, num_samples, seed, 1.0, 0.0, 0.0)
-                    .map_err(py_value_error)?;
-            let variant_orbits = OrbitBatch::new(
-                variant_samples.variants.orbit_id.clone(),
-                variant_samples.variants.object_id.clone(),
-                variant_samples.variants.coordinates.clone(),
-            )
-            .map_err(py_value_error)?;
-            let variant_result = py
-                .allow_threads(|| {
-                    self.inner.generate_ephemeris(
-                        &variant_orbits,
-                        &observers,
-                        &options,
-                        &PythonTimeProvider,
-                        &self.spice,
-                    )
-                })
-                .map_err(py_runtime_error)?;
-            let weights_cov: Vec<f64> = variant_samples
-                .variants
-                .weights_cov
-                .iter()
-                .map(|weight| weight.unwrap_or(0.0))
-                .collect();
-            collapse_variant_ephemeris(
-                &result,
-                &variant_result,
-                &variant_samples.source_orbit_indices,
-                &weights_cov,
-                observers.coordinates.len(),
-            )
-            .map_err(py_value_error)?
-        } else {
-            result
+        let benchmark = NativeBenchmark::Ephemeris {
+            orbits,
+            observers,
+            options,
+            covariance_method: parse_covariance_method(covariance_method)?,
+            num_samples,
+            seed,
+            sampled_covariance: covariance,
         };
+        let result = py
+            .allow_threads(|| run_ephemeris_benchmark(self, &benchmark))
+            .map_err(py_runtime_error)?;
+        self.store_benchmark(benchmark)?;
         ephemeris_result_to_dict(py, &result)
     }
 
@@ -537,19 +594,16 @@ impl NativeAssistPropagator {
                 stopping,
             });
         }
-        let states = states_from_pyarray(states)?;
+        let benchmark = NativeBenchmark::Collisions {
+            states: states_from_pyarray(states)?,
+            epoch_jd_tdb,
+            final_jd_tdb,
+            conditions,
+        };
         let output = py
-            .allow_threads(|| {
-                self.inner.detect_collisions_same_epoch(
-                    &states,
-                    epoch_jd_tdb,
-                    final_jd_tdb,
-                    &conditions,
-                )
-            })
-            .map_err(|err| {
-                PyRuntimeError::new_err(format!("assist collision detection failed: {err}"))
-            })?;
+            .allow_threads(|| run_collision_benchmark(self, &benchmark))
+            .map_err(py_runtime_error)?;
+        self.store_benchmark(benchmark)?;
 
         let dict = PyDict::new_bound(py);
         dict.set_item(
@@ -659,7 +713,7 @@ impl NativeAssistPropagator {
             epoch_policy: EpochPolicy::CrossProduct,
             covariance: CovariancePropagation::None,
         };
-        let result = match variant_ids {
+        let input = match variant_ids {
             Some(variant_ids) => {
                 if covariance {
                     return Err(PyValueError::new_err(
@@ -671,102 +725,252 @@ impl NativeAssistPropagator {
                 let weights_cov = weights_cov.ok_or_else(|| {
                     PyValueError::new_err("variant propagation requires weights_cov")
                 })?;
-                let variants = OrbitVariantBatch::new(
+                PreparedPropagationInput::Variants(
+                    OrbitVariantBatch::new(
+                        orbit_ids.into_iter().map(OrbitId).collect(),
+                        object_ids
+                            .into_iter()
+                            .map(|value| value.map(ObjectId))
+                            .collect(),
+                        variant_ids
+                            .into_iter()
+                            .map(|value| value.map(VariantId))
+                            .collect(),
+                        weights,
+                        weights_cov,
+                        coordinates,
+                    )
+                    .map_err(py_value_error)?,
+                )
+            }
+            None => PreparedPropagationInput::Orbits(
+                OrbitBatch::new(
                     orbit_ids.into_iter().map(OrbitId).collect(),
                     object_ids
                         .into_iter()
                         .map(|value| value.map(ObjectId))
                         .collect(),
-                    variant_ids
-                        .into_iter()
-                        .map(|value| value.map(VariantId))
-                        .collect(),
-                    weights,
-                    weights_cov,
                     coordinates,
                 )
-                .map_err(py_value_error)?;
-                let request = PropagationRequest::new_variants(&variants, &target_times, options)
-                    .map_err(py_runtime_error)?;
-                py.allow_threads(|| self.inner.propagate(&request, &PythonTimeProvider))
-                    .map_err(py_runtime_error)?
-            }
-            None => {
-                let orbits = OrbitBatch::new(
-                    orbit_ids.into_iter().map(OrbitId).collect(),
-                    object_ids
-                        .into_iter()
-                        .map(|value| value.map(ObjectId))
-                        .collect(),
-                    coordinates,
-                )
-                .map_err(py_value_error)?;
-                if covariance {
-                    propagate_with_sampled_covariance(
-                        py,
-                        &self.inner,
-                        &orbits,
-                        &target_times,
-                        options,
-                        covariance_method,
-                        num_samples,
-                        seed,
-                    )?
-                } else {
-                    let request = PropagationRequest::new(&orbits, &target_times, options)
-                        .map_err(py_runtime_error)?;
-                    py.allow_threads(|| self.inner.propagate(&request, &PythonTimeProvider))
-                        .map_err(py_runtime_error)?
-                }
-            }
+                .map_err(py_value_error)?,
+            ),
         };
+        let benchmark = NativeBenchmark::Propagation {
+            input,
+            target_times,
+            options,
+            covariance_method: parse_covariance_method(covariance_method)?,
+            num_samples,
+            seed,
+            sampled_covariance: covariance,
+        };
+        let result = py
+            .allow_threads(|| run_propagation_benchmark(self, &benchmark))
+            .map_err(py_runtime_error)?;
+        self.store_benchmark(benchmark)?;
         propagation_result_to_dict(py, &result)
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn propagate_with_sampled_covariance(
-    py: Python<'_>,
+impl NativeAssistPropagator {
+    fn store_benchmark(&self, benchmark: NativeBenchmark) -> PyResult<()> {
+        *self
+            .benchmark
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("native benchmark lock is poisoned"))? =
+            Some(benchmark);
+        Ok(())
+    }
+}
+
+fn propagate_with_sampled_covariance_native(
     propagator: &RustAssistPropagator,
     orbits: &OrbitBatch,
     target_times: &TimeArray,
     mut options: PropagationOptions,
-    covariance_method: &str,
+    method: OrbitVariantSamplingMethod,
     num_samples: usize,
     seed: Option<u64>,
-) -> PyResult<PropagationResult> {
-    let method = parse_covariance_method(covariance_method)?;
+) -> Result<PropagationResult, String> {
     if orbits.coordinates.covariance.is_none() {
-        return Err(PyValueError::new_err(
-            "covariance=True requires input coordinate covariance rows",
-        ));
+        return Err("covariance=True requires input coordinate covariance rows".to_string());
     }
-    // Public covariance mirrors Python `adam_assist`: sample variants, propagate them,
-    // and collapse to nominal covariance. The lower-level ASSIST STM transport
-    // (`CovariancePropagation::Linearized`) is intentionally NOT used here; it stays a
-    // separate typed Rust-trait surface (see `AssistPropagator::supports`). The public
-    // path therefore forces `None` and owns covariance via sampled variants.
     options.covariance = CovariancePropagation::None;
     let variant_samples =
         create_sampled_orbit_variants(orbits, method, num_samples, seed, 1.0, 0.0, 0.0)
-            .map_err(py_value_error)?;
-    let nominal_request =
-        PropagationRequest::new(orbits, target_times, options.clone()).map_err(py_runtime_error)?;
-    let nominal = py
-        .allow_threads(|| propagator.propagate(&nominal_request, &PythonTimeProvider))
-        .map_err(py_runtime_error)?;
+            .map_err(|err| err.to_string())?;
+    let nominal_request = PropagationRequest::new(orbits, target_times, options.clone())
+        .map_err(|err| err.to_string())?;
+    let nominal = propagator
+        .propagate(&nominal_request, &PythonTimeProvider)
+        .map_err(|err| err.to_string())?;
     let variant_request =
         PropagationRequest::new_variants(&variant_samples.variants, target_times, options)
-            .map_err(py_runtime_error)?;
-    let propagated_variants = py
-        .allow_threads(|| propagator.propagate(&variant_request, &PythonTimeProvider))
-        .map_err(py_runtime_error)?;
+            .map_err(|err| err.to_string())?;
+    let propagated_variants = propagator
+        .propagate(&variant_request, &PythonTimeProvider)
+        .map_err(|err| err.to_string())?;
     collapse_propagated_variants_to_orbits(
         &nominal,
         &propagated_variants,
         &variant_samples.source_orbit_indices,
     )
-    .map_err(py_runtime_error)
+    .map_err(|err| err.to_string())
+}
+
+fn run_propagation_benchmark(
+    propagator: &NativeAssistPropagator,
+    benchmark: &NativeBenchmark,
+) -> Result<PropagationResult, String> {
+    let NativeBenchmark::Propagation {
+        input,
+        target_times,
+        options,
+        covariance_method,
+        num_samples,
+        seed,
+        sampled_covariance,
+    } = benchmark
+    else {
+        return Err("prepared benchmark is not propagation".to_string());
+    };
+    match input {
+        PreparedPropagationInput::Orbits(orbits) if *sampled_covariance => {
+            propagate_with_sampled_covariance_native(
+                &propagator.inner,
+                orbits,
+                target_times,
+                options.clone(),
+                *covariance_method,
+                *num_samples,
+                *seed,
+            )
+        }
+        PreparedPropagationInput::Orbits(orbits) => {
+            let request = PropagationRequest::new(orbits, target_times, options.clone())
+                .map_err(|err| err.to_string())?;
+            propagator
+                .inner
+                .propagate(&request, &PythonTimeProvider)
+                .map_err(|err| err.to_string())
+        }
+        PreparedPropagationInput::Variants(variants) => {
+            let request = PropagationRequest::new_variants(variants, target_times, options.clone())
+                .map_err(|err| err.to_string())?;
+            propagator
+                .inner
+                .propagate(&request, &PythonTimeProvider)
+                .map_err(|err| err.to_string())
+        }
+    }
+}
+
+fn run_ephemeris_benchmark(
+    propagator: &NativeAssistPropagator,
+    benchmark: &NativeBenchmark,
+) -> Result<EphemerisResult, String> {
+    let NativeBenchmark::Ephemeris {
+        orbits,
+        observers,
+        options,
+        covariance_method,
+        num_samples,
+        seed,
+        sampled_covariance,
+    } = benchmark
+    else {
+        return Err("prepared benchmark is not ephemeris".to_string());
+    };
+    let nominal = propagator
+        .inner
+        .generate_ephemeris(
+            orbits,
+            observers,
+            options,
+            &PythonTimeProvider,
+            &propagator.spice,
+        )
+        .map_err(|err| err.to_string())?;
+    if !sampled_covariance {
+        return Ok(nominal);
+    }
+    let variant_samples = create_sampled_orbit_variants(
+        orbits,
+        *covariance_method,
+        *num_samples,
+        *seed,
+        1.0,
+        0.0,
+        0.0,
+    )
+    .map_err(|err| err.to_string())?;
+    let variant_orbits = OrbitBatch::new(
+        variant_samples.variants.orbit_id.clone(),
+        variant_samples.variants.object_id.clone(),
+        variant_samples.variants.coordinates.clone(),
+    )
+    .map_err(|err| err.to_string())?;
+    let variant_result = propagator
+        .inner
+        .generate_ephemeris(
+            &variant_orbits,
+            observers,
+            options,
+            &PythonTimeProvider,
+            &propagator.spice,
+        )
+        .map_err(|err| err.to_string())?;
+    let weights_cov: Vec<f64> = variant_samples
+        .variants
+        .weights_cov
+        .iter()
+        .map(|weight| weight.unwrap_or(0.0))
+        .collect();
+    collapse_variant_ephemeris(
+        &nominal,
+        &variant_result,
+        &variant_samples.source_orbit_indices,
+        &weights_cov,
+        observers.coordinates.len(),
+    )
+    .map_err(|err| err.to_string())
+}
+
+fn run_collision_benchmark(
+    propagator: &NativeAssistPropagator,
+    benchmark: &NativeBenchmark,
+) -> Result<CollisionDetectionOutput, String> {
+    let NativeBenchmark::Collisions {
+        states,
+        epoch_jd_tdb,
+        final_jd_tdb,
+        conditions,
+    } = benchmark
+    else {
+        return Err("prepared benchmark is not collision detection".to_string());
+    };
+    propagator
+        .inner
+        .detect_collisions_same_epoch(states, *epoch_jd_tdb, *final_jd_tdb, conditions)
+        .map_err(|err| err.to_string())
+}
+
+fn run_native_benchmark(
+    propagator: &NativeAssistPropagator,
+    benchmark: &NativeBenchmark,
+) -> Result<(), String> {
+    match benchmark {
+        NativeBenchmark::Propagation { .. } => {
+            black_box(run_propagation_benchmark(propagator, benchmark)?);
+        }
+        NativeBenchmark::Ephemeris { .. } => {
+            black_box(run_ephemeris_benchmark(propagator, benchmark)?);
+        }
+        NativeBenchmark::Collisions { .. } => {
+            black_box(run_collision_benchmark(propagator, benchmark)?);
+        }
+    }
+    Ok(())
 }
 
 fn parse_covariance_method(value: &str) -> PyResult<OrbitVariantSamplingMethod> {

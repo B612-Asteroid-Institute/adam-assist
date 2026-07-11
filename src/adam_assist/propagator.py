@@ -35,10 +35,11 @@ from adam_core.observers.observers import Observers
 from adam_core.orbits.ephemeris import Ephemeris
 from adam_core.orbits.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
-from adam_core.propagator.utils import ensure_input_origin_and_frame
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
+
+from adam_core.propagator.utils import ensure_input_origin_and_frame
 
 from ._native import NativeAssistPropagator
 
@@ -307,6 +308,20 @@ class ASSISTPropagator(ImpactMixin):
         return result.sort_by(
             ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
         )
+
+    def benchmark_last_native(
+        self, reps: int, trials: int = 1, warmup_reps: int = 1
+    ) -> tuple[str, list[list[float]]]:
+        """Time the last prepared propagation/ephemeris/collision operation.
+
+        Samples are owned by Rust ``std::time::Instant``; Python/PyO3 input and
+        output conversion occurred during the preceding public call and is not
+        included.
+        """
+        operation, samples = self._native.benchmark_last_native(
+            int(reps), int(trials), int(warmup_reps)
+        )
+        return str(operation), [list(map(float, trial)) for trial in samples]
 
     def generate_ephemeris(
         self,
