@@ -5,7 +5,6 @@ import pytest
 from adam_core.observers import Observers
 from adam_core.orbits.query.horizons import query_horizons, query_horizons_ephemeris
 from adam_core.time import Timestamp
-from astropy import units as u
 from numpy.testing import assert_allclose
 
 from adam_assist import ASSISTPropagator
@@ -43,6 +42,8 @@ OBJECT_IDS = [
     # "A802 FA",
 ]
 
+
+@pytest.mark.live
 @pytest.mark.parametrize("object_id", OBJECT_IDS)
 def test_ephemeris(object_id):
     """
@@ -72,7 +73,7 @@ def test_ephemeris(object_id):
     np.testing.assert_array_less(
         np.abs(requested_vs_received.to_numpy(zero_copy_only=False)),
         millisecond_in_days,
-        err_msg=f"Horizons returned significantly different epochs than were requested.",
+        err_msg="Horizons returned significantly different epochs than were requested.",
     )
 
     assist_ephem = prop.generate_ephemeris(

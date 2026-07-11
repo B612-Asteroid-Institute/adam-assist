@@ -1,12 +1,12 @@
-import pytest
 import pyarrow.compute as pc
-
-from adam_core.constants import Constants as c
+import pytest
 from adam_core.constants import KM_P_AU
-from adam_core.coordinates import Origin
+from adam_core.constants import Constants as c
+from adam_core.dynamics.impacts import (
+    CollisionConditions,
+    calculate_impacts,
+)
 from adam_core.orbits import Orbits, VariantOrbits
-from adam_core.dynamics.impacts import calculate_impacts, CollisionConditions, EARTH_RADIUS_KM
-from adam_core.orbits import Orbits
 from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
 
@@ -37,21 +37,28 @@ def test_calculate_impacts_benchmark_some_impacts(benchmark, processes):
         seed=42,  # This allows us to predict exact number of impactors empirically
     )
     assert len(variants) == 200, "Should have 200 variants"
-    assert len(impacts) == 138, "Should have exactly 138 impactors"
+    # Rust owns Monte Carlo sampling; its seeded RNG is deterministic but not
+    # bit-identical to NumPy legacy sampling (migration decision 2026-07-03).
+    assert len(impacts) == 123, "Should have exactly 123 Rust-seeded impactors"
+
 
 @pytest.mark.parametrize("processes", [1, 2])
 def test_calculate_impacts(processes):
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_60)[0]
     propagator = ASSISTPropagator()
 
-    variants_orbits = VariantOrbits.create(impactor, method="monte-carlo", num_samples=200, seed=42)
+    variants_orbits = VariantOrbits.create(
+        impactor, method="monte-carlo", num_samples=200, seed=42
+    )
     variants, impacts = propagator.detect_collisions(
         variants_orbits,
         60,
         max_processes=processes,
     )
     assert len(variants) == 200, "Should have 200 variants"
-    assert len(impacts) == 138, "Should have exactly 138 impactors"
+    # Rust owns Monte Carlo sampling; its seeded RNG is deterministic but not
+    # bit-identical to NumPy legacy sampling (migration decision 2026-07-03).
+    assert len(impacts) == 123, "Should have exactly 123 Rust-seeded impactors"
 
     assert impacts.collision_coordinates.frame == "ecliptic"
     assert pc.all(pc.equal(impacts.collision_coordinates.origin.code, "EARTH")).as_py()

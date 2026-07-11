@@ -113,3 +113,8 @@ poetry.lock
 .pdm-python
 pdm.lock
 src/adam_assist/version.py
+
+# Rust / migration runtime artifacts
+target/
+rust/**/target/
+migration/artifacts/assist_parity_cache/

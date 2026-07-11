@@ -1,26 +1,35 @@
 import tomllib
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _project_dependencies() -> list[str]:
-    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    with pyproject_path.open("rb") as pyproject_file:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
     return list(pyproject["project"]["dependencies"])
 
 
-def test_assist_dependency_uses_rebound_header_compatible_release() -> None:
-    assert "assist>=1.2.3,<1.3" in _project_dependencies()
+def _cargo_manifest() -> dict:
+    with (ROOT / "rust" / "adam_assist_rs" / "Cargo.toml").open("rb") as cargo_file:
+        return tomllib.load(cargo_file)
 
 
-def test_rebound_dependency_stays_on_assist_supported_major_version() -> None:
-    assert "rebound>=4.4.11,!=4.5.0,<5" in _project_dependencies()
+def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
+    names = {
+        dependency.split("=")[0].split(">")[0] for dependency in _project_dependencies()
+    }
+    assert {"assist", "rebound", "ray", "spiceypy"}.isdisjoint(names)
 
 
-def test_rebound_dependency_excludes_heap_corruption_release() -> None:
-    """REBOUND 4.5.0 paired with ASSIST 1.2.3 has a destructor/lifetime
-    heap-corruption bug that crashes ASSIST during propagation; it is fixed in
-    4.5.1. Guard that the exclusion stays in place so a constrained resolution
-    can never land on the broken release."""
-    rebound_dep = next(dep for dep in _project_dependencies() if dep.startswith("rebound"))
-    assert "!=4.5.0" in rebound_dep
+def test_assist_rs_is_pinned_to_reviewed_revision() -> None:
+    dependency = _cargo_manifest()["dependencies"]["assist-rs"]
+    assert dependency["rev"] == "f66517aa9b920ad250312aceb28a2635cdb999a5"
+    assert dependency["default-features"] is False
+    assert dependency["features"] == ["parallel"]
+
+
+def test_public_extension_is_packaged_inside_adam_assist() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        pyproject = tomllib.load(pyproject_file)
+    assert pyproject["tool"]["maturin"]["module-name"] == "adam_assist._native"
