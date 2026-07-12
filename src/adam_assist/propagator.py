@@ -588,6 +588,170 @@ class ASSISTPropagator(ImpactMixin):
         )
         return fitted, float(chi2), int(iterations), bool(converged)
 
+    def _od_problem_args(self, orbit: Orbits, observations: Any) -> tuple:
+        """Marshal the shared OD-problem arguments used by the fused fit,
+        od, and Vallado native work units."""
+        assert len(orbit) == 1, "Only one orbit can be differentially corrected"
+        coordinates = orbit.coordinates
+        orbit_scale, orbit_days, orbit_nanos = _time_parts(coordinates.time)
+        observed = observations.coordinates
+        observers = observations.observers
+        observer_coordinates = observers.coordinates
+        observer_scale, observer_days, observer_nanos = _time_parts(
+            observer_coordinates.time
+        )
+        return (
+            _string_column_to_list(orbit.orbit_id),
+            _optional_string_column_to_list(orbit.object_id),
+            np.ascontiguousarray(coordinates.values, dtype=np.float64),
+            _string_column_to_list(coordinates.origin.code),
+            coordinates.frame,
+            orbit_scale,
+            orbit_days,
+            orbit_nanos,
+            np.ascontiguousarray(observed.values, dtype=np.float64),
+            np.ascontiguousarray(
+                observed.covariance.to_matrix().reshape(len(observed), 36),
+                dtype=np.float64,
+            ),
+            _string_column_to_list(observers.code),
+            np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
+            _string_column_to_list(observer_coordinates.origin.code),
+            observer_coordinates.frame,
+            observer_scale,
+            observer_days,
+            observer_nanos,
+        )
+
+    def fit_least_squares_evaluated(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        ignore: list[bool] | None = None,
+        *,
+        xtol: float = 1e-12,
+        ftol: float = 1e-12,
+        max_iterations: int = 100,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict:
+        """Fused ``fit_least_squares`` work unit (bead personal-dqk): one
+        native crossing runs the Gauss-Newton fit on the non-ignored subset
+        followed by the final ``evaluate_orbits``-style residual/statistics
+        pass over the full observation set.
+
+        Returns a plain dict of arrays for the adam-core public veneer:
+        ``state``, ``covariance``, ``fit_chi2``, ``iterations``,
+        ``converged``, ``residual_values``, ``residual_chi2``,
+        ``residual_dof``, ``residual_probability``, ``chi2``,
+        ``reduced_chi2``, ``arc_length``, ``num_obs``, ``outlier``.
+        """
+        if ignore is None:
+            ignore = [False] * len(observations)
+        return self._native.fit_orbit_least_squares_evaluated(
+            *self._od_problem_args(orbit, observations),
+            list(ignore),
+            xtol=xtol,
+            ftol=ftol,
+            max_iterations=max_iterations,
+            lt_tol=lt_tol,
+            eph_max_iter=eph_max_iter,
+            eph_tol=eph_tol,
+            stellar_aberration=stellar_aberration,
+            max_lt_iter=max_lt_iter,
+        )
+
+    def od_fit(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        *,
+        rchi2_threshold: float = 100.0,
+        min_obs: int = 5,
+        min_arc_length: float = 1.0,
+        contamination_percentage: float = 0.0,
+        delta: float = 1e-6,
+        max_iter: int = 20,
+        method: str = "central",
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict:
+        """The full legacy ``adam_core.orbit_determination.od`` loop for one
+        orbit in one native crossing (bead personal-dqk): delta bounding,
+        finite/central perturbation batching, weighted normal equations,
+        condition/covariance sanity rejections, acceptance bookkeeping, and
+        chi2-ranked outlier retries.
+
+        Returns a plain dict of arrays for the adam-core public veneer:
+        ``found``, ``state``, ``covariance``, ``arc_length``, ``num_obs``,
+        ``chi2``, ``reduced_chi2``, ``iterations``, ``improved``,
+        ``residual_values``, ``residual_chi2``, ``residual_dof``,
+        ``residual_probability``, ``outlier``.
+        """
+        return self._native.od_fit(
+            *self._od_problem_args(orbit, observations),
+            rchi2_threshold=rchi2_threshold,
+            min_obs=min_obs,
+            min_arc_length=min_arc_length,
+            contamination_percentage=contamination_percentage,
+            delta=delta,
+            max_iter=max_iter,
+            method=method,
+            lt_tol=lt_tol,
+            eph_max_iter=eph_max_iter,
+            eph_tol=eph_tol,
+            stellar_aberration=stellar_aberration,
+            max_lt_iter=max_lt_iter,
+        )
+
+    def vallado_least_squares(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        *,
+        use_central_difference: bool,
+        perturbation_initial_fraction: float = 1e-6,
+        perturbation_multiplier: float = 0.5,
+        rms_epsilon: float = 1e-3,
+        max_iterations: int = 20,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict:
+        """The public ``LeastSquares.least_squares`` Vallado RMS algorithm in
+        one native crossing (bead personal-dqk), including the debug
+        iteration trace, rejected-update semantics, and perturbation
+        backoff.
+
+        Returns a plain dict for the adam-core public veneer: ``status``
+        (``updated``/``initial``/``not_improved``), ``state``,
+        ``covariance``, ``num_observations``, parallel iteration-trace lists
+        (``iterations_rchi2``, ``iterations_rms``, ``iterations_delta_rms``,
+        ``iterations_converged``, ``iterations_perturbation``,
+        ``iterations_error``), ``corrections``, and ``exit_message``.
+        """
+        return self._native.vallado_least_squares(
+            *self._od_problem_args(orbit, observations),
+            use_central_difference=use_central_difference,
+            perturbation_initial_fraction=perturbation_initial_fraction,
+            perturbation_multiplier=perturbation_multiplier,
+            rms_epsilon=rms_epsilon,
+            max_iterations=max_iterations,
+            lt_tol=lt_tol,
+            eph_max_iter=eph_max_iter,
+            eph_tol=eph_tol,
+            stellar_aberration=stellar_aberration,
+            max_lt_iter=max_lt_iter,
+        )
+
     def detect_collisions(
         self,
         orbits: OrbitTable,

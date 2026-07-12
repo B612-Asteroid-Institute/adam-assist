@@ -27,10 +27,15 @@ from migration.parity._assist_serde import table_from_ipc, table_to_ipc
 
 
 def _orbits_cls(name: str) -> Any:
+    from adam_core.orbit_determination.fitted_orbits import FittedOrbits
     from adam_core.orbits import Orbits
     from adam_core.orbits.variants import VariantOrbits
 
-    return {"Orbits": Orbits, "VariantOrbits": VariantOrbits}[name]
+    return {
+        "Orbits": Orbits,
+        "VariantOrbits": VariantOrbits,
+        "FittedOrbits": FittedOrbits,
+    }[name]
 
 
 def _build_propagator() -> Any:
@@ -84,11 +89,71 @@ def _run_detect(req: dict[str, Any], *, private: bool) -> dict[str, Any]:
     }
 
 
+def _load_od_problem(req: dict[str, Any]) -> tuple[Any, Any]:
+    from adam_core.orbit_determination import OrbitDeterminationObservations
+
+    orbit = table_from_ipc(_orbits_cls(req["orbits_cls"]), req["orbits"])
+    observations = table_from_ipc(OrbitDeterminationObservations, req["observations"])
+    return orbit, observations
+
+
+def _run_od(req: dict[str, Any]) -> dict[str, Any]:
+    from adam_assist import ASSISTPropagator
+    from adam_core.orbit_determination.od import od
+
+    orbit, observations = _load_od_problem(req)
+    od_orbit, od_members = od(
+        orbit, observations, propagator=ASSISTPropagator, **req["kwargs"]
+    )
+    return {
+        "od_orbit": table_to_ipc(od_orbit),
+        "od_members": table_to_ipc(od_members),
+    }
+
+
+def _run_fit_least_squares(req: dict[str, Any]) -> dict[str, Any]:
+    from adam_assist import ASSISTPropagator
+    from adam_core.orbit_determination import fit_least_squares
+
+    orbit, observations = _load_od_problem(req)
+    fitted, members = fit_least_squares(
+        orbit, observations, ASSISTPropagator(), **req["kwargs"]
+    )
+    return {
+        "fitted": table_to_ipc(fitted),
+        "members": table_to_ipc(members),
+    }
+
+
+def _run_vallado_least_squares(req: dict[str, Any]) -> dict[str, Any]:
+    from adam_assist import ASSISTPropagator
+    from adam_core.orbit_determination.least_squares import LeastSquares
+
+    orbit, observations = _load_od_problem(req)
+    fitter = LeastSquares(req["use_central_difference"])
+    debug_info: dict[str, Any] = {}
+    improved = fitter.least_squares(
+        orbit,
+        observations,
+        ASSISTPropagator(),
+        debug_info=debug_info,
+        **req["kwargs"],
+    )
+    return {
+        "improved": None if improved is None else table_to_ipc(improved),
+        "improved_cls": None if improved is None else type(improved).__name__,
+        "debug_info": debug_info,
+    }
+
+
 _DISPATCH = {
     "propagate_orbits": lambda req: _run_propagate_orbits(req),
     "generate_ephemeris": lambda req: _run_generate_ephemeris(req),
     "detect_collisions": lambda req: _run_detect(req, private=False),
     "_detect_collisions": lambda req: _run_detect(req, private=True),
+    "od": lambda req: _run_od(req),
+    "fit_least_squares": lambda req: _run_fit_least_squares(req),
+    "vallado_least_squares": lambda req: _run_vallado_least_squares(req),
 }
 
 

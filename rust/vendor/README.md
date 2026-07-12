@@ -1,7 +1,10 @@
 # Vendored adam-core Rust contracts
 
 These crates are a source snapshot from `adam-core-rust-migration` commit
-`8116c69f` (branch `rust-migration-waves-d-e`):
+`8116c69f` (branch `rust-migration-waves-d-e`), with
+`adam_core_rs_coords/src/{propagation.rs,propagation/od.rs,orbit_least_squares.rs}`
+updated to the backend-generic OD drivers from adam-core commits `7656d7f7` +
+`3e6090f3` (bead personal-dqk):
 
 - `adam_core_rs_autodiff`
 - `adam_core_rs_coords`

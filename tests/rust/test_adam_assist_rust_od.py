@@ -24,7 +24,10 @@ from adam_core.coordinates import (
 )
 from adam_core.observers import Observers
 from adam_core.orbit_determination import fit_least_squares
-from adam_core.orbit_determination.evaluate import OrbitDeterminationObservations
+from adam_core.orbit_determination.evaluate import (
+    OrbitDeterminationObservations,
+    evaluate_orbits,
+)
 from adam_core.orbits import Orbits
 from adam_core.time import Timestamp
 
@@ -143,3 +146,181 @@ def test_public_fit_least_squares_dispatches_to_native(od_problem):
     np.testing.assert_array_equal(
         fitted_orbit.coordinates.values[0], direct.coordinates.values[0]
     )
+
+
+def test_fit_least_squares_evaluated_matches_composed_crossings(od_problem):
+    """The fused fit+evaluate work unit (bead personal-dqk) reproduces the
+    two-crossing composition (native fit, then evaluate_orbits) exactly:
+    same ephemeris kernels, same residual kernels, one crossing."""
+    _python_propagator, observations, initial = od_problem
+    rust_propagator = RustASSISTPropagator()
+
+    fused = rust_propagator.fit_least_squares_evaluated(initial, observations)
+
+    fitted, _chi2, iterations, converged = rust_propagator.fit_least_squares(
+        initial, observations
+    )
+    evaluated_orbit, evaluated_members = evaluate_orbits(
+        fitted, observations, rust_propagator, parameters=6
+    )
+
+    np.testing.assert_array_equal(
+        np.asarray(fused["state"]), fitted.coordinates.values[0]
+    )
+    np.testing.assert_array_equal(
+        np.asarray(fused["covariance"]).reshape(6, 6),
+        fitted.coordinates.covariance.to_matrix()[0],
+    )
+    assert fused["iterations"] == iterations
+    assert fused["converged"] == converged
+    np.testing.assert_array_equal(
+        np.asarray(fused["residual_values"]),
+        evaluated_members.residuals.to_array(),
+    )
+    np.testing.assert_array_equal(
+        np.asarray(fused["residual_chi2"]),
+        evaluated_members.residuals.chi2.to_numpy(zero_copy_only=False),
+    )
+    assert list(fused["residual_dof"]) == evaluated_members.residuals.dof.to_pylist()
+    np.testing.assert_array_equal(
+        np.asarray(fused["residual_probability"]),
+        evaluated_members.residuals.probability.to_numpy(zero_copy_only=False),
+    )
+    assert fused["chi2"] == evaluated_orbit.chi2[0].as_py()
+    assert fused["reduced_chi2"] == evaluated_orbit.reduced_chi2[0].as_py()
+    assert fused["arc_length"] == evaluated_orbit.arc_length[0].as_py()
+    assert fused["num_obs"] == evaluated_orbit.num_obs[0].as_py()
+    assert list(fused["outlier"]) == [False] * len(observations)
+
+    # Ignore-mask path: the fit runs on the subset, the evaluation covers all.
+    ignore_ids = [observations.id[1].as_py(), observations.id[6].as_py()]
+    ignore_mask = [obs_id in ignore_ids for obs_id in observations.id.to_pylist()]
+    fused_ignored = rust_propagator.fit_least_squares_evaluated(
+        initial, observations, ignore_mask
+    )
+    assert list(fused_ignored["outlier"]) == ignore_mask
+    assert fused_ignored["num_obs"] == len(observations) - 2
+
+
+def test_od_fit_two_runtime_parity(od_problem):
+    """Rust `od_fit` vs the legacy `adam_core.orbit_determination.od` loop in
+    the isolated legacy runtime. Bit parity is architecturally impossible
+    (cross-libassist C builds plus LAPACK-vs-Gauss-Jordan linear algebra), so
+    the gate is converged-solution parity on the noise-free fixture."""
+    python_propagator, observations, initial = od_problem
+    rust_propagator = RustASSISTPropagator()
+
+    output = rust_propagator.od_fit(
+        initial,
+        observations,
+        rchi2_threshold=100.0,
+        min_obs=5,
+        min_arc_length=1.0,
+        contamination_percentage=0.0,
+        delta=1e-6,
+        max_iter=20,
+        method="central",
+    )
+    assert output["found"]
+    assert output["improved"]
+    assert output["reduced_chi2"] <= 100.0
+    assert output["num_obs"] == len(observations)
+    assert list(output["outlier"]) == [False] * len(observations)
+    np.testing.assert_allclose(
+        np.asarray(output["state"]), TRUTH_STATE, rtol=0, atol=1e-5
+    )
+
+    # The legacy public `od` contract accepts a plain Orbits input (as the
+    # pinned legacy test suite does); only ids/coordinates are read.
+    legacy_orbit, legacy_members = python_propagator.od(
+        initial,
+        observations,
+        rchi2_threshold=100.0,
+        min_obs=5,
+        min_arc_length=1.0,
+        contamination_percentage=0.0,
+        delta=1e-6,
+        max_iter=20,
+        method="central",
+    )
+    assert len(legacy_orbit) == 1
+    np.testing.assert_allclose(
+        np.asarray(output["state"]),
+        legacy_orbit.coordinates.values[0],
+        rtol=0,
+        atol=5e-5,
+    )
+    assert output["num_obs"] == legacy_orbit.num_obs[0].as_py()
+    assert list(output["outlier"]) == legacy_members.outlier.to_pylist()
+    assert bool(output["improved"]) == legacy_orbit.success[0].as_py()
+    np.testing.assert_allclose(
+        output["arc_length"], legacy_orbit.arc_length[0].as_py(), rtol=1e-12
+    )
+
+
+def test_od_fit_below_min_obs_returns_empty(od_problem):
+    _python_propagator, observations, initial = od_problem
+    output = RustASSISTPropagator().od_fit(
+        initial, observations, min_obs=len(observations) + 1
+    )
+    assert not output["found"]
+    assert output["num_obs"] == 0
+    assert len(output["residual_chi2"]) == 0
+
+
+@pytest.mark.parametrize("use_central_difference", [True, False])
+def test_vallado_least_squares_two_runtime_parity(od_problem, use_central_difference):
+    """Rust Vallado `LeastSquares` work unit vs the legacy Python class in
+    the isolated legacy runtime: both improve the perturbed orbit and agree
+    at the cross-runtime floor; the debug trace has the legacy structure."""
+    python_propagator, observations, initial = od_problem
+    rust_propagator = RustASSISTPropagator()
+
+    output = rust_propagator.vallado_least_squares(
+        initial, observations, use_central_difference=use_central_difference
+    )
+    assert output["status"] == "updated"
+    assert output["num_observations"] == len(observations)
+    assert len(output["iterations_rms"]) > 1
+    assert output["iterations_rms"][-1] < output["iterations_rms"][0]
+    assert len(output["iterations_rchi2"]) == len(output["iterations_rms"])
+    assert len(np.asarray(output["corrections"])) == len(output["iterations_rms"]) - 1
+    assert output["iterations_delta_rms"][0] is None
+    assert output["iterations_converged"][0] is None
+    np.testing.assert_allclose(
+        np.asarray(output["state"]), TRUTH_STATE, rtol=0, atol=1e-5
+    )
+
+    legacy_improved, legacy_debug = python_propagator.vallado_least_squares(
+        initial, observations, use_central_difference
+    )
+    assert legacy_improved is not None
+    np.testing.assert_allclose(
+        np.asarray(output["state"]),
+        legacy_improved.coordinates.values[0],
+        rtol=0,
+        atol=5e-5,
+    )
+    assert legacy_debug["num_observations"] == output["num_observations"]
+    assert len(legacy_debug["iterations"]) > 1
+
+
+def test_native_od_timing_lanes(od_problem):
+    """Each fused OD work unit is wired to the Rust-owned timing hook."""
+    _python_propagator, observations, initial = od_problem
+    rust_propagator = RustASSISTPropagator()
+
+    rust_propagator.od_fit(initial, observations)
+    operation, samples = rust_propagator.benchmark_last_native(2, 2, 1)
+    assert operation == "od_fit"
+    assert len(samples) == 2 and all(len(trial) == 2 for trial in samples)
+
+    rust_propagator.fit_least_squares_evaluated(initial, observations)
+    operation, _ = rust_propagator.benchmark_last_native(1, 1, 0)
+    assert operation == "fit_least_squares_evaluated"
+
+    rust_propagator.vallado_least_squares(
+        initial, observations, use_central_difference=True
+    )
+    operation, _ = rust_propagator.benchmark_last_native(1, 1, 0)
+    assert operation == "vallado_least_squares"

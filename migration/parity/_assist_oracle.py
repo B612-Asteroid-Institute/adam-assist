@@ -217,6 +217,18 @@ class LegacyAssistPropagator:
             "kwargs": kwargs,
         }
 
+    @staticmethod
+    def _od_problem_request(
+        method: str, orbit: Any, observations: Any, kwargs: dict[str, Any]
+    ) -> dict:
+        return {
+            "method": method,
+            "orbits": table_to_ipc(orbit),
+            "orbits_cls": type(orbit).__name__,
+            "observations": table_to_ipc(observations),
+            "kwargs": kwargs,
+        }
+
     # -- parity outputs (cached) -------------------------------------------
     def propagate_orbits(self, orbits: Any, times: Any, **kwargs: Any) -> Any:
         return _result_table(_run(self._propagate_request(orbits, times, kwargs)))
@@ -237,6 +249,75 @@ class LegacyAssistPropagator:
     ) -> tuple[Any, Any]:
         request = self._detect_request(orbits, num_days, conditions, {}, private=True)
         return _detect_result(_run(request))
+
+    def od(self, orbit: Any, observations: Any, **kwargs: Any) -> tuple[Any, Any]:
+        """Legacy `adam_core.orbit_determination.od` with the legacy Python
+        ASSIST propagator, executed in the isolated legacy runtime."""
+        from adam_core.orbit_determination.fitted_orbits import (
+            FittedOrbitMembers,
+            FittedOrbits,
+        )
+
+        response = _run(self._od_problem_request("od", orbit, observations, kwargs))
+        return (
+            table_from_ipc(FittedOrbits, response["od_orbit"]),
+            table_from_ipc(FittedOrbitMembers, response["od_members"]),
+        )
+
+    def fit_least_squares_public(
+        self, orbit: Any, observations: Any, **kwargs: Any
+    ) -> tuple[Any, Any]:
+        """Legacy public `adam_core.orbit_determination.fit_least_squares`
+        (scipy path; legacy adam_assist has no native fit hook)."""
+        from adam_core.orbit_determination.fitted_orbits import (
+            FittedOrbitMembers,
+            FittedOrbits,
+        )
+
+        response = _run(
+            self._od_problem_request("fit_least_squares", orbit, observations, kwargs)
+        )
+        return (
+            table_from_ipc(FittedOrbits, response["fitted"]),
+            table_from_ipc(FittedOrbitMembers, response["members"]),
+        )
+
+    def vallado_least_squares(
+        self,
+        orbit: Any,
+        observations: Any,
+        use_central_difference: bool,
+        **kwargs: Any,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Legacy public `LeastSquares.least_squares` with the legacy Python
+        ASSIST propagator. Returns `(improved_orbit_or_None, debug_info)`."""
+        from adam_core.orbits import Orbits
+
+        request = self._od_problem_request(
+            "vallado_least_squares", orbit, observations, kwargs
+        )
+        request["use_central_difference"] = use_central_difference
+        response = _run(request)
+        improved = response["improved"]
+        return (
+            None if improved is None else table_from_ipc(Orbits, improved),
+            response["debug_info"],
+        )
+
+    def time_od(
+        self,
+        orbit: Any,
+        observations: Any,
+        *,
+        repeats: int,
+        warmups: int,
+        **kwargs: Any,
+    ) -> list[float]:
+        return _time_request(
+            self._od_problem_request("od", orbit, observations, kwargs),
+            repeats=repeats,
+            warmups=warmups,
+        )
 
     # -- timing (uncached; the loop runs inside the legacy runtime) ---------
     def time_propagate_orbits(
