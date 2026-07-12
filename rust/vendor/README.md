@@ -4,10 +4,12 @@ These crates are a source snapshot from `adam-core-rust-migration` commit
 `8116c69f` (branch `rust-migration-waves-d-e`), with
 `adam_core_rs_coords/src/{propagation.rs,propagation/od.rs,orbit_least_squares.rs}`
 updated to the backend-generic OD drivers from adam-core commits `7656d7f7` +
-`3e6090f3` (bead personal-dqk):
+`3e6090f3` (bead personal-dqk), and the complete IOD driver plus Gauss-root
+ordering contract synchronized from `16bd0e4b` (bead personal-cmy.37.3.12):
 
 - `adam_core_rs_autodiff`
 - `adam_core_rs_coords`
+- `adam_core_rs_orbit_determination`
 - `adam_core_rs_spice`
 
 They remain permissive, generic adam-core contracts; adam-assist does not own

@@ -4,8 +4,9 @@ use crate::AssistPropagator as RustAssistPropagator;
 use crate::{map_origin_code_to_assist_body, CollisionConditionSpec, CollisionDetectionOutput};
 use adam_core_rs_coords::propagation::{
     fit_orbit_least_squares_barycentric, fit_orbit_least_squares_evaluated_barycentric,
-    od_fit_barycentric, vallado_least_squares_barycentric, EvaluatedLeastSquaresFit, OdConfig,
-    OdMethod, OdOutput, ValladoConfig, ValladoResult, ValladoStatus,
+    iod_fit_linkages_barycentric, od_fit_barycentric, vallado_least_squares_barycentric,
+    EvaluatedLeastSquaresFit, IodConfig, IodOutput, ObservationSelectionMethod, OdConfig, OdMethod,
+    OdOutput, ValladoConfig, ValladoResult, ValladoStatus,
 };
 use adam_core_rs_coords::propagation::{
     CovariancePropagation, EpochPolicy, PropagationOptions, PropagationRequest, PropagationResult,
@@ -28,6 +29,7 @@ use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -56,6 +58,13 @@ enum PreparedPropagationInput {
 #[derive(Clone)]
 struct OdProblem {
     orbit: OrbitBatch,
+    observed: CoordinateBatch,
+    observers: ObserverBatch,
+    options: EphemerisOptions,
+}
+
+#[derive(Clone)]
+struct IodProblem {
     observed: CoordinateBatch,
     observers: ObserverBatch,
     options: EphemerisOptions,
@@ -101,6 +110,12 @@ enum NativeBenchmark {
         problem: OdProblem,
         config: ValladoConfig,
     },
+    Iod {
+        problem: IodProblem,
+        linkage_rows: Vec<Vec<usize>>,
+        chunk_size: usize,
+        config: IodConfig,
+    },
 }
 
 impl NativeBenchmark {
@@ -116,6 +131,7 @@ impl NativeBenchmark {
             Self::FitEvaluated { .. } => "fit_least_squares_evaluated",
             Self::OdFit { .. } => "od_fit",
             Self::Vallado { .. } => "vallado_least_squares",
+            Self::Iod { .. } => "initial_orbit_determination",
         }
     }
 }
@@ -819,6 +835,230 @@ impl NativeAssistPropagator {
         Ok(dict)
     }
 
+    /// Complete Gauss-IOD orchestration for every linkage in one crossing:
+    /// Rust owns member indexing, per-linkage chronological ordering, triplet
+    /// selection, candidate scoring/outliers, deduplication, and final order.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        observation_ids,
+        observed_values,
+        observed_covariances,
+        observed_origin_codes,
+        observed_frame,
+        observed_time_scale,
+        observed_time_days,
+        observed_time_nanos,
+        observer_codes,
+        observer_states,
+        observer_origin_codes,
+        observer_frame,
+        observer_time_scale,
+        observer_time_days,
+        observer_time_nanos,
+        linkage_ids,
+        member_linkage_ids,
+        member_obs_ids,
+        min_obs=6,
+        min_arc_length=1.0,
+        contamination_percentage=0.0,
+        rchi2_threshold=200.0,
+        observation_selection_method="combinations",
+        light_time=true,
+        chunk_size=1,
+        mu=0.00029591220828559115,
+        speed_of_light=173.14463267424034,
+        lt_tol=1.0e-12,
+        eph_max_iter=1000,
+        eph_tol=1.0e-15,
+        stellar_aberration=false,
+        max_lt_iter=10
+    ))]
+    fn initial_orbit_determination<'py>(
+        &self,
+        py: Python<'py>,
+        observation_ids: Vec<String>,
+        observed_values: PyReadonlyArray2<'py, f64>,
+        observed_covariances: PyReadonlyArray2<'py, f64>,
+        observed_origin_codes: Vec<String>,
+        observed_frame: &str,
+        observed_time_scale: &str,
+        observed_time_days: Vec<i64>,
+        observed_time_nanos: Vec<i64>,
+        observer_codes: Vec<String>,
+        observer_states: PyReadonlyArray2<'py, f64>,
+        observer_origin_codes: Vec<String>,
+        observer_frame: &str,
+        observer_time_scale: &str,
+        observer_time_days: Vec<i64>,
+        observer_time_nanos: Vec<i64>,
+        linkage_ids: Vec<String>,
+        member_linkage_ids: Vec<String>,
+        member_obs_ids: Vec<String>,
+        min_obs: usize,
+        min_arc_length: f64,
+        contamination_percentage: f64,
+        rchi2_threshold: f64,
+        observation_selection_method: &str,
+        light_time: bool,
+        chunk_size: usize,
+        mu: f64,
+        speed_of_light: f64,
+        lt_tol: f64,
+        eph_max_iter: usize,
+        eph_tol: f64,
+        stellar_aberration: bool,
+        max_lt_iter: usize,
+    ) -> PyResult<Bound<'py, PyDict>> {
+        if observation_ids.len() != observed_origin_codes.len()
+            || observation_ids.len() != observed_time_days.len()
+            || observation_ids.len() != observed_time_nanos.len()
+        {
+            return Err(PyValueError::new_err("observation columns must align"));
+        }
+        if member_linkage_ids.len() != member_obs_ids.len() {
+            return Err(PyValueError::new_err("linkage member columns must align"));
+        }
+        let mut observation_index = HashMap::with_capacity(observation_ids.len());
+        for (row, id) in observation_ids.iter().enumerate() {
+            observation_index.insert(id.as_str(), row);
+        }
+        let mut rows_by_linkage: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (linkage_id, obs_id) in member_linkage_ids.iter().zip(member_obs_ids.iter()) {
+            if let Some(&row) = observation_index.get(obs_id.as_str()) {
+                rows_by_linkage
+                    .entry(linkage_id.as_str())
+                    .or_default()
+                    .push(row);
+            }
+        }
+        let mut linkage_rows = Vec::with_capacity(linkage_ids.len());
+        for linkage_id in &linkage_ids {
+            let mut rows = rows_by_linkage
+                .remove(linkage_id.as_str())
+                .unwrap_or_default();
+            rows.sort_by(|&left, &right| {
+                observed_time_days[left]
+                    .cmp(&observed_time_days[right])
+                    .then(observed_time_nanos[left].cmp(&observed_time_nanos[right]))
+                    .then(observed_origin_codes[left].cmp(&observed_origin_codes[right]))
+            });
+            linkage_rows.push(rows);
+        }
+        let problem = build_iod_problem(
+            observed_values,
+            observed_covariances,
+            observed_origin_codes,
+            observed_frame,
+            observed_time_scale,
+            observed_time_days,
+            observed_time_nanos,
+            observer_codes,
+            observer_states,
+            observer_origin_codes,
+            observer_frame,
+            observer_time_scale,
+            observer_time_days,
+            observer_time_nanos,
+            lt_tol,
+            eph_max_iter,
+            eph_tol,
+            stellar_aberration,
+            max_lt_iter,
+        )?;
+        let config = IodConfig {
+            min_obs,
+            min_arc_length,
+            contamination_percentage,
+            rchi2_threshold,
+            observation_selection_method: parse_observation_selection_method(
+                observation_selection_method,
+            )?,
+            light_time,
+            mu,
+            speed_of_light,
+        };
+        let outputs = py
+            .allow_threads(|| run_iod_linkages(self, &problem, &linkage_rows, chunk_size, &config))
+            .map_err(py_runtime_error)?;
+        self.store_benchmark(NativeBenchmark::Iod {
+            problem,
+            linkage_rows: linkage_rows.clone(),
+            chunk_size,
+            config,
+        })?;
+
+        let mut seen = HashSet::<[u64; 7]>::new();
+        let mut accepted: Vec<(String, Vec<usize>, IodOutput)> = linkage_ids
+            .into_iter()
+            .zip(linkage_rows)
+            .zip(outputs)
+            .filter_map(|((linkage_id, rows), output)| {
+                if !output.found {
+                    return None;
+                }
+                let key = [
+                    output.epoch_mjd.to_bits(),
+                    output.state[0].to_bits(),
+                    output.state[1].to_bits(),
+                    output.state[2].to_bits(),
+                    output.state[3].to_bits(),
+                    output.state[4].to_bits(),
+                    output.state[5].to_bits(),
+                ];
+                seen.insert(key).then_some((linkage_id, rows, output))
+            })
+            .collect();
+        accepted.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let orbit_ids: Vec<String> = accepted.iter().map(|row| row.0.clone()).collect();
+        let states: Vec<[f64; 6]> = accepted.iter().map(|row| row.2.state).collect();
+        let epochs: Vec<f64> = accepted.iter().map(|row| row.2.epoch_mjd).collect();
+        let arc_lengths: Vec<f64> = accepted.iter().map(|row| row.2.arc_length).collect();
+        let num_obs: Vec<usize> = accepted.iter().map(|row| row.2.num_obs).collect();
+        let chi2: Vec<f64> = accepted.iter().map(|row| row.2.chi2_total).collect();
+        let reduced_chi2: Vec<f64> = accepted.iter().map(|row| row.2.reduced_chi2).collect();
+        let mut member_orbit_ids = Vec::new();
+        let mut member_obs_ids_out = Vec::new();
+        let mut residual_values = Vec::new();
+        let mut residual_chi2 = Vec::new();
+        let mut residual_dof = Vec::new();
+        let mut residual_probability = Vec::new();
+        let mut solution = Vec::new();
+        let mut outlier = Vec::new();
+        for (linkage_id, rows, output) in &accepted {
+            for (member, &global_row) in rows.iter().enumerate() {
+                member_orbit_ids.push(linkage_id.clone());
+                member_obs_ids_out.push(observation_ids[global_row].clone());
+                residual_values.extend_from_slice(&output.residuals[member * 6..member * 6 + 6]);
+                residual_chi2.push(output.residual_chi2[member]);
+                residual_dof.push(output.residual_dof[member]);
+                residual_probability.push(output.residual_probability[member]);
+                solution.push(output.solution[member]);
+                outlier.push(output.outlier[member]);
+            }
+        }
+        let dict = PyDict::new_bound(py);
+        dict.set_item("orbit_ids", orbit_ids)?;
+        dict.set_item("states", shaped_states_array(py, &states)?)?;
+        dict.set_item("epoch_mjd", epochs)?;
+        dict.set_item("arc_length", arc_lengths)?;
+        dict.set_item("num_obs", num_obs)?;
+        dict.set_item("chi2", chi2)?;
+        dict.set_item("reduced_chi2", reduced_chi2)?;
+        dict.set_item("member_orbit_ids", member_orbit_ids)?;
+        dict.set_item("member_obs_ids", member_obs_ids_out)?;
+        dict.set_item(
+            "residual_values",
+            shaped_matrix_array(py, &residual_values, residual_chi2.len(), 6)?,
+        )?;
+        dict.set_item("residual_chi2", residual_chi2)?;
+        dict.set_item("residual_dof", residual_dof)?;
+        dict.set_item("residual_probability", residual_probability)?;
+        dict.set_item("solution", solution)?;
+        dict.set_item("outlier", outlier)?;
+        Ok(dict)
+    }
+
     /// The public `LeastSquares.least_squares` Vallado RMS algorithm in one
     /// crossing (bead personal-dqk), including the debug iteration trace.
     #[allow(clippy::too_many_arguments)]
@@ -1430,6 +1670,20 @@ fn run_native_benchmark(
         NativeBenchmark::Vallado { problem, config } => {
             black_box(run_vallado(propagator, problem, config)?);
         }
+        NativeBenchmark::Iod {
+            problem,
+            linkage_rows,
+            chunk_size,
+            config,
+        } => {
+            black_box(run_iod_linkages(
+                propagator,
+                problem,
+                linkage_rows,
+                *chunk_size,
+                config,
+            )?);
+        }
     }
     Ok(())
 }
@@ -1490,6 +1744,38 @@ fn run_vallado(
     .map_err(|err| err.to_string())
 }
 
+fn run_iod_linkages(
+    propagator: &NativeAssistPropagator,
+    problem: &IodProblem,
+    linkage_rows: &[Vec<usize>],
+    chunk_size: usize,
+    config: &IodConfig,
+) -> Result<Vec<IodOutput>, String> {
+    iod_fit_linkages_barycentric(
+        &propagator.inner,
+        &problem.observed,
+        &problem.observers,
+        linkage_rows,
+        chunk_size,
+        config,
+        &problem.options,
+        &PythonTimeProvider,
+        &propagator.spice,
+    )
+    .map_err(|err| err.to_string())
+}
+
+fn parse_observation_selection_method(method: &str) -> PyResult<ObservationSelectionMethod> {
+    match method {
+        "combinations" => Ok(ObservationSelectionMethod::Combinations),
+        "first+middle+last" => Ok(ObservationSelectionMethod::FirstMiddleLast),
+        "thirds" => Ok(ObservationSelectionMethod::Thirds),
+        _ => Err(PyValueError::new_err(
+            "method should be one of {'first+middle+last', 'thirds'}",
+        )),
+    }
+}
+
 fn parse_od_method(method: &str) -> PyResult<OdMethod> {
     match method {
         "central" => Ok(OdMethod::Central),
@@ -1498,6 +1784,149 @@ fn parse_od_method(method: &str) -> PyResult<OdMethod> {
             "method should be one of 'central' or 'finite'.",
         )),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_observation_problem(
+    observed_values: PyReadonlyArray2<'_, f64>,
+    observed_covariances: PyReadonlyArray2<'_, f64>,
+    observed_origin_codes: Vec<String>,
+    observed_frame: &str,
+    observed_time_scale: &str,
+    observed_time_days: Vec<i64>,
+    observed_time_nanos: Vec<i64>,
+    observer_codes: Vec<String>,
+    observer_states: PyReadonlyArray2<'_, f64>,
+    observer_origin_codes: Vec<String>,
+    observer_frame: &str,
+    observer_time_scale: &str,
+    observer_time_days: Vec<i64>,
+    observer_time_nanos: Vec<i64>,
+    lt_tol: f64,
+    eph_max_iter: usize,
+    eph_tol: f64,
+    stellar_aberration: bool,
+    max_lt_iter: usize,
+) -> PyResult<(CoordinateBatch, ObserverBatch, EphemerisOptions)> {
+    let observed_rows = states_from_pyarray(observed_values)?;
+    let n = observed_rows.len();
+    let observed_cov = observed_covariances.as_array();
+    if observed_cov.nrows() != n || observed_cov.ncols() != 36 {
+        return Err(PyValueError::new_err(
+            "observed_covariances must have shape (N, 36)",
+        ));
+    }
+    let observed = CoordinateBatch::new(
+        CoordinateValues::Spherical(observed_rows),
+        Frame::parse(observed_frame).map_err(py_value_error)?,
+        OriginArray::new(
+            observed_origin_codes
+                .into_iter()
+                .map(OriginId::from_code)
+                .collect(),
+        ),
+        Some(time_array(
+            observed_time_scale,
+            observed_time_days,
+            observed_time_nanos,
+        )?),
+        Some(
+            CovarianceBatch::new(
+                n,
+                6,
+                observed_cov.iter().copied().collect(),
+                CovarianceUnits::Coordinate(CoordinateRepresentation::Spherical),
+            )
+            .map_err(py_value_error)?,
+        ),
+    )
+    .map_err(py_value_error)?;
+    let observer_times = time_array(observer_time_scale, observer_time_days, observer_time_nanos)?;
+    let observer_coordinates = CoordinateBatch::cartesian(
+        states_from_pyarray(observer_states)?,
+        Frame::parse(observer_frame).map_err(py_value_error)?,
+        OriginArray::new(
+            observer_origin_codes
+                .into_iter()
+                .map(OriginId::from_code)
+                .collect(),
+        ),
+        Some(observer_times),
+        None,
+    )
+    .map_err(py_value_error)?;
+    let observers = ObserverBatch::new(
+        observer_codes.into_iter().map(ObservatoryCode).collect(),
+        observer_coordinates,
+    )
+    .map_err(py_value_error)?;
+    let options = EphemerisOptions {
+        propagation: PropagationOptions {
+            chunk_size: None,
+            thread_limit: None,
+            epoch_policy: EpochPolicy::CrossProduct,
+            covariance: CovariancePropagation::None,
+        },
+        lt_tol,
+        max_iter: eph_max_iter,
+        tol: eph_tol,
+        stellar_aberration,
+        max_lt_iter,
+        output_time_scale: TimeScale::parse(observer_time_scale).map_err(py_value_error)?,
+        include_aberrated_coordinates: false,
+        photometry: EphemerisPhotometryOptions::default(),
+    };
+    Ok((observed, observers, options))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_iod_problem(
+    observed_values: PyReadonlyArray2<'_, f64>,
+    observed_covariances: PyReadonlyArray2<'_, f64>,
+    observed_origin_codes: Vec<String>,
+    observed_frame: &str,
+    observed_time_scale: &str,
+    observed_time_days: Vec<i64>,
+    observed_time_nanos: Vec<i64>,
+    observer_codes: Vec<String>,
+    observer_states: PyReadonlyArray2<'_, f64>,
+    observer_origin_codes: Vec<String>,
+    observer_frame: &str,
+    observer_time_scale: &str,
+    observer_time_days: Vec<i64>,
+    observer_time_nanos: Vec<i64>,
+    lt_tol: f64,
+    eph_max_iter: usize,
+    eph_tol: f64,
+    stellar_aberration: bool,
+    max_lt_iter: usize,
+) -> PyResult<IodProblem> {
+    let (observed, observers, options) = build_observation_problem(
+        observed_values,
+        observed_covariances,
+        observed_origin_codes,
+        observed_frame,
+        observed_time_scale,
+        observed_time_days,
+        observed_time_nanos,
+        observer_codes,
+        observer_states,
+        observer_origin_codes,
+        observer_frame,
+        observer_time_scale,
+        observer_time_days,
+        observer_time_nanos,
+        lt_tol,
+        eph_max_iter,
+        eph_tol,
+        stellar_aberration,
+        max_lt_iter,
+    )?;
+    Ok(IodProblem {
+        observed,
+        observers,
+        options,
+    })
 }
 
 /// Marshal the shared raw OD-problem arguments into typed batches. This is
@@ -1555,68 +1984,31 @@ fn build_od_problem(
     )
     .map_err(py_value_error)?;
 
-    let observer_times = time_array(observer_time_scale, observer_time_days, observer_time_nanos)?;
-    let observer_origins = OriginArray::new(
-        observer_origin_codes
-            .into_iter()
-            .map(OriginId::from_code)
-            .collect(),
-    );
-    let observed_rows = states_from_pyarray(observed_values)?;
-    let n = observed_rows.len();
-    let observed_cov = observed_covariances.as_array();
-    if observed_cov.nrows() != n || observed_cov.ncols() != 36 {
-        return Err(PyValueError::new_err(
-            "observed_covariances must have shape (N, 36)",
-        ));
-    }
-    let observed_cov_flat: Vec<f64> = observed_cov.iter().copied().collect();
-    let covariance = CovarianceBatch::new(
-        n,
-        6,
-        observed_cov_flat,
-        CovarianceUnits::Coordinate(CoordinateRepresentation::Spherical),
-    )
-    .map_err(py_value_error)?;
-    let observed = CoordinateBatch::new(
-        CoordinateValues::Spherical(observed_rows),
-        Frame::parse(observer_frame).map_err(py_value_error)?,
-        observer_origins.clone(),
-        Some(observer_times.clone()),
-        Some(covariance),
-    )
-    .map_err(py_value_error)?;
-
-    let observer_coordinates = CoordinateBatch::cartesian(
-        states_from_pyarray(observer_states)?,
-        Frame::parse(observer_frame).map_err(py_value_error)?,
-        observer_origins,
-        Some(observer_times),
-        None,
-    )
-    .map_err(py_value_error)?;
-    let observers = ObserverBatch::new(
-        observer_codes.into_iter().map(ObservatoryCode).collect(),
-        observer_coordinates,
-    )
-    .map_err(py_value_error)?;
-
-    let options = EphemerisOptions {
-        propagation: PropagationOptions {
-            chunk_size: None,
-            thread_limit: None,
-            epoch_policy: EpochPolicy::CrossProduct,
-            covariance: CovariancePropagation::None,
-        },
+    // The existing OD contract labels observed rows with the observer frame,
+    // origins, and times; preserve that established behavior while sharing
+    // the batch/options builder with the IOD contract (which supplies the
+    // observed metadata explicitly).
+    let (observed, observers, options) = build_observation_problem(
+        observed_values,
+        observed_covariances,
+        observer_origin_codes.clone(),
+        observer_frame,
+        observer_time_scale,
+        observer_time_days.clone(),
+        observer_time_nanos.clone(),
+        observer_codes,
+        observer_states,
+        observer_origin_codes,
+        observer_frame,
+        observer_time_scale,
+        observer_time_days,
+        observer_time_nanos,
         lt_tol,
-        max_iter: eph_max_iter,
-        tol: eph_tol,
+        eph_max_iter,
+        eph_tol,
         stellar_aberration,
         max_lt_iter,
-        output_time_scale: TimeScale::parse(observer_time_scale).map_err(py_value_error)?,
-        include_aberrated_coordinates: false,
-        photometry: EphemerisPhotometryOptions::default(),
-    };
+    )?;
     Ok(OdProblem {
         orbit,
         observed,

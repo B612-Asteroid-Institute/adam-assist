@@ -268,6 +268,35 @@ def test_od_fit_below_min_obs_returns_empty(od_problem):
     assert len(output["residual_chi2"]) == 0
 
 
+def test_initial_orbit_determination_fused_batch_and_timing(od_problem):
+    _python_propagator, observations, _initial = od_problem
+    propagator = RustASSISTPropagator()
+    obs_ids = observations.id.to_pylist()
+    output = propagator.initial_orbit_determination(
+        observations,
+        ["b", "a"],
+        ["b"] * len(obs_ids) + ["a"] * len(obs_ids),
+        obs_ids + obs_ids,
+        min_obs=3,
+        min_arc_length=1.0,
+        rchi2_threshold=1e12,
+        contamination_percentage=0.0,
+        chunk_size=2,
+    )
+    # Identical linkage inputs generate an exact duplicate preliminary state;
+    # Rust keeps the first and returns linkage/member order deterministically.
+    assert output["orbit_ids"] == ["b"]
+    assert output["member_orbit_ids"] == ["b"] * len(obs_ids)
+    assert output["member_obs_ids"] == obs_ids
+    assert np.isfinite(np.asarray(output["states"])).all()
+
+    operation, trials = propagator.benchmark_last_native(2, 2, 1)
+    assert operation == "initial_orbit_determination"
+    assert len(trials) == 2
+    assert all(len(trial) == 2 for trial in trials)
+    assert all(sample > 0 for trial in trials for sample in trial)
+
+
 @pytest.mark.parametrize("use_central_difference", [True, False])
 def test_vallado_least_squares_two_runtime_parity(od_problem, use_central_difference):
     """Rust Vallado `LeastSquares` work unit vs the legacy Python class in

@@ -710,6 +710,80 @@ class ASSISTPropagator(ImpactMixin):
             max_lt_iter=max_lt_iter,
         )
 
+    def _iod_problem_args(self, observations: Any) -> tuple:
+        observed = observations.coordinates
+        observed_scale, observed_days, observed_nanos = _time_parts(observed.time)
+        observers = observations.observers
+        observer_coordinates = observers.coordinates
+        observer_scale, observer_days, observer_nanos = _time_parts(
+            observer_coordinates.time
+        )
+        return (
+            _string_column_to_list(observations.id),
+            np.ascontiguousarray(observed.values, dtype=np.float64),
+            np.ascontiguousarray(
+                observed.covariance.to_matrix().reshape(len(observed), 36),
+                dtype=np.float64,
+            ),
+            _string_column_to_list(observed.origin.code),
+            observed.frame,
+            observed_scale,
+            observed_days,
+            observed_nanos,
+            _string_column_to_list(observers.code),
+            np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
+            _string_column_to_list(observer_coordinates.origin.code),
+            observer_coordinates.frame,
+            observer_scale,
+            observer_days,
+            observer_nanos,
+        )
+
+    def initial_orbit_determination(
+        self,
+        observations: Any,
+        linkage_ids: list[str],
+        member_linkage_ids: list[str],
+        member_obs_ids: list[str],
+        *,
+        min_obs: int = 6,
+        min_arc_length: float = 1.0,
+        contamination_percentage: float = 0.0,
+        rchi2_threshold: float = 200.0,
+        observation_selection_method: str = "combinations",
+        light_time: bool = True,
+        chunk_size: int = 1,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict:
+        """Run complete Gauss-IOD orchestration for every linkage in one
+        native crossing. Rust owns linkage/member indexing, chronological
+        ordering, triplet selection, candidate generation and ephemeris
+        scoring, outlier acceptance, exact-state deduplication, and final
+        linkage ordering. ``chunk_size`` is a Rust scheduling control.
+        """
+        return self._native.initial_orbit_determination(
+            *self._iod_problem_args(observations),
+            list(linkage_ids),
+            list(member_linkage_ids),
+            list(member_obs_ids),
+            min_obs=min_obs,
+            min_arc_length=min_arc_length,
+            contamination_percentage=contamination_percentage,
+            rchi2_threshold=rchi2_threshold,
+            observation_selection_method=observation_selection_method,
+            light_time=light_time,
+            chunk_size=chunk_size,
+            lt_tol=lt_tol,
+            eph_max_iter=eph_max_iter,
+            eph_tol=eph_tol,
+            stellar_aberration=stellar_aberration,
+            max_lt_iter=max_lt_iter,
+        )
+
     def vallado_least_squares(
         self,
         orbit: Orbits,
