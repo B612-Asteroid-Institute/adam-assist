@@ -25,7 +25,8 @@ use adam_core_rs_coords::{
 };
 use adam_core_rs_coords::{CoordinateValues, LeastSquaresConfig};
 use adam_core_rs_spice::AdamCoreSpiceBackend;
-use assist_rs::{Ephemeris, Ias15AdaptiveMode, IntegratorConfig};
+use libassist_sys::Ephemeris;
+use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
 use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;

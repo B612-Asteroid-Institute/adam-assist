@@ -1,13 +1,12 @@
-"""Experimental Rust-backed ASSIST adapter.
+"""Rust-backed ASSIST propagator.
 
-This package is the GPL Python boundary for benchmarking the private
-``assist-rs`` adapter against the public ``adam_assist.ASSISTPropagator``
-semantics. It covers public orbit propagation, covariance ephemeris, and
-collision detection -- each a single Python->Rust crossing (sampled covariance
-expansion/collapse and rayon parallelism live in Rust). The propagator is
-standalone: it implements the public ``propagate_orbits`` /
-``generate_ephemeris`` / ``detect_collisions`` contract directly and does not
-rely on any adam_core base composition.
+This package is the GPL Python boundary over adam-assist-owned Rust
+orchestration and the canonical ``libassist-sys`` / ``librebound-sys``
+bindings. Public propagation, covariance ephemeris, and collision detection
+each use a single Python→Rust crossing; sampled covariance expansion/collapse
+and Rayon parallelism live in Rust. The propagator implements the public
+``propagate_orbits`` / ``generate_ephemeris`` / ``detect_collisions`` contract
+directly and does not rely on adam-core base composition.
 """
 
 from __future__ import annotations

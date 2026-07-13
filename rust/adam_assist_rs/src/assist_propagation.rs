@@ -1,6 +1,7 @@
-//! ASSIST propagation orchestration, moved verbatim from `assist-rs` when
-//! that crate was slimmed to a pure binding (assist-rs PR #11 rework, bead
-//! personal-np5). Provenance: `assist-rs` rev `f66517aa`
+//! ASSIST propagation orchestration, moved from the historical `assist-rs`
+//! domain layer into its owning consumer. The binding/RAII layer now comes
+//! directly from `libassist-sys` and `librebound-sys`. Provenance: historical
+//! `assist-rs` rev `f66517aa`
 //! `src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}`; the
 //! obliquity constants remain bit-identical to adam-core's
 //! (`np.cos/np.sin(Constants.OBLIQUITY)`).
@@ -19,8 +20,9 @@
 // index correspondence in the 6x6/6x9 covariance products.
 #![allow(clippy::needless_range_loop)]
 
-use assist_rs::ffi;
-use assist_rs::{AssistSim, Ephemeris, Error, IntegratorConfig, Result, Simulation};
+use crate::{AssistError as Error, AssistResult as Result};
+use libassist_sys::{ffi, AssistSim, Ephemeris};
+use librebound_sys::{IntegratorConfig, Simulation};
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
 
@@ -638,7 +640,7 @@ impl<'a> PropagatorPool<'a> {
         // 4) Non-grav scalar params + in-place A1/A2/A3 update (no realloc).
         if let Some(ng) = orbit.non_grav.as_ref() {
             apply_nongrav_scalars(&mut self.asim, ng);
-            self.asim.update_nongrav_coeffs(ng.a1, ng.a2, ng.a3);
+            self.asim.update_nongrav_coeffs(ng.a1, ng.a2, ng.a3)?;
         }
 
         run_integration(

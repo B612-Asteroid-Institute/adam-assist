@@ -22,13 +22,11 @@ def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
     assert {"assist", "rebound", "ray", "spiceypy"}.isdisjoint(names)
 
 
-def test_assist_rs_is_pinned_to_reviewed_revision() -> None:
-    # Lean binding-only assist-rs (PR #11 rework): the crate exposes no cargo
-    # features anymore, so the pin is just the reviewed revision.
-    dependency = _cargo_manifest()["dependencies"]["assist-rs"]
-    assert dependency["rev"] == "33233c6efd7f9fb4a5e61538f5c332262f731170"
-    assert "default-features" not in dependency
-    assert "features" not in dependency
+def test_canonical_sys_crates_are_pinned_without_assist_rs() -> None:
+    dependencies = _cargo_manifest()["dependencies"]
+    assert "assist-rs" not in dependencies
+    assert dependencies["libassist-sys"] == "=1.2.1"
+    assert dependencies["librebound-sys"] == "=4.6.0"
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:

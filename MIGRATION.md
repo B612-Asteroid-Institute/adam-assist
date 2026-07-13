@@ -15,8 +15,9 @@ Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
 
 ## Ownership boundary
 
-- `assist-rs` owns reusable low-level ASSIST integration primitives.
-- `adam-assist` owns package-level ASSIST semantics and its GPL Python wheel.
+- `libassist-sys` and `librebound-sys` own reusable FFI and RAII bindings.
+- `adam-assist` owns propagation/ephemeris orchestration, package semantics,
+  and its GPL Python wheel.
 - `adam-core` owns permissive generic contracts and cross-package integration.
 
 Until adam-core's Rust crates are published, identified snapshots are carried

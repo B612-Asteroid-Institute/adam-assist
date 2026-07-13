@@ -24,6 +24,7 @@ replace these paths with versioned crate dependencies and delete the snapshot.
 
 Package ownership is intentionally separate:
 
-- `assist-rs`: reusable low-level ASSIST/REBOUND primitives.
+- `libassist-sys` / `librebound-sys`: versioned ASSIST/REBOUND FFI and RAII
+  bindings consumed directly from crates.io.
 - `adam-assist`: GPL package semantics and orchestration (`adam_assist_rs`).
 - `adam-core`: generic data, SPICE, propagation, and integration contracts.

@@ -1,8 +1,9 @@
-//! GPL `assist-rs` adapter for adam-core Rust propagation contracts.
+//! GPL ASSIST adapter for adam-core Rust propagation contracts.
 //!
 //! This crate is the deliberate GPL boundary for ASSIST/REBOUND-backed
 //! propagation. The permissive core crates expose only backend-generic
-//! contracts; this crate maps those contracts to `assist-rs` types.
+//! contracts; this crate owns domain orchestration over the canonical
+//! `libassist-sys` and `librebound-sys` binding layers.
 
 use adam_core_rs_coords::propagation::{
     CovariancePropagation, EpochPolicy, OrbitRow, PropagationConvergence,
@@ -17,11 +18,14 @@ use adam_core_rs_coords::{
     ObserverBatch, OrbitBatch, OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider,
     TimeArray, TimeScale, TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
 };
-use assist_rs::ffi;
-use assist_rs::{AssistSim, Error as AssistError, Ias15AdaptiveMode, IntegratorConfig, Simulation};
+use libassist_sys::{ffi, AssistSim};
+use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig, Simulation};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::sync::Arc;
+
+mod assist_error;
+pub use assist_error::{AssistError, AssistResult};
 
 pub mod assist_propagation;
 pub use assist_propagation::AssistData;
@@ -406,9 +410,9 @@ fn propagate_same_epoch_state_group(
 /// Joint single-simulation propagation of same-epoch gravity-only states.
 ///
 /// Delegates to [`assist_propagation::assist_propagate_states_same_epoch`],
-/// this crate's home for the primitive since assist-rs was slimmed to a pure
-/// binding (it briefly lived upstream via assist-rs PR #11). The obliquity
-/// constants are bit-identical to adam-core's
+/// this crate's permanent home for the orchestration primitive. The
+/// binding/RAII layer comes directly from the canonical sys crates. The
+/// obliquity constants are bit-identical to adam-core's
 /// (`np.cos/np.sin(Constants.OBLIQUITY)`), so the heliocentric-ecliptic
 /// round-trip is unchanged bit-for-bit.
 fn propagate_same_epoch_states(
@@ -2043,7 +2047,7 @@ mod tests {
 
     fn live_propagator_from_env() -> AssistPropagator {
         let (planets, asteroids) = live_kernel_paths();
-        let ephem = assist_rs::Ephemeris::from_paths(
+        let ephem = libassist_sys::Ephemeris::from_paths(
             std::path::Path::new(&planets),
             std::path::Path::new(&asteroids),
         )
