@@ -66,6 +66,7 @@ lint = { composite = ["ruff check ./src/adam_assist ./tests", "black --check ./s
 fix = "ruff check ./src/adam_assist ./tests --fix"
 typecheck = "mypy --strict ./src/adam_assist"
 test = "pytest --benchmark-skip {args}"
+coverage = "pytest --benchmark-skip --cov=adam_assist --cov-report=xml {args}"
 benchmark = "pytest --benchmark-only {args}"
 assist-public-semantics-benchmark = "python migration/scripts/benchmark_assist_public_semantics.py"
 assist-two-runtime-benchmark = "python migration/scripts/perf_assist_two_runtime.py"
