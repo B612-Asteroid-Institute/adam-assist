@@ -34,3 +34,9 @@ serde_json = "1"
 [lib]
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
+
+# Keep this standalone package from being implicitly adopted by an ancestor
+# Cargo workspace when adam-assist is checked out beneath another repository
+# (as in adam-core's release-candidate wheel matrix).
+[workspace]
+resolver = "2"
