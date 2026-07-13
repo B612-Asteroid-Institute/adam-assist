@@ -11,6 +11,10 @@ ordering contract synchronized from `16bd0e4b` (bead personal-cmy.37.3.12):
 - `adam_core_rs_coords`
 - `adam_core_rs_orbit_determination`
 - `adam_core_rs_spice`
+- `adam_core_rs_kernel_data` (snapshot from adam-core commit `bd88cde0`,
+  bead personal-3uy): pinned PyPI-wheel kernel resolution used by the live
+  Rust tests so the `ADAM_CORE_RS_ASSIST_*` env vars become optional
+  overrides instead of requirements.
 
 They remain permissive, generic adam-core contracts; adam-assist does not own
 their design. They are vendored temporarily so the GPL `adam_assist_rs` wheel

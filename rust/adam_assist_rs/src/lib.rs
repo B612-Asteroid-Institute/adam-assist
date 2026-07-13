@@ -2033,11 +2033,30 @@ mod tests {
         .expect("fixture JSON must parse")
     }
 
+    /// Kernel paths for live tests. The historical env vars remain explicit
+    /// overrides; otherwise the vendored adam-core kernel-data resolver finds
+    /// the files (installed-Python probe, cache, or checksummed PyPI fetch).
+    fn live_kernel_paths() -> (String, String) {
+        let resolver = adam_core_rs_kernel_data::Resolver::from_env();
+        let resolve = |var: &str, id: &str| {
+            std::env::var(var).unwrap_or_else(|_| {
+                resolver
+                    .resolve(id)
+                    .unwrap_or_else(|error| {
+                        panic!("failed to resolve {id} kernel ({error}); set {var} to override")
+                    })
+                    .display()
+                    .to_string()
+            })
+        };
+        (
+            resolve("ADAM_CORE_RS_ASSIST_PLANETS_PATH", "de440"),
+            resolve("ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH", "sb441_n16"),
+        )
+    }
+
     fn live_propagator_from_env() -> AssistPropagator {
-        let planets = std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH")
-            .expect("set ADAM_CORE_RS_ASSIST_PLANETS_PATH to the DE440 BSP path");
-        let asteroids = std::env::var("ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH")
-            .expect("set ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH to the DE441-n16 BSP path");
+        let (planets, asteroids) = live_kernel_paths();
         let ephem = assist_rs::Ephemeris::from_paths(
             std::path::Path::new(&planets),
             std::path::Path::new(&asteroids),
@@ -2497,7 +2516,7 @@ mod tests {
         use adam_core_rs_coords::{generate_ephemeris_barycentric, EphemerisPhotometryOptions};
 
         let propagator = live_propagator_from_env();
-        let planets = std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH").unwrap();
+        let (planets, _) = live_kernel_paths();
         let mut spice = adam_core_rs_spice::AdamCoreSpiceBackend::new();
         spice
             .furnsh(std::path::Path::new(&planets))
@@ -2642,7 +2661,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ADAM_CORE_RS_ASSIST_PLANETS_PATH and ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH"]
+    #[ignore = "live kernels resolved via adam_core_rs_kernel_data (env vars are optional overrides)"]
     fn live_assist_propagates_with_env_kernels() {
         let propagator = live_propagator_from_env();
         let orbits = sample_orbits(
@@ -2670,10 +2689,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ADAM_CORE_RS_ASSIST_PLANETS_PATH and ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH"]
+    #[ignore = "live kernels resolved via adam_core_rs_kernel_data (env vars are optional overrides)"]
     fn live_assist_generate_ephemeris_translates_observers_via_spice() {
         let propagator = live_propagator_from_env();
-        let planets = std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH").unwrap();
+        let (planets, _) = live_kernel_paths();
         let mut spice = adam_core_rs_spice::AdamCoreSpiceBackend::new();
         spice
             .furnsh(std::path::Path::new(&planets))
