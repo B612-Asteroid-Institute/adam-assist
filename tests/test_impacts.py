@@ -1,3 +1,5 @@
+from importlib.metadata import version
+
 import pyarrow.compute as pc
 import pytest
 from adam_core.constants import KM_P_AU
@@ -22,6 +24,17 @@ IMPACTOR_FILE_PATH_0 = "tests/data/I00009_orbit.parquet"
 R_EARTH_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
 
+def _expected_seeded_impacts() -> int:
+    """Pin each supported adam-core RNG generation explicitly.
+
+    Published adam-core 0.5.5 is the minimum CI dependency and yields 138;
+    the Rust migration candidate from 0.5.6 onward yields 123. Exact candidate
+    integration is additionally covered by adam-core's clean-wheel matrix.
+    """
+    release = tuple(int(part) for part in version("adam-core").split(".")[:3])
+    return 123 if release >= (0, 5, 6) else 138
+
+
 @pytest.mark.benchmark
 @pytest.mark.parametrize("processes", [1, 2])
 def test_calculate_impacts_benchmark_some_impacts(benchmark, processes):
@@ -39,7 +52,10 @@ def test_calculate_impacts_benchmark_some_impacts(benchmark, processes):
     assert len(variants) == 200, "Should have 200 variants"
     # Rust owns Monte Carlo sampling; its seeded RNG is deterministic but not
     # bit-identical to NumPy legacy sampling (migration decision 2026-07-03).
-    assert len(impacts) == 123, "Should have exactly 123 Rust-seeded impactors"
+    expected_impacts = _expected_seeded_impacts()
+    assert (
+        len(impacts) == expected_impacts
+    ), f"Should have exactly {expected_impacts} Rust-seeded impactors"
 
 
 @pytest.mark.parametrize("processes", [1, 2])
@@ -58,7 +74,10 @@ def test_calculate_impacts(processes):
     assert len(variants) == 200, "Should have 200 variants"
     # Rust owns Monte Carlo sampling; its seeded RNG is deterministic but not
     # bit-identical to NumPy legacy sampling (migration decision 2026-07-03).
-    assert len(impacts) == 123, "Should have exactly 123 Rust-seeded impactors"
+    expected_impacts = _expected_seeded_impacts()
+    assert (
+        len(impacts) == expected_impacts
+    ), f"Should have exactly {expected_impacts} Rust-seeded impactors"
 
     assert impacts.collision_coordinates.frame == "ecliptic"
     assert pc.all(pc.equal(impacts.collision_coordinates.origin.code, "EARTH")).as_py()
