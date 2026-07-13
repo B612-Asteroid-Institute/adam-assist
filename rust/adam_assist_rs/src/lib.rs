@@ -18,13 +18,16 @@ use adam_core_rs_coords::{
     TimeArray, TimeScale, TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
 };
 use assist_rs::ffi;
-use assist_rs::{
-    assist_propagate, assist_propagate_states_same_epoch, AssistData, AssistSim,
-    Error as AssistError, Ias15AdaptiveMode, IntegratorConfig, Orbit as AssistOrbit, Simulation,
-};
+use assist_rs::{AssistSim, Error as AssistError, Ias15AdaptiveMode, IntegratorConfig, Simulation};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::sync::Arc;
+
+pub mod assist_propagation;
+pub use assist_propagation::AssistData;
+use assist_propagation::{
+    assist_propagate, assist_propagate_states_same_epoch, Orbit as AssistOrbit,
+};
 
 #[cfg(feature = "python")]
 mod python;
@@ -402,11 +405,12 @@ fn propagate_same_epoch_state_group(
 
 /// Joint single-simulation propagation of same-epoch gravity-only states.
 ///
-/// Delegates to the upstream `assist_rs::assist_propagate_states_same_epoch`
-/// primitive (upstreamed from this adapter via assist-rs PR #11). The
-/// upstream obliquity constants are bit-identical to adam-core's
+/// Delegates to [`assist_propagation::assist_propagate_states_same_epoch`],
+/// this crate's home for the primitive since assist-rs was slimmed to a pure
+/// binding (it briefly lived upstream via assist-rs PR #11). The obliquity
+/// constants are bit-identical to adam-core's
 /// (`np.cos/np.sin(Constants.OBLIQUITY)`), so the heliocentric-ecliptic
-/// round-trip matches the previous adapter-local implementation bit-for-bit.
+/// round-trip is unchanged bit-for-bit.
 fn propagate_same_epoch_states(
     data: &AssistData,
     integrator: IntegratorConfig,
@@ -509,7 +513,7 @@ fn build_collision_sim(
 ) -> Result<AssistSim, AssistError> {
     let mut sim = Simulation::new()?;
     sim.set_t(t);
-    apply_integrator_config(&mut sim, integrator);
+    integrator.apply(&mut sim);
     if backward {
         let dt = sim.dt();
         sim.set_dt(-dt);
@@ -647,21 +651,6 @@ impl AssistPropagator {
                 )?;
             }
         }
-    }
-}
-
-fn apply_integrator_config(sim: &mut Simulation, integrator: IntegratorConfig) {
-    if let Some(dt) = integrator.initial_dt {
-        sim.set_dt(dt);
-    }
-    if let Some(epsilon) = integrator.epsilon {
-        sim.set_ias15_epsilon(epsilon);
-    }
-    if let Some(min_dt) = integrator.min_dt {
-        sim.set_ias15_min_dt(min_dt);
-    }
-    if let Some(mode) = integrator.adaptive_mode {
-        sim.set_ias15_adaptive_mode(mode);
     }
 }
 
@@ -1542,15 +1531,12 @@ fn classify_assist_error(
         | AssistError::CloseEncounter
         | AssistError::Escape
         | AssistError::Collision
-        | AssistError::IntegrationFailed(_)
-        | AssistError::LightTimeConvergence(_) => {
+        | AssistError::IntegrationFailed(_) => {
             Ok((PropagationFailureCode::IntegratorFailure, message))
         }
-        AssistError::EphemerisError(_)
-        | AssistError::InvalidBody(_)
-        | AssistError::InvalidObservatory(_)
-        | AssistError::Io(_)
-        | AssistError::Other(_) => Err(PropagationError::Backend(message)),
+        AssistError::EphemerisError(_) | AssistError::Other(_) => {
+            Err(PropagationError::Backend(message))
+        }
     }
 }
 

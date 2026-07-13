@@ -202,14 +202,11 @@ dependencies = [
 
 [[package]]
 name = "assist-rs"
-version = "1.2.0"
-source = "git+https://github.com/B612-Asteroid-Institute/assist-rs.git?rev=f66517aa9b920ad250312aceb28a2635cdb999a5#f66517aa9b920ad250312aceb28a2635cdb999a5"
+version = "2.0.0"
+source = "git+https://github.com/B612-Asteroid-Institute/assist-rs.git?rev=33233c6efd7f9fb4a5e61538f5c332262f731170#33233c6efd7f9fb4a5e61538f5c332262f731170"
 dependencies = [
  "cc",
  "libc",
- "rayon",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1966,7 +1963,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
- "serde_derive",
 ]
 
 [[package]]

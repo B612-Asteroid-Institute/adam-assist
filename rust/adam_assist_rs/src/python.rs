@@ -1,5 +1,6 @@
 #![allow(clippy::useless_conversion)] // PyO3 0.22 macro expansion trips this lint on generated wrappers.
 
+use crate::AssistData;
 use crate::AssistPropagator as RustAssistPropagator;
 use crate::{map_origin_code_to_assist_body, CollisionConditionSpec, CollisionDetectionOutput};
 use adam_core_rs_coords::propagation::{
@@ -24,7 +25,7 @@ use adam_core_rs_coords::{
 };
 use adam_core_rs_coords::{CoordinateValues, LeastSquaresConfig};
 use adam_core_rs_spice::AdamCoreSpiceBackend;
-use assist_rs::{AssistData, Ephemeris, Ias15AdaptiveMode, IntegratorConfig};
+use assist_rs::{Ephemeris, Ias15AdaptiveMode, IntegratorConfig};
 use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;

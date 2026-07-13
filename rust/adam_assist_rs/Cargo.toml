@@ -15,8 +15,9 @@ extension-module = ["python", "pyo3/extension-module"]
 # rust/vendor/README.md for upstream provenance and update policy.
 adam_core_rs_coords = { path = "../vendor/adam_core_rs_coords" }
 adam_core_rs_spice = { path = "../vendor/adam_core_rs_spice" }
-# Pinned to assist-rs PR #11 until the same-epoch multi-particle API is released.
-assist-rs = { git = "https://github.com/B612-Asteroid-Institute/assist-rs.git", rev = "f66517aa9b920ad250312aceb28a2635cdb999a5", default-features = false, features = ["parallel"] }
+# Lean binding-only assist-rs (PR #11 rework, bead personal-np5): orchestration
+# now lives in this crate's assist_propagation module.
+assist-rs = { git = "https://github.com/B612-Asteroid-Institute/assist-rs.git", rev = "33233c6efd7f9fb4a5e61538f5c332262f731170" }
 ndarray = { version = "0.16", optional = true }
 numpy = { version = "0.22", optional = true }
 pyo3 = { version = "0.22", optional = true }
