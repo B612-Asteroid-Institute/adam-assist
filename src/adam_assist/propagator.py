@@ -12,7 +12,7 @@ directly and does not rely on adam-core base composition.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias, cast
 
 import numpy as np
 import numpy.typing as npt
@@ -42,14 +42,17 @@ from adam_core.propagator.utils import ensure_input_origin_and_frame
 
 from ._native import NativeAssistPropagator
 
-OrbitTable = Orbits | VariantOrbits
+# adam-core's quivr tables are runtime-typed but do not currently publish
+# complete static typing metadata. Keep the public annotations readable while
+# containing that external Any boundary in one alias.
+OrbitTable: TypeAlias = Any
 
 
 def _column_to_list(column: Any) -> list[Any]:
     if hasattr(column, "to_pylist"):
-        return column.to_pylist()
+        return list(column.to_pylist())
     if hasattr(column, "to_numpy"):
-        return column.to_numpy(zero_copy_only=False).tolist()
+        return list(column.to_numpy(zero_copy_only=False).tolist())
     return list(column)
 
 
@@ -214,7 +217,7 @@ def _collision_rows(
     return rows.set_column("coordinates", coordinates)
 
 
-class ASSISTPropagator(ImpactMixin):
+class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
     """Rust-backed propagation subset of ``adam_assist.ASSISTPropagator``.
 
     The public method mirrors the Python propagator's ``propagate_orbits``
@@ -267,7 +270,7 @@ class ASSISTPropagator(ImpactMixin):
 
     def __setstate__(self, state: dict[str, Any]) -> None:
         """Recreate process-local ASSIST/SPICE state after unpickling."""
-        self.__init__(**state)
+        ASSISTPropagator.__init__(self, **state)
 
     def propagate_orbits(
         self,
@@ -587,7 +590,7 @@ class ASSISTPropagator(ImpactMixin):
         )
         return fitted, float(chi2), int(iterations), bool(converged)
 
-    def _od_problem_args(self, orbit: Orbits, observations: Any) -> tuple:
+    def _od_problem_args(self, orbit: Orbits, observations: Any) -> tuple[Any, ...]:
         """Marshal the shared OD-problem arguments used by the fused fit,
         od, and Vallado native work units."""
         assert len(orbit) == 1, "Only one orbit can be differentially corrected"
@@ -636,7 +639,7 @@ class ASSISTPropagator(ImpactMixin):
         eph_tol: float = 1.0e-15,
         stellar_aberration: bool = False,
         max_lt_iter: int = 10,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Fused ``fit_least_squares`` work unit (bead personal-dqk): one
         native crossing runs the Gauss-Newton fit on the non-ignored subset
         followed by the final ``evaluate_orbits``-style residual/statistics
@@ -650,17 +653,20 @@ class ASSISTPropagator(ImpactMixin):
         """
         if ignore is None:
             ignore = [False] * len(observations)
-        return self._native.fit_orbit_least_squares_evaluated(
-            *self._od_problem_args(orbit, observations),
-            list(ignore),
-            xtol=xtol,
-            ftol=ftol,
-            max_iterations=max_iterations,
-            lt_tol=lt_tol,
-            eph_max_iter=eph_max_iter,
-            eph_tol=eph_tol,
-            stellar_aberration=stellar_aberration,
-            max_lt_iter=max_lt_iter,
+        return cast(
+            dict[str, Any],
+            self._native.fit_orbit_least_squares_evaluated(
+                *self._od_problem_args(orbit, observations),
+                list(ignore),
+                xtol=xtol,
+                ftol=ftol,
+                max_iterations=max_iterations,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
         )
 
     def od_fit(
@@ -680,7 +686,7 @@ class ASSISTPropagator(ImpactMixin):
         eph_tol: float = 1.0e-15,
         stellar_aberration: bool = False,
         max_lt_iter: int = 10,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """The full legacy ``adam_core.orbit_determination.od`` loop for one
         orbit in one native crossing (bead personal-dqk): delta bounding,
         finite/central perturbation batching, weighted normal equations,
@@ -693,23 +699,26 @@ class ASSISTPropagator(ImpactMixin):
         ``residual_values``, ``residual_chi2``, ``residual_dof``,
         ``residual_probability``, ``outlier``.
         """
-        return self._native.od_fit(
-            *self._od_problem_args(orbit, observations),
-            rchi2_threshold=rchi2_threshold,
-            min_obs=min_obs,
-            min_arc_length=min_arc_length,
-            contamination_percentage=contamination_percentage,
-            delta=delta,
-            max_iter=max_iter,
-            method=method,
-            lt_tol=lt_tol,
-            eph_max_iter=eph_max_iter,
-            eph_tol=eph_tol,
-            stellar_aberration=stellar_aberration,
-            max_lt_iter=max_lt_iter,
+        return cast(
+            dict[str, Any],
+            self._native.od_fit(
+                *self._od_problem_args(orbit, observations),
+                rchi2_threshold=rchi2_threshold,
+                min_obs=min_obs,
+                min_arc_length=min_arc_length,
+                contamination_percentage=contamination_percentage,
+                delta=delta,
+                max_iter=max_iter,
+                method=method,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
         )
 
-    def _iod_problem_args(self, observations: Any) -> tuple:
+    def _iod_problem_args(self, observations: Any) -> tuple[Any, ...]:
         observed = observations.coordinates
         observed_scale, observed_days, observed_nanos = _time_parts(observed.time)
         observers = observations.observers
@@ -757,30 +766,33 @@ class ASSISTPropagator(ImpactMixin):
         eph_tol: float = 1.0e-15,
         stellar_aberration: bool = False,
         max_lt_iter: int = 10,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Run complete Gauss-IOD orchestration for every linkage in one
         native crossing. Rust owns linkage/member indexing, chronological
         ordering, triplet selection, candidate generation and ephemeris
         scoring, outlier acceptance, exact-state deduplication, and final
         linkage ordering. ``chunk_size`` is a Rust scheduling control.
         """
-        return self._native.initial_orbit_determination(
-            *self._iod_problem_args(observations),
-            list(linkage_ids),
-            list(member_linkage_ids),
-            list(member_obs_ids),
-            min_obs=min_obs,
-            min_arc_length=min_arc_length,
-            contamination_percentage=contamination_percentage,
-            rchi2_threshold=rchi2_threshold,
-            observation_selection_method=observation_selection_method,
-            light_time=light_time,
-            chunk_size=chunk_size,
-            lt_tol=lt_tol,
-            eph_max_iter=eph_max_iter,
-            eph_tol=eph_tol,
-            stellar_aberration=stellar_aberration,
-            max_lt_iter=max_lt_iter,
+        return cast(
+            dict[str, Any],
+            self._native.initial_orbit_determination(
+                *self._iod_problem_args(observations),
+                list(linkage_ids),
+                list(member_linkage_ids),
+                list(member_obs_ids),
+                min_obs=min_obs,
+                min_arc_length=min_arc_length,
+                contamination_percentage=contamination_percentage,
+                rchi2_threshold=rchi2_threshold,
+                observation_selection_method=observation_selection_method,
+                light_time=light_time,
+                chunk_size=chunk_size,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
         )
 
     def vallado_least_squares(
@@ -798,7 +810,7 @@ class ASSISTPropagator(ImpactMixin):
         eph_tol: float = 1.0e-15,
         stellar_aberration: bool = False,
         max_lt_iter: int = 10,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """The public ``LeastSquares.least_squares`` Vallado RMS algorithm in
         one native crossing (bead personal-dqk), including the debug
         iteration trace, rejected-update semantics, and perturbation
@@ -811,18 +823,21 @@ class ASSISTPropagator(ImpactMixin):
         ``iterations_converged``, ``iterations_perturbation``,
         ``iterations_error``), ``corrections``, and ``exit_message``.
         """
-        return self._native.vallado_least_squares(
-            *self._od_problem_args(orbit, observations),
-            use_central_difference=use_central_difference,
-            perturbation_initial_fraction=perturbation_initial_fraction,
-            perturbation_multiplier=perturbation_multiplier,
-            rms_epsilon=rms_epsilon,
-            max_iterations=max_iterations,
-            lt_tol=lt_tol,
-            eph_max_iter=eph_max_iter,
-            eph_tol=eph_tol,
-            stellar_aberration=stellar_aberration,
-            max_lt_iter=max_lt_iter,
+        return cast(
+            dict[str, Any],
+            self._native.vallado_least_squares(
+                *self._od_problem_args(orbit, observations),
+                use_central_difference=use_central_difference,
+                perturbation_initial_fraction=perturbation_initial_fraction,
+                perturbation_multiplier=perturbation_multiplier,
+                rms_epsilon=rms_epsilon,
+                max_iterations=max_iterations,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
         )
 
     def detect_collisions(

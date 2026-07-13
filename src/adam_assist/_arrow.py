@@ -16,6 +16,8 @@ against ``adam_core._rust`` ``orbit_schema_metadata`` in the contract test.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pyarrow as pa
 from adam_core.coordinates.cartesian import CartesianCoordinates
@@ -66,7 +68,7 @@ def _flat_schema(*, frame: str, time_scale: str, has_covariance: bool) -> pa.Sch
     return pa.schema(fields, metadata=metadata)
 
 
-def _metadata_value(metadata: dict | None, key: str) -> str:
+def _metadata_value(metadata: dict[Any, Any] | None, key: str) -> str:
     if not metadata:
         raise ValueError(f"flat OrbitBatch RecordBatch is missing metadata key {key!r}")
     value = (
