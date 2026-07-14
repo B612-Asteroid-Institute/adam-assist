@@ -5,7 +5,9 @@ These crates are a source snapshot from `adam-core-rust-migration` commit
 `adam_core_rs_coords/src/{propagation.rs,propagation/od.rs,orbit_least_squares.rs}`
 updated to the backend-generic OD drivers from adam-core commits `7656d7f7` +
 `3e6090f3` (bead personal-dqk), and the complete IOD driver plus Gauss-root
-ordering contract synchronized from `16bd0e4b` (bead personal-cmy.37.3.12):
+ordering contract synchronized from `16bd0e4b` (bead personal-cmy.37.3.12).
+The cross-platform macOS photometry geometry implementations and invalid-tail
+coverage are synchronized exactly from adam-core commit `a8f9101a`:
 
 - `adam_core_rs_autodiff`
 - `adam_core_rs_coords`
