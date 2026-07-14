@@ -1,0 +1,86 @@
+name: Publish tested adam-assist wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      acceptance_run_id:
+        description: Successful Release candidate wheel matrix run ID for this exact commit
+        required: true
+        type: string
+      repository:
+        description: Destination index
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  collect-tested-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify acceptance provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.acceptance_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          RUN_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+          test "$(jq -r .conclusion <<<"$RUN_JSON")" = success
+          test "$(jq -r .head_sha <<<"$RUN_JSON")" = "$EXPECTED_SHA"
+          test "$(jq -r .name <<<"$RUN_JSON")" = "Release candidate wheel matrix"
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.acceptance_run_id }}
+          github-token: ${{ github.token }}
+          pattern: wheel-acceptance-*
+          path: acceptance-artifacts
+      - name: Aggregate adam-assist wheels without rebuilding
+        run: |
+          set -euo pipefail
+          mkdir dist
+          find acceptance-artifacts -type f -name 'adam_assist-*.whl' -exec cp '{}' dist/ ';'
+          test "$(find dist -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 15
+          sha256sum dist/*.whl | sort | tee dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adam-assist-tested-publication-set
+          path: dist/
+          if-no-files-found: error
+  publish-testpypi:
+    if: inputs.repository == 'testpypi'
+    needs: collect-tested-artifacts
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/adam-assist
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: adam-assist-tested-publication-set
+          path: dist
+      - run: rm dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: inputs.repository == 'pypi'
+    needs: collect-tested-artifacts
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/adam-assist
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: adam-assist-tested-publication-set
+          path: dist
+      - run: rm dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@release/v1
