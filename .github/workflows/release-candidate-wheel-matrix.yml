@@ -36,7 +36,6 @@ jobs:
           - {name: manylinux-aarch64, runner: ubuntu-24.04-arm, system: Linux-aarch64, family: manylinux, target: aarch64, wheel_tag: "manylinux*aarch64"}
           - {name: macos-arm64, runner: macos-14, system: Darwin-arm64, family: native, wheel_tag: "macosx*arm64"}
           - {name: macos-x86_64, runner: macos-15-intel, system: Darwin-x86_64, family: native, wheel_tag: "macosx*x86_64"}
-          - {name: windows-x86_64, runner: windows-latest, system: Windows-AMD64, family: native, wheel_tag: "win_amd64"}
     steps:
       - name: Checkout adam-assist candidate
         uses: actions/checkout@v4

@@ -46,7 +46,7 @@ jobs:
           set -euo pipefail
           mkdir dist
           find acceptance-artifacts -type f -name 'adam_assist-*.whl' -exec cp '{}' dist/ ';'
-          test "$(find dist -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 15
+          test "$(find dist -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 12
           sha256sum dist/*.whl | sort | tee dist/SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
