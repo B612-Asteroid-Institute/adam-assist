@@ -867,7 +867,7 @@ impl NativeAssistPropagator {
         observation_selection_method="combinations",
         light_time=true,
         chunk_size=1,
-        mu=0.00029591220828559115,
+        mu=0.00029591220828411956,
         speed_of_light=173.14463267424034,
         lt_tol=1.0e-12,
         eph_max_iter=1000,

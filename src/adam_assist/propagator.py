@@ -761,6 +761,8 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
         observation_selection_method: str = "combinations",
         light_time: bool = True,
         chunk_size: int = 1,
+        mu: float = 0.00029591220828411956,
+        speed_of_light: float = 173.14463267424034,
         lt_tol: float = 1.0e-12,
         eph_max_iter: int = 1000,
         eph_tol: float = 1.0e-15,
@@ -772,6 +774,9 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
         ordering, triplet selection, candidate generation and ephemeris
         scoring, outlier acceptance, exact-state deduplication, and final
         linkage ordering. ``chunk_size`` is a Rust scheduling control.
+        ``mu`` and ``speed_of_light`` are supplied explicitly by adam-core so
+        the fused provider preserves the constants owned by the original
+        adam-core orchestration.
         """
         return cast(
             dict[str, Any],
@@ -787,6 +792,8 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
                 observation_selection_method=observation_selection_method,
                 light_time=light_time,
                 chunk_size=chunk_size,
+                mu=mu,
+                speed_of_light=speed_of_light,
                 lt_tol=lt_tol,
                 eph_max_iter=eph_max_iter,
                 eph_tol=eph_tol,
