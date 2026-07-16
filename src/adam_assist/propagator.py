@@ -136,93 +136,34 @@ def _nongrav_column_to_numpy(column: Any, length: int) -> npt.NDArray[np.object_
     return np.array(values, dtype=object)
 
 
-# ASSIST evaluates the non-gravitational g(r) with simulation-level Marsden
-# constants that default to alpha=1, nk=0, nm=2, nn=5.093, r0=1, i.e.
-# g(r) = (1 au / r)^2 — the Yarkovsky/asteroid convention. Solutions fit
-# under different constants (e.g. the cometary Marsden values
-# alpha=0.1113, nk=4.6142, nm=2.15, r0=2.808) must be rejected rather than
-# silently propagated with the wrong force law.
-_ASSIST_MARSDEN_DEFAULTS = {
-    "ALN": 1.0,
-    "NK": 0.0,
-    "NM": 2.0,
-    "R0": 1.0,
-}
-
-
 def _extract_assist_particle_params(
     orbits: OrbitType,
 ) -> Union[None, npt.NDArray[np.float64]]:
+    """
+    Flatten the canonical A1/A2/A3 non-gravitational parameters into ASSIST
+    particle params, with nulls treated as zero (no force).
+
+    ASSIST evaluates the non-gravitational g(r) with simulation-level Marsden
+    constants that default to alpha=1, nk=0, nm=2, nn=5.093, r0=1, i.e.
+    g(r) = (1 au / r)^2 -- the Yarkovsky/asteroid convention. adam_core's
+    canonical schema stores only Marsden-style A1/A2/A3 (its importers drop
+    solutions' non-standard g(r) constants and other parameters at ingestion
+    with a warning), so the A1/A2/A3 values received here are applied under
+    that standard force law.
+    """
     nongrav = getattr(orbits, "non_gravitational_parameters", None)
     if nongrav is None or len(orbits) == 0:
         return None
 
-    estimated_parameter_names = _nongrav_column_to_numpy(
-        nongrav.estimated_parameter_names, len(orbits)
-    )
-    unsupported_estimated = set()
-    for names in estimated_parameter_names:
-        if names is None:
-            continue
-        for name in str(names).split(","):
-            stripped = name.strip()
-            if stripped and stripped not in {"A1", "A2", "A3"}:
-                unsupported_estimated.add(stripped)
-    if unsupported_estimated:
-        raise ValueError(
-            "ASSISTPropagator only supports Marsden-style A1/A2/A3 non-gravitational "
-            f"parameters. Unsupported estimated parameters are present: {', '.join(sorted(unsupported_estimated))}."
-        )
-
     a1 = _nongrav_column_to_numpy(nongrav.A1, len(orbits))
     a2 = _nongrav_column_to_numpy(nongrav.A2, len(orbits))
     a3 = _nongrav_column_to_numpy(nongrav.A3, len(orbits))
-    has_supported_values = np.array(
-        [
-            (a1_i is not None) or (a2_i is not None) or (a3_i is not None)
-            for a1_i, a2_i, a3_i in zip(a1, a2, a3)
-        ],
-        dtype=bool,
+    has_values = any(
+        (a1_i is not None) or (a2_i is not None) or (a3_i is not None)
+        for a1_i, a2_i, a3_i in zip(a1, a2, a3)
     )
-
-    # Rows that claim estimated A1/A2/A3 but carry no values are pathological:
-    # the fitted force cannot be reproduced. Source/model/dimension metadata
-    # alone (e.g. a 6D NEOCC solution, or a catalog that stamps a source on
-    # every row) is fine and simply means no non-grav force.
-    missing_value_rows = [
-        i
-        for i, names in enumerate(estimated_parameter_names)
-        if names is not None and str(names).strip() and not has_supported_values[i]
-    ]
-    if missing_value_rows:
-        raise ValueError(
-            "ASSISTPropagator received non-gravitational metadata without usable "
-            "A1/A2/A3 values for rows with estimated parameters "
-            f"(rows {missing_value_rows}). Only Marsden-style A1/A2/A3 "
-            "propagation is supported."
-        )
-
-    if not np.any(has_supported_values):
+    if not has_values:
         return None
-
-    # Reject solutions fit under Marsden constants other than ASSIST's
-    # g(r) = (1 au / r)^2 defaults; their A1/A2/A3 are not valid under the
-    # force law ASSIST will apply. NN needs no check: it only enters g(r)
-    # when NK is non-zero, and any non-zero NK is rejected here.
-    for field, default in _ASSIST_MARSDEN_DEFAULTS.items():
-        column = _nongrav_column_to_numpy(getattr(nongrav, field), len(orbits))
-        for i, value in enumerate(column):
-            if (
-                has_supported_values[i]
-                and value is not None
-                and not np.isclose(float(value), default)
-            ):
-                raise ValueError(
-                    f"ASSISTPropagator applies g(r) = (1 au / r)^2 "
-                    f"({field}={default}), but row {i} was fit with "
-                    f"{field}={value}. Its A1/A2/A3 are not valid under "
-                    "ASSIST's non-gravitational force law."
-                )
 
     particle_params = np.zeros((len(orbits), 3), dtype=np.float64)
     for i, (a1_i, a2_i, a3_i) in enumerate(zip(a1, a2, a3)):
