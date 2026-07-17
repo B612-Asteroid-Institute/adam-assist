@@ -1,0 +1,216 @@
+name: Publish tested adam-assist preview wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      acceptance_run_id:
+        description: Successful Release candidate wheel matrix run ID for this exact commit
+        required: true
+        type: string
+      expected_version:
+        description: Exact adam-assist PEP 440 release-candidate version
+        required: true
+        default: 0.4.0rc1
+        type: string
+      expected_adam_core_version:
+        description: Exact already-published adam-core release candidate
+        required: true
+        default: 0.5.6rc1
+        type: string
+      repository:
+        description: Destination index
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+      confirmation:
+        description: Type "publish adam-assist <version> from <sha> to <repository>"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  collect-tested-artifacts:
+    name: Collect and verify already-tested preview wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install wheel filename parser
+        run: |
+          python -m pip install --only-binary=:all: packaging
+      - name: Verify exact RC tag and irreversible-action confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_SHA: ${{ github.sha }}
+          DESTINATION: ${{ inputs.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/v$EXPECTED_VERSION"
+          test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to $DESTINATION"
+      - name: Verify source prerelease and exact adam-core dependency
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_CORE_VERSION: ${{ inputs.expected_adam_core_version }}
+        run: |
+          python - <<'PY'
+          import os, tomllib
+          from pathlib import Path
+          from packaging.version import Version
+
+          assist = Version(os.environ["EXPECTED_VERSION"])
+          core = Version(os.environ["EXPECTED_CORE_VERSION"])
+          if assist.pre is None or assist.pre[0] != "rc" or core.pre is None or core.pre[0] != "rc":
+              raise SystemExit(f"only release candidates are accepted: {assist=} {core=}")
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+          expected = f"adam-core=={core}"
+          if expected not in pyproject["project"]["dependencies"]:
+              raise SystemExit(f"missing exact preview dependency {expected}")
+          cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
+          cargo_version = cargo["package"]["version"]
+          if cargo_version != "0.4.0-rc.1" or str(assist) != "0.4.0rc1":
+              raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
+          for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
+              if cargo["dependencies"].get(name) != "=0.1.0-rc.1":
+                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.1")
+          kernel_data = cargo["dev-dependencies"].get("adam_core_rs_kernel_data")
+          if kernel_data != {"version": "=0.1.0-rc.1", "default-features": False}:
+              raise SystemExit("adam_core_rs_kernel_data is not exact-pinned")
+          if Path("rust/vendor").exists():
+              raise SystemExit("temporary vendored core crates must be absent")
+          PY
+      - name: Verify acceptance provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.acceptance_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          RUN_JSON="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")"
+          test "$(jq -r .conclusion <<<"$RUN_JSON")" = success
+          test "$(jq -r .head_sha <<<"$RUN_JSON")" = "$EXPECTED_SHA"
+          test "$(jq -r .name <<<"$RUN_JSON")" = "Release candidate wheel matrix"
+          case "$(jq -r .event <<<"$RUN_JSON")" in
+            push|workflow_dispatch) ;;
+            *) echo "acceptance must be built from an exact push or workflow-dispatch checkout" >&2; exit 1 ;;
+          esac
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.acceptance_run_id }}
+          github-token: ${{ github.token }}
+          pattern: wheel-acceptance-*
+          path: acceptance-artifacts
+      - name: Aggregate and verify adam-assist wheels without rebuilding
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_CORE_VERSION: ${{ inputs.expected_adam_core_version }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          find acceptance-artifacts -type f -name 'adam_assist-*.whl' -exec cp '{}' dist/ ';'
+          test "$(find dist -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 12
+          python - <<'PY'
+          import email
+          import os
+          import zipfile
+          from pathlib import Path
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name, parse_wheel_filename
+          from packaging.version import Version
+
+          expected_version = Version(os.environ["EXPECTED_VERSION"])
+          expected_core = Version(os.environ["EXPECTED_CORE_VERSION"])
+          expected_python = {"cp311", "cp312", "cp313"}
+          expected_platforms = {
+              "manylinux_2_17_x86_64",
+              "manylinux_2_17_aarch64",
+              "macosx_11_0_arm64",
+              "macosx_10_12_x86_64",
+          }
+          allowed_platform_aliases = {
+              "manylinux2014_x86_64",
+              "manylinux2014_aarch64",
+          }
+          combinations = set()
+          for wheel in sorted(Path("dist").glob("*.whl")):
+              name, version, _, tags = parse_wheel_filename(wheel.name)
+              if canonicalize_name(name) != "adam-assist" or version != expected_version:
+                  raise SystemExit(f"unexpected wheel identity: {wheel.name}")
+              with zipfile.ZipFile(wheel) as archive:
+                  metadata_paths = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")]
+                  if len(metadata_paths) != 1:
+                      raise SystemExit(f"{wheel.name}: unexpected METADATA files")
+                  metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
+              requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
+              core_requirements = [r for r in requirements if canonicalize_name(r.name) == "adam-core"]
+              if len(core_requirements) != 1 or str(core_requirements[0].specifier) != f"=={expected_core}":
+                  raise SystemExit(f"{wheel.name}: bad adam-core dependency {core_requirements}")
+              interpreters = {tag.interpreter for tag in tags}
+              abis = {tag.abi for tag in tags}
+              platforms = {tag.platform for tag in tags}
+              if len(interpreters) != 1 or abis != interpreters:
+                  raise SystemExit(
+                      f"{wheel.name}: unexpected interpreter/ABI tags {sorted(map(str, tags))}"
+                  )
+              canonical_platforms = platforms & expected_platforms
+              if len(canonical_platforms) != 1:
+                  raise SystemExit(
+                      f"{wheel.name}: expected one canonical platform tag, got {sorted(platforms)}"
+                  )
+              if not platforms <= expected_platforms | allowed_platform_aliases:
+                  raise SystemExit(
+                      f"{wheel.name}: unexpected platform aliases {sorted(platforms)}"
+                  )
+              combinations.add((interpreters.pop(), canonical_platforms.pop()))
+          expected = {(python, platform) for python in expected_python for platform in expected_platforms}
+          if combinations != expected:
+              raise SystemExit(
+                  f"wheel matrix mismatch: missing={sorted(expected - combinations)} "
+                  f"extra={sorted(combinations - expected)}"
+              )
+          PY
+          sha256sum dist/*.whl | sort | tee dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: adam-assist-${{ inputs.expected_version }}-tested-publication-set
+          path: dist/
+          if-no-files-found: error
+
+  publish-testpypi:
+    if: inputs.repository == 'testpypi'
+    needs: collect-tested-artifacts
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi-preview
+      url: https://test.pypi.org/p/adam-assist
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: adam-assist-${{ inputs.expected_version }}-tested-publication-set
+          path: dist
+      - run: rm dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: inputs.repository == 'pypi'
+    needs: collect-tested-artifacts
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-preview
+      url: https://pypi.org/p/adam-assist
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: adam-assist-${{ inputs.expected_version }}-tested-publication-set
+          path: dist
+      - run: rm dist/SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@release/v1
