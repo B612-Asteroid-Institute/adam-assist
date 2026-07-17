@@ -11,6 +11,7 @@ from adam_core.dynamics.impacts import (
 from adam_core.orbits import Orbits, VariantOrbits
 from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
+from packaging.version import Version
 
 from adam_assist import ASSISTPropagator
 
@@ -31,7 +32,7 @@ def _expected_seeded_impacts() -> int:
     the Rust migration candidate from 0.5.6 onward yields 123. Exact candidate
     integration is additionally covered by adam-core's clean-wheel matrix.
     """
-    release = tuple(int(part) for part in version("adam-core").split(".")[:3])
+    release = Version(version("adam-core")).release[:3]
     return 123 if release >= (0, 5, 6) else 138
 
 

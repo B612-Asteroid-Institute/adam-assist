@@ -203,8 +203,6 @@ def test_generate_ephemeris_covariance_matches_python_adam_assist(
         covariance=True,
         covariance_method="sigma-point",
         max_processes=1,
-        predict_magnitudes=False,
-        predict_phase_angle=False,
     )
     actual = RustASSISTPropagator().generate_ephemeris(
         orbits,
@@ -212,8 +210,6 @@ def test_generate_ephemeris_covariance_matches_python_adam_assist(
         covariance=True,
         covariance_method="sigma-point",
         max_processes=1,
-        predict_magnitudes=False,
-        predict_phase_angle=False,
     )
 
     np.testing.assert_allclose(
@@ -222,6 +218,7 @@ def test_generate_ephemeris_covariance_matches_python_adam_assist(
         atol=EPHEMERIS_STATE_ATOL,
         rtol=0,
     )
+    assert actual.coordinates.time.scale == "utc"
 
     actual_cov = _sorted_covariance(actual)
     expected_cov = _sorted_covariance(expected)

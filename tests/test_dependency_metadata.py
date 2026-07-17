@@ -1,5 +1,8 @@
+import importlib.util
 import tomllib
 from pathlib import Path
+
+from adam_assist.version import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,3 +36,14 @@ def test_public_extension_is_packaged_inside_adam_assist() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
     assert pyproject["tool"]["maturin"]["module-name"] == "adam_assist._native"
+
+
+def test_python_preview_version_matches_cargo_semver() -> None:
+    script = ROOT / "migration" / "scripts" / "write_maturin_version.py"
+    spec = importlib.util.spec_from_file_location("assist_write_version", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cargo_version = _cargo_manifest()["package"]["version"]
+    assert cargo_version == "0.4.0-rc.1"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc1"

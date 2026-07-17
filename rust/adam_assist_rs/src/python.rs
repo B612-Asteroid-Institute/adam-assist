@@ -1600,12 +1600,31 @@ fn run_ephemeris_benchmark(
         variant_samples.variants.coordinates.clone(),
     )
     .map_err(|err| err.to_string())?;
+    let mut variant_options = options.clone();
+    if let Some(h_v) = options.photometry.h_v.as_ref() {
+        variant_options.photometry.h_v = Some(
+            variant_samples
+                .source_orbit_indices
+                .iter()
+                .map(|&index| h_v[index])
+                .collect(),
+        );
+    }
+    if let Some(g) = options.photometry.g.as_ref() {
+        variant_options.photometry.g = Some(
+            variant_samples
+                .source_orbit_indices
+                .iter()
+                .map(|&index| g[index])
+                .collect(),
+        );
+    }
     let variant_result = propagator
         .inner
         .generate_ephemeris(
             &variant_orbits,
             observers,
-            options,
+            &variant_options,
             &PythonTimeProvider,
             &propagator.spice,
         )

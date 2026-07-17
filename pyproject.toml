@@ -59,7 +59,11 @@ dev = [
 ]
 
 [tool.pdm.scripts]
-rust-develop = "maturin develop --release --features python,extension-module"
+wheel-version = "python migration/scripts/write_maturin_version.py"
+rust-develop = { composite = [
+    "pdm run wheel-version",
+    "maturin develop --release --features python,extension-module",
+] }
 check = { composite = ["lint", "typecheck"] }
 format = { composite = ["black ./src/adam_assist ./tests", "isort ./src/adam_assist ./tests"] }
 lint = { composite = ["ruff check ./src/adam_assist ./tests", "black --check ./src/adam_assist ./tests", "isort --check-only ./src/adam_assist ./tests"] }

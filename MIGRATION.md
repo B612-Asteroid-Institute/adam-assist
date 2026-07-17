@@ -21,11 +21,34 @@ Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
 - `adam-core` owns permissive generic contracts and cross-package integration.
 
 Until adam-core's Rust crates are published, identified snapshots are carried
-under `rust/vendor`; see `rust/vendor/README.md`.
+under `rust/vendor`; see `rust/vendor/README.md`. For the `0.4.0rc1` package,
+the core crates will first be published as `0.1.0-rc.1`; adam-assist will then
+replace these snapshots with exact `=0.1.0-rc.1` dependencies before its final
+wheel candidate is built.
 
 ## Parity
 
-`migration/parity` contains the two-runtime legacy oracle. The reference runtime
-must contain pinned legacy adam-core and adam-assist 0.3.9. Current Rust tests
-exercise the public `adam_assist.ASSISTPropagator` import, never a private
-experimental package name.
+`migration/parity` contains the two-runtime legacy oracle. Numerical reference
+runs use pinned legacy adam-core and adam-assist 0.3.9. The complete published
+API authority is the `adam-assist==0.3.10` wheel identified in
+`migration/public_surface/adam_assist_0_3_10.json`; governance tests preserve
+its four modules, root exports, module-level helpers/constants, class methods,
+positional signatures, and defaults. Current Rust tests exercise the public
+`adam_assist.ASSISTPropagator` import, never a private experimental package
+name.
+
+## Release candidate
+
+The opt-in Python preview versions are:
+
+```text
+adam-core==0.5.6rc1
+adam-assist==0.4.0rc1
+```
+
+Pip excludes these from ordinary stable resolution. The adam-assist RC metadata
+must exact-pin the core RC before publication. Its 12 native wheels contain the
+Python compatibility veneer and compiled `adam_assist._native` extension. Each
+public propagation, ephemeris, covariance, or collision operation crosses into
+adam-assist once; adam-core generic algorithms and ASSIST orchestration then
+compose Rust-to-Rust inside that extension.

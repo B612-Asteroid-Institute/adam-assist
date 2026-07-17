@@ -11,6 +11,9 @@ directly and does not rely on adam-core base composition.
 
 from __future__ import annotations
 
+import hashlib
+import random
+from ctypes import c_uint32
 from pathlib import Path
 from typing import Any, Literal, TypeAlias, cast
 
@@ -19,6 +22,7 @@ import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
+from adam_core.constants import Constants as c
 from adam_core.coordinates.cartesian import CartesianCoordinates
 from adam_core.coordinates.covariances import CoordinateCovariances
 from adam_core.coordinates.origin import Origin, OriginCodes
@@ -38,14 +42,55 @@ from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 
+from adam_core.propagator.propagator import Propagator
 from adam_core.propagator.utils import ensure_input_origin_and_frame
 
 from ._native import NativeAssistPropagator
+from .version import __version__ as __version__
+
+C = c.C
 
 # adam-core's quivr tables are runtime-typed but do not currently publish
 # complete static typing metadata. Keep the public annotations readable while
 # containing that external Any boundary in one alias.
 OrbitTable: TypeAlias = Any
+
+
+def uint32_hash(s: str) -> c_uint32:
+    """Return the legacy deterministic REBOUND-compatible orbit hash."""
+    sha256_result = hashlib.sha256(s.encode()).digest()
+    return c_uint32(int.from_bytes(sha256_result[:4], byteorder="big"))
+
+
+def hash_orbit_ids_to_uint32(
+    orbit_ids: npt.NDArray[np.str_],
+) -> tuple[dict[int, str], list[c_uint32]]:
+    """Preserve the published string-ID to uint32 compatibility helper."""
+    hashes = [uint32_hash(orbit_id) for orbit_id in orbit_ids]
+    mapping = {hashes[i].value: orbit_ids[i] for i in range(len(orbit_ids))}
+    return mapping, hashes
+
+
+def generate_unique_separator(
+    *string_arrays: npt.NDArray[np.str_],
+    alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    length: int = 4,
+) -> str:
+    """Generate a legacy-compatible random separator absent from all inputs."""
+    all_strings = (
+        np.concatenate([array.astype(str) for array in string_arrays])
+        if string_arrays
+        else np.array([])
+    )
+    for _ in range(1000):
+        candidate = "".join(random.sample(alphabet, length))
+        if len(all_strings) == 0 or not np.any(
+            np.char.find(all_strings, candidate) >= 0
+        ):
+            return candidate
+    raise ValueError(
+        f"Could not generate a unique {length}-character string after 1000 attempts"
+    )
 
 
 def _column_to_list(column: Any) -> list[Any]:
@@ -217,7 +262,7 @@ def _collision_rows(
     return rows.set_column("coordinates", coordinates)
 
 
-class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
+class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     """Rust-backed propagation subset of ``adam_assist.ASSISTPropagator``.
 
     The public method mirrors the Python propagator's ``propagate_orbits``
@@ -232,14 +277,16 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
 
     def __init__(
         self,
-        *,
+        *args: object,
         planets_path: str | Path | None = None,
         asteroids_path: str | Path | None = None,
         min_dt: float = 1e-9,
         initial_dt: float = 1e-6,
         adaptive_mode: int = 1,
         epsilon: float = 1e-6,
+        **kwargs: object,
     ) -> None:
+        super().__init__(*args, **kwargs)
         self.planets_path = str(planets_path if planets_path is not None else de440)
         self.asteroids_path = str(
             asteroids_path if asteroids_path is not None else de441_n16
@@ -329,6 +376,16 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
         self,
         orbits: Orbits,
         observers: Observers,
+        covariance: bool = False,
+        covariance_method: Literal[
+            "auto", "sigma-point", "monte-carlo"
+        ] = "monte-carlo",
+        num_samples: int = 1000,
+        chunk_size: int | None = 100,
+        max_processes: int | None = 1,
+        seed: int | None = None,
+        predict_magnitudes: bool = True,
+        predict_phase_angle: bool = False,
         *,
         lt_tol: float = 1.0e-12,
         max_iter: int = 1000,
@@ -336,16 +393,6 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
         stellar_aberration: bool = False,
         max_lt_iter: int = 10,
         output_time_scale: str | None = None,
-        predict_magnitudes: bool = False,
-        predict_phase_angle: bool = False,
-        chunk_size: int | None = 100,
-        max_processes: int | None = 1,
-        covariance: bool = False,
-        covariance_method: Literal[
-            "auto", "sigma-point", "monte-carlo"
-        ] = "monte-carlo",
-        num_samples: int = 1000,
-        seed: int | None = None,
     ) -> Ephemeris:
         """Rust-native ASSIST ephemeris matching adam_assist public semantics.
 
@@ -366,7 +413,7 @@ class ASSISTPropagator(ImpactMixin):  # type: ignore[misc]
         observer_states: npt.NDArray[np.float64] = np.ascontiguousarray(
             observer_coordinates.values, dtype=np.float64
         )
-        out_scale = output_time_scale or observer_coordinates.time.scale
+        out_scale = output_time_scale or "utc"
 
         h_v: list[float | None] | None = None
         g: list[float | None] | None = None
