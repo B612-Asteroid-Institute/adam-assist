@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1781555144709,
+  "lastUpdate": 1784332529791,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -609,6 +609,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.1736294414053279",
             "extra": "mean: 26.044475116400008 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "akoumjian@users.noreply.github.com",
+            "name": "Alec Koumjian",
+            "username": "akoumjian"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7d50cdb1c52f5f79c4220b3b3415df93817d0166",
+          "message": "Register protected preview publication workflow (#36)",
+          "timestamp": "2026-07-17T19:27:56-04:00",
+          "tree_id": "08e34f8e9362dde53258b4157eb245cdd8e61775",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/7d50cdb1c52f5f79c4220b3b3415df93817d0166"
+        },
+        "date": 1784332529186,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.30611045702122314,
+            "unit": "iter/sec",
+            "range": "stddev: 0.01179425968840055",
+            "extra": "mean: 3.2667946392000204 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 16.826415533984694,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0007108549285268361",
+            "extra": "mean: 59.4303640000021 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 0.43308188712434414,
+            "unit": "iter/sec",
+            "range": "stddev: 0.004650274153555808",
+            "extra": "mean: 2.3090321477999964 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 0.43121057447377614,
+            "unit": "iter/sec",
+            "range": "stddev: 0.013577600762768895",
+            "extra": "mean: 2.3190525909999793 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 0.6137380269609036,
+            "unit": "iter/sec",
+            "range": "stddev: 0.01015935952442046",
+            "extra": "mean: 1.6293596877999903 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 1.8610829258683907,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000706263135873636",
+            "extra": "mean: 537.3215701999925 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 2.54693250871737,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0021707816879476664",
+            "extra": "mean: 392.6291711999852 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.019172246402418176,
+            "unit": "iter/sec",
+            "range": "stddev: 0.1012145758785858",
+            "extra": "mean: 52.15872876919999 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.038551792591630815,
+            "unit": "iter/sec",
+            "range": "stddev: 0.15898630045313583",
+            "extra": "mean: 25.939131043600014 sec\nrounds: 5"
           }
         ]
       }
