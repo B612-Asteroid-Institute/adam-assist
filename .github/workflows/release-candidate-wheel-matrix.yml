@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       adam_core_ref:
-        description: adam-core revision to test with this adam-assist revision
+        description: Exact published adam-core RC source tag to test
         required: true
-        default: rust-migration-waves-d-e
+        default: v0.5.6rc1
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'rust-migration-waves-d-e' }}
+  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'v0.5.6rc1' }}
   PIP_ONLY_BINARY: ":all:"
   ADAM_CORE_PREVIEW_VERSION: "0.5.6rc1"
   ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc1"

@@ -32,6 +32,19 @@ def test_canonical_sys_crates_are_pinned_without_assist_rs() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
 
 
+def test_preview_dependencies_are_exact_public_releases() -> None:
+    assert "adam-core==0.5.6rc1" in _project_dependencies()
+    manifest = _cargo_manifest()
+    dependencies = manifest["dependencies"]
+    assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.1"
+    assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.1"
+    assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == {
+        "version": "=0.1.0-rc.1",
+        "default-features": False,
+    }
+    assert not (ROOT / "rust" / "vendor").exists()
+
+
 def test_public_extension_is_packaged_inside_adam_assist() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)

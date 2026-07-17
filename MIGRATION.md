@@ -20,11 +20,11 @@ Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
   and its GPL Python wheel.
 - `adam-core` owns permissive generic contracts and cross-package integration.
 
-Until adam-core's Rust crates are published, identified snapshots are carried
-under `rust/vendor`; see `rust/vendor/README.md`. For the `0.4.0rc1` package,
-the core crates will first be published as `0.1.0-rc.1`; adam-assist will then
-replace these snapshots with exact `=0.1.0-rc.1` dependencies before its final
-wheel candidate is built.
+The temporary identified snapshots under `rust/vendor` were removed after the
+adam-core Rust crates were published. The `0.4.0rc1` package exact-pins the
+public `adam_core_rs_coords`, `adam_core_rs_spice`, and test-only
+`adam_core_rs_kernel_data` crates to `=0.1.0-rc.1`; its Python metadata
+exact-pins `adam-core==0.5.6rc1`.
 
 ## Parity
 

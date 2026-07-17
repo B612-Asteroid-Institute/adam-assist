@@ -2024,7 +2024,7 @@ mod tests {
     }
 
     /// Kernel paths for live tests. The historical env vars remain explicit
-    /// overrides; otherwise the vendored adam-core kernel-data resolver finds
+    /// overrides; otherwise the published adam-core kernel-data resolver finds
     /// the files (installed-Python probe, cache, or checksummed PyPI fetch).
     fn live_kernel_paths() -> (String, String) {
         let resolver = adam_core_rs_kernel_data::Resolver::from_env();

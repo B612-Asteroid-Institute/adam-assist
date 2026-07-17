@@ -20,7 +20,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "adam-core>=0.5.4",
+    "adam-core==0.5.6rc1",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     "numpy",
