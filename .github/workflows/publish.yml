@@ -126,6 +126,10 @@ jobs:
               "macosx_11_0_arm64",
               "macosx_10_12_x86_64",
           }
+          allowed_platform_aliases = {
+              "manylinux2014_x86_64",
+              "manylinux2014_aarch64",
+          }
           combinations = set()
           for wheel in sorted(Path("dist").glob("*.whl")):
               name, version, _, tags = parse_wheel_filename(wheel.name)
@@ -140,8 +144,23 @@ jobs:
               core_requirements = [r for r in requirements if canonicalize_name(r.name) == "adam-core"]
               if len(core_requirements) != 1 or str(core_requirements[0].specifier) != f"=={expected_core}":
                   raise SystemExit(f"{wheel.name}: bad adam-core dependency {core_requirements}")
-              for tag in tags:
-                  combinations.add((tag.interpreter, tag.platform))
+              interpreters = {tag.interpreter for tag in tags}
+              abis = {tag.abi for tag in tags}
+              platforms = {tag.platform for tag in tags}
+              if len(interpreters) != 1 or abis != interpreters:
+                  raise SystemExit(
+                      f"{wheel.name}: unexpected interpreter/ABI tags {sorted(map(str, tags))}"
+                  )
+              canonical_platforms = platforms & expected_platforms
+              if len(canonical_platforms) != 1:
+                  raise SystemExit(
+                      f"{wheel.name}: expected one canonical platform tag, got {sorted(platforms)}"
+                  )
+              if not platforms <= expected_platforms | allowed_platform_aliases:
+                  raise SystemExit(
+                      f"{wheel.name}: unexpected platform aliases {sorted(platforms)}"
+                  )
+              combinations.add((interpreters.pop(), canonical_platforms.pop()))
           expected = {(python, platform) for python in expected_python for platform in expected_platforms}
           if combinations != expected:
               raise SystemExit(
