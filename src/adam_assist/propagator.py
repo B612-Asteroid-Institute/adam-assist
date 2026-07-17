@@ -358,6 +358,21 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
         )
 
+    def _propagate_orbits(
+        self,
+        orbits: OrbitTable,
+        times: Timestamp,
+    ) -> OrbitTable:
+        """Satisfy the adam-core <=0.5.5 private propagator contract.
+
+        The public method remains the single implementation and performs the
+        one native Rust crossing. Newer adam-core releases make the public
+        method itself the abstract contract, while the published 0.5.5 base
+        class still requires this private hook before the class can be
+        instantiated.
+        """
+        return self.propagate_orbits(orbits, times)
+
     def benchmark_last_native(
         self, reps: int, trials: int = 1, warmup_reps: int = 1
     ) -> tuple[str, list[list[float]]]:

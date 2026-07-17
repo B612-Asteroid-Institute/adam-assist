@@ -23,6 +23,8 @@ def test_published_0310_modules_remain_importable() -> None:
 
 def test_assist_propagator_preserves_the_public_base_contract() -> None:
     assert issubclass(ASSISTPropagator, Propagator)
+    assert not inspect.isabstract(ASSISTPropagator)
+    assert hasattr(ASSISTPropagator, "_propagate_orbits")
     for method in MANIFEST["legacy_class_methods"]["ASSISTPropagator"]:
         assert hasattr(ASSISTPropagator, method)
     for hook in MANIFEST["private_compatibility_hooks"]:
