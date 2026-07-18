@@ -1,0 +1,51 @@
+{
+  "oracle": {
+    "distribution": "adam-assist",
+    "version": "0.3.10",
+    "wheel": "adam_assist-0.3.10-py3-none-any.whl",
+    "sha256": "9e72cc5bdb9ba26b12546a1a4d1419ad6d5338da8dc14e9fa4b1187b74bcee94"
+  },
+  "modules": [
+    "adam_assist",
+    "adam_assist.perturbers",
+    "adam_assist.propagator",
+    "adam_assist.version"
+  ],
+  "root_exports": [
+    "ASSISTPropagator",
+    "get_perturber_designations",
+    "get_perturber_naif_id",
+    "get_perturber_naif_ids",
+    "is_perturber"
+  ],
+  "perturber_symbols": [
+    "PERTURBER_DESIGNATIONS",
+    "PERTURBER_NAIF_IDS",
+    "get_perturber_designations",
+    "get_perturber_naif_id",
+    "get_perturber_naif_ids",
+    "is_perturber",
+    "unique_perturber_ids_from_candidates"
+  ],
+  "propagator_symbols": [
+    "ASSISTPropagator",
+    "C",
+    "EARTH_RADIUS_KM",
+    "generate_unique_separator",
+    "hash_orbit_ids_to_uint32",
+    "uint32_hash"
+  ],
+  "legacy_class_methods": {
+    "ASSISTPropagator": [
+      "__getstate__",
+      "__init__",
+      "__setstate__",
+      "detect_collisions",
+      "generate_ephemeris",
+      "propagate_orbits"
+    ]
+  },
+  "private_compatibility_hooks": [
+    "ASSISTPropagator._detect_collisions"
+  ]
+}

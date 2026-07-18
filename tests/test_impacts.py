@@ -1,14 +1,17 @@
-import pytest
-import pyarrow.compute as pc
+from importlib.metadata import version
 
-from adam_core.constants import Constants as c
+import pyarrow.compute as pc
+import pytest
 from adam_core.constants import KM_P_AU
-from adam_core.coordinates import Origin
+from adam_core.constants import Constants as c
+from adam_core.dynamics.impacts import (
+    CollisionConditions,
+    calculate_impacts,
+)
 from adam_core.orbits import Orbits, VariantOrbits
-from adam_core.dynamics.impacts import calculate_impacts, CollisionConditions, EARTH_RADIUS_KM
-from adam_core.orbits import Orbits
 from adam_core.orbits.query.horizons import query_horizons
 from adam_core.time import Timestamp
+from packaging.version import Version
 
 from adam_assist import ASSISTPropagator
 
@@ -20,6 +23,17 @@ IMPACTOR_FILE_PATH_100 = "tests/data/I00008_orbit.parquet"
 IMPACTOR_FILE_PATH_0 = "tests/data/I00009_orbit.parquet"
 
 R_EARTH_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
+
+
+def _expected_seeded_impacts() -> int:
+    """Pin each supported adam-core RNG generation explicitly.
+
+    Published adam-core 0.5.5 is the minimum CI dependency and yields 138;
+    the Rust migration candidate from 0.5.6 onward yields 123. Exact candidate
+    integration is additionally covered by adam-core's clean-wheel matrix.
+    """
+    release = Version(version("adam-core")).release[:3]
+    return 123 if release >= (0, 5, 6) else 138
 
 
 @pytest.mark.benchmark
@@ -37,21 +51,34 @@ def test_calculate_impacts_benchmark_some_impacts(benchmark, processes):
         seed=42,  # This allows us to predict exact number of impactors empirically
     )
     assert len(variants) == 200, "Should have 200 variants"
-    assert len(impacts) == 138, "Should have exactly 138 impactors"
+    # Rust owns Monte Carlo sampling; its seeded RNG is deterministic but not
+    # bit-identical to NumPy legacy sampling (migration decision 2026-07-03).
+    expected_impacts = _expected_seeded_impacts()
+    assert (
+        len(impacts) == expected_impacts
+    ), f"Should have exactly {expected_impacts} Rust-seeded impactors"
+
 
 @pytest.mark.parametrize("processes", [1, 2])
 def test_calculate_impacts(processes):
     impactor = Orbits.from_parquet(IMPACTOR_FILE_PATH_60)[0]
     propagator = ASSISTPropagator()
 
-    variants_orbits = VariantOrbits.create(impactor, method="monte-carlo", num_samples=200, seed=42)
+    variants_orbits = VariantOrbits.create(
+        impactor, method="monte-carlo", num_samples=200, seed=42
+    )
     variants, impacts = propagator.detect_collisions(
         variants_orbits,
         60,
         max_processes=processes,
     )
     assert len(variants) == 200, "Should have 200 variants"
-    assert len(impacts) == 138, "Should have exactly 138 impactors"
+    # Rust owns Monte Carlo sampling; its seeded RNG is deterministic but not
+    # bit-identical to NumPy legacy sampling (migration decision 2026-07-03).
+    expected_impacts = _expected_seeded_impacts()
+    assert (
+        len(impacts) == expected_impacts
+    ), f"Should have exactly {expected_impacts} Rust-seeded impactors"
 
     assert impacts.collision_coordinates.frame == "ecliptic"
     assert pc.all(pc.equal(impacts.collision_coordinates.origin.code, "EARTH")).as_py()

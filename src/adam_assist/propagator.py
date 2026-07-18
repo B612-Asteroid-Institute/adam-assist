@@ -1,74 +1,73 @@
+"""Rust-backed ASSIST propagator.
+
+This package is the GPL Python boundary over adam-assist-owned Rust
+orchestration and the canonical ``libassist-sys`` / ``librebound-sys``
+bindings. Public propagation, covariance ephemeris, and collision detection
+each use a single Python→Rust crossing; sampled covariance expansion/collapse
+and Rayon parallelism live in Rust. The propagator implements the public
+``propagate_orbits`` / ``generate_ephemeris`` / ``detect_collisions`` contract
+directly and does not rely on adam-core base composition.
+"""
+
+from __future__ import annotations
+
 import hashlib
 import random
 from ctypes import c_uint32
-from typing import Any, Dict, List, Tuple, Union
+from pathlib import Path
+from typing import Any, Literal, TypeAlias, cast
 
-import assist
 import numpy as np
 import numpy.typing as npt
 import pyarrow as pa
 import pyarrow.compute as pc
 import quivr as qv
-import rebound
-from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
-from adam_core.coordinates import (
-    CartesianCoordinates,
-    Origin,
-    OriginCodes,
-    SphericalCoordinates,
-    transform_coordinates,
+from adam_core.coordinates.cartesian import CartesianCoordinates
+from adam_core.coordinates.covariances import CoordinateCovariances
+from adam_core.coordinates.origin import Origin, OriginCodes
+from adam_core.coordinates.spherical import SphericalCoordinates
+from adam_core.coordinates.transform import transform_coordinates
+from adam_core.dynamics.impacts import (
+    EARTH_RADIUS_KM,
+    CollisionConditions,
+    CollisionEvent,
+    ImpactMixin,
 )
-from adam_core.dynamics.impacts import CollisionConditions, CollisionEvent, ImpactMixin
-from adam_core.orbits import Orbits
+from adam_core.observers.observers import Observers
+from adam_core.orbits.ephemeris import Ephemeris
+from adam_core.orbits.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
-from quivr.concat import concatenate
 
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
+from adam_core.propagator.propagator import Propagator
+from adam_core.propagator.utils import ensure_input_origin_and_frame
+
+from ._native import NativeAssistPropagator
+from .version import __version__ as __version__
 
 C = c.C
 
-try:
-    from adam_assist.version import __version__
-except ImportError:
-    __version__ = "0.0.0"
-
-# Use the Earth's equatorial radius as used in DE4XX ephemerides
-# adam_core defines it in au but we need it in km
-EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
-
-# pyarrow.compute type stubs are incomplete for the functions used here.
-pc_cast: Any = pc.cast
-pc_invert: Any = pc.invert  # type: ignore[attr-defined]
-pc_is_in: Any = pc.is_in  # type: ignore[attr-defined]
-pc_subtract: Any = pc.subtract  # type: ignore[attr-defined]
-pc_unique: Any = pc.unique  # type: ignore[attr-defined]
+# adam-core's quivr tables are runtime-typed but do not currently publish
+# complete static typing metadata. Keep the public annotations readable while
+# containing that external Any boundary in one alias.
+OrbitTable: TypeAlias = Any
 
 
 def uint32_hash(s: str) -> c_uint32:
+    """Return the legacy deterministic REBOUND-compatible orbit hash."""
     sha256_result = hashlib.sha256(s.encode()).digest()
-    # Get the first 4 bytes of the SHA256 hash to obtain a uint32 value.
     return c_uint32(int.from_bytes(sha256_result[:4], byteorder="big"))
 
 
 def hash_orbit_ids_to_uint32(
-    # orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
     orbit_ids: npt.NDArray[np.str_],
-) -> Tuple[Dict[int, str], List[c_uint32]]:
-    """
-    Derive uint32 hashes from orbit id strigns
-
-    Rebound uses uint32 to track individual particles, but we use orbit id strings.
-    Here we attempt to generate uint32 hashes for each and return the mapping as well.
-    """
-    hashes = [uint32_hash(o) for o in orbit_ids]
-    # Because uint32 is an unhashable type,
-    # we use a dict mapping from uint32 to orbit id string
+) -> tuple[dict[int, str], list[c_uint32]]:
+    """Preserve the published string-ID to uint32 compatibility helper."""
+    hashes = [uint32_hash(orbit_id) for orbit_id in orbit_ids]
     mapping = {hashes[i].value: orbit_ids[i] for i in range(len(orbit_ids))}
-
     return mapping, hashes
 
 
@@ -77,788 +76,994 @@ def generate_unique_separator(
     alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
     length: int = 4,
 ) -> str:
-    """
-    Generate a random string of specified length that is not present as a substring in any of the input arrays.
-    All characters in the generated string will be different to prevent misplaced substring matches when splitting.
-
-    Parameters
-    ----------
-    *string_arrays : npt.NDArray[np.str_]
-        One or more numpy arrays of strings to check against
-    alphabet : str, optional
-        Characters to use for generating the random string, by default includes letters and digits
-    length : int, optional
-        Length of the random string to generate, by default 4
-
-    Returns
-    -------
-    str
-        A random string that is not present as a substring in any of the input arrays
-
-    Raises
-    ------
-    ValueError
-        If unable to generate a unique string after many attempts
-    """
-    # Combine all arrays into a single numpy array for vectorized operations
+    """Generate a legacy-compatible random separator absent from all inputs."""
     all_strings = (
-        np.concatenate([arr.astype(str) for arr in string_arrays])
+        np.concatenate([array.astype(str) for array in string_arrays])
         if string_arrays
         else np.array([])
     )
-
-    max_attempts = 1000
-    for _ in range(max_attempts):
-        # Generate a random string with all different characters
-        chars = random.sample(alphabet, length)
-        candidate = "".join(chars)
-
-        # Vectorized substring check using numpy
-        if len(all_strings) == 0:
+    for _ in range(1000):
+        candidate = "".join(random.sample(alphabet, length))
+        if len(all_strings) == 0 or not np.any(
+            np.char.find(all_strings, candidate) >= 0
+        ):
             return candidate
-
-        # Use numpy's vectorized string operations for faster substring checking
-        contains_candidate = np.char.find(all_strings, candidate) >= 0
-        if not np.any(contains_candidate):
-            return candidate
-
     raise ValueError(
-        f"Could not generate a unique {length}-character string after {max_attempts} attempts"
+        f"Could not generate a unique {length}-character string after 1000 attempts"
     )
 
 
-class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
+def _column_to_list(column: Any) -> list[Any]:
+    if hasattr(column, "to_pylist"):
+        return list(column.to_pylist())
+    if hasattr(column, "to_numpy"):
+        return list(column.to_numpy(zero_copy_only=False).tolist())
+    return list(column)
+
+
+def _string_column_to_list(column: Any) -> list[str]:
+    return [str(value) for value in _column_to_list(column)]
+
+
+def _optional_string_column_to_list(column: Any) -> list[str | None]:
+    return [None if value is None else str(value) for value in _column_to_list(column)]
+
+
+def _optional_float_column_to_list(column: Any) -> list[float | None]:
+    return [
+        None if value is None else float(value) for value in _column_to_list(column)
+    ]
+
+
+def _time_parts(times: Timestamp) -> tuple[str, list[int], list[int]]:
+    days = times.days.to_numpy(zero_copy_only=False).astype(np.int64).tolist()
+    nanos = times.nanos.to_numpy(zero_copy_only=False).astype(np.int64).tolist()
+    return times.scale, days, nanos
+
+
+def _output_times(result: dict[str, Any]) -> Timestamp:
+    return Timestamp.from_kwargs(
+        days=result["time_days"],
+        nanos=result["time_nanos"],
+        scale=result["time_scale"],
+    )
+
+
+def _raise_if_failed_rows(result: dict[str, Any]) -> None:
+    validity = result["validity"]
+    if all(validity):
+        return
+    messages = result["messages"]
+    first_failure = next(
+        (message for is_valid, message in zip(validity, messages) if not is_valid),
+        "assist-rs propagation failed",
+    )
+    raise RuntimeError(first_failure)
+
+
+def _physical_parameters_for_output(orbits: OrbitTable, result: dict[str, Any]) -> Any:
+    input_indices = np.asarray(result["input_orbit_indices"], dtype=np.int64)
+    return orbits.physical_parameters.take(input_indices)
+
+
+def _coordinates_from_result(result: dict[str, Any]) -> CartesianCoordinates:
+    states = np.asarray(result["states"], dtype=np.float64)
+    covariances = result.get("covariances")
+    covariance = None
+    if covariances is not None:
+        covariance_rows = np.asarray(covariances, dtype=np.float64).reshape(
+            states.shape[0], 6, 6
+        )
+        covariance = CoordinateCovariances.from_matrix(covariance_rows)
+    return CartesianCoordinates.from_kwargs(
+        x=states[:, 0],
+        y=states[:, 1],
+        z=states[:, 2],
+        vx=states[:, 3],
+        vy=states[:, 4],
+        vz=states[:, 5],
+        covariance=covariance,
+        time=_output_times(result),
+        origin=Origin.from_kwargs(code=result["origin_codes"]),
+        frame=result["frame"],
+    )
+
+
+def _ephemeris_from_result(result: dict[str, Any]) -> Ephemeris:
+    states = np.asarray(result["states"], dtype=np.float64)
+    spherical_covariance = result.get("covariance")
+    coordinates = SphericalCoordinates.from_kwargs(
+        rho=states[:, 0],
+        lon=states[:, 1],
+        lat=states[:, 2],
+        vrho=states[:, 3],
+        vlon=states[:, 4],
+        vlat=states[:, 5],
+        time=Timestamp.from_kwargs(
+            days=result["time_days"],
+            nanos=result["time_nanos"],
+            scale=result["time_scale"],
+        ),
+        origin=Origin.from_kwargs(code=result["origin_codes"]),
+        frame=result["frame"],
+        covariance=(
+            CoordinateCovariances.from_matrix(
+                np.asarray(spherical_covariance, dtype=np.float64).reshape(-1, 6, 6)
+            )
+            if spherical_covariance is not None
+            else None
+        ),
+    )
+    kwargs: dict[str, Any] = {
+        "orbit_id": result["orbit_id"],
+        "object_id": result["object_id"],
+        "coordinates": coordinates,
+        "light_time": result["light_time"],
+    }
+    if result["alpha"] is not None:
+        kwargs["alpha"] = result["alpha"]
+    if result["predicted_magnitude_v"] is not None:
+        kwargs["predicted_magnitude_v"] = result["predicted_magnitude_v"]
+    if result["aberrated_states"] is not None:
+        aberrated_states = np.asarray(result["aberrated_states"], dtype=np.float64)
+        aberrated_covariance = result.get("aberrated_covariance")
+        kwargs["aberrated_coordinates"] = CartesianCoordinates.from_kwargs(
+            x=aberrated_states[:, 0],
+            y=aberrated_states[:, 1],
+            z=aberrated_states[:, 2],
+            vx=aberrated_states[:, 3],
+            vy=aberrated_states[:, 4],
+            vz=aberrated_states[:, 5],
+            time=Timestamp.from_kwargs(
+                days=result["aberrated_time_days"],
+                nanos=result["aberrated_time_nanos"],
+                scale=result["aberrated_time_scale"],
+            ),
+            origin=Origin.from_kwargs(code=result["aberrated_origin_codes"]),
+            frame="ecliptic",
+            covariance=(
+                CoordinateCovariances.from_matrix(
+                    np.asarray(aberrated_covariance, dtype=np.float64).reshape(-1, 6, 6)
+                )
+                if aberrated_covariance is not None
+                else None
+            ),
+        )
+    return Ephemeris.from_kwargs(**kwargs)
+
+
+def _collision_rows(
+    source: OrbitTable,
+    indices: npt.NDArray[np.int64],
+    states: npt.NDArray[np.float64],
+    times: Timestamp,
+) -> OrbitTable:
+    """Source rows re-coordinated at collision-loop states/times.
+
+    Preserves orbit/variant identity, weights, and physical parameters from
+    the input table while replacing coordinates with barycentric-equatorial
+    states from the Rust collision loop (matching the legacy step-loop table
+    construction).
+    """
+    rows = source.take(pa.array(indices, type=pa.int64()))
+    coordinates = CartesianCoordinates.from_kwargs(
+        x=states[:, 0],
+        y=states[:, 1],
+        z=states[:, 2],
+        vx=states[:, 3],
+        vy=states[:, 4],
+        vz=states[:, 5],
+        time=times,
+        origin=Origin.from_kwargs(
+            code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", len(states))
+        ),
+        frame="equatorial",
+    )
+    return rows.set_column("coordinates", coordinates)
+
+
+class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
+    """Rust-backed propagation subset of ``adam_assist.ASSISTPropagator``.
+
+    The public method mirrors the Python propagator's ``propagate_orbits``
+    signature for state propagation. ``max_processes`` controls the Rust Rayon
+    thread limit rather than launching Ray workers; this keeps the benchmark
+    Python-callable while measuring the Rust adapter boundary directly.
+
+    ``ImpactMixin`` support: ``_detect_collisions`` mirrors the Python
+    ``adam_assist`` step loop through a single Rust crossing, so
+    ``detect_collisions``/``calculate_impacts`` work with this propagator.
+    """
 
     def __init__(
         self,
-        *args: object,  # Generic type for arbitrary positional arguments
+        *args: object,
+        planets_path: str | Path | None = None,
+        asteroids_path: str | Path | None = None,
         min_dt: float = 1e-9,
         initial_dt: float = 1e-6,
         adaptive_mode: int = 1,
         epsilon: float = 1e-6,
-        **kwargs: object,  # Generic type for arbitrary keyword arguments
+        **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
-        if min_dt <= 0:
-            raise ValueError("min_dt must be positive")
-        if initial_dt <= 0:
-            raise ValueError("initial_dt must be positive")
-        if min_dt > initial_dt:
-            raise ValueError("min_dt must be smaller than initial_dt")
+        self.planets_path = str(planets_path if planets_path is not None else de440)
+        self.asteroids_path = str(
+            asteroids_path if asteroids_path is not None else de441_n16
+        )
         self.min_dt = min_dt
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
-
-    def __getstate__(self) -> Dict[str, Any]:
-        state = self.__dict__.copy()
-        state.pop("_last_simulation", None)
-        return state
-
-    def __setstate__(self, state: Dict[str, Any]) -> None:
-        self.__dict__.update(state)
-
-    def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
-        """
-        Propagate the orbits to the specified times.
-        """
-        # OPTIMIZATION: Fast path for single orbits
-        if len(orbits) == 1:
-            return self._propagate_single_orbit_optimized(orbits, times)
-
-        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
-        # This is also the native coordinate system for the JPL binary files.
-        # For units we use solar masses, astronomical units, and days.
-        # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
-        # Convert coordinates to ICRF using TDB time
-        transformed_coords = transform_coordinates(
-            orbits.coordinates,
-            origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
-            frame_out="equatorial",
-        )
-        transformed_input_orbit_times = transformed_coords.time.rescale("tdb")
-        transformed_coords = transformed_coords.set_column(
-            "time", transformed_input_orbit_times
-        )
-        transformed_orbits = orbits.set_column("coordinates", transformed_coords)
-
-        # Group orbits by unique time, then propagate them
-        results = None
-        unique_times = transformed_orbits.coordinates.time.unique()
-        for epoch in unique_times:
-            mask = transformed_orbits.coordinates.time.equals(epoch)
-            epoch_orbits = transformed_orbits.apply_mask(mask)
-            propagated_orbits = self._propagate_orbits_inner(epoch_orbits, times)
-            if results is None:
-                results = propagated_orbits
-            else:
-                results = concatenate([results, propagated_orbits])
-
-        # Sanity check that the results are of the correct type
-        assert isinstance(results, OrbitType)
-
-        return results
-
-    def _propagate_single_orbit_optimized(
-        self, orbit: OrbitType, times: TimestampType
-    ) -> OrbitType:
-        """
-        Optimized propagation for a single orbit, bypassing grouping overhead.
-        """
-        # Validate assumption
-        if len(orbit) != 1:
-            raise ValueError(f"Expected exactly 1 orbit, got {len(orbit)}")
-
-        # Transform coordinates directly without grouping
-        transformed_coords = transform_coordinates(
-            orbit.coordinates,
-            origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
-            frame_out="equatorial",
-        )
-        transformed_input_orbit_times = transformed_coords.time.rescale("tdb")
-        transformed_coords = transformed_coords.set_column(
-            "time", transformed_input_orbit_times
-        )
-        transformed_orbit = orbit.set_column("coordinates", transformed_coords)
-
-        return self._propagate_single_orbit_inner_optimized(transformed_orbit, times)
-
-    def _propagate_single_orbit_inner_optimized(
-        self, orbit: OrbitType, times: TimestampType
-    ) -> OrbitType:
-        """
-        Inner propagation optimized for exactly one orbit.
-        """
-        assert len(orbit) == 1, f"Expected exactly 1 orbit, got {len(orbit)}"
-
-        # Setup ephemeris and simulation
-        ephem = assist.Ephem(planets_path=de440, asteroids_path=de441_n16)
-        sim = rebound.Simulation()
-
-        start_tdb_time = orbit.coordinates.time.jd().to_numpy()[0]
-        sim.t = start_tdb_time - ephem.jd_ref
-
-        # Handle particle ID creation (optimized for single orbit)
-        is_variant = isinstance(orbit, VariantOrbits)
-        if is_variant:
-            orbit_id = str(orbit.orbit_id.to_numpy(zero_copy_only=False)[0])
-            variant_id = str(orbit.variant_id.to_numpy(zero_copy_only=False)[0])
-            particle_hash = uint32_hash(f"{orbit_id}\x1f{variant_id}")
-        else:
-            orbit_id = str(orbit.orbit_id.to_numpy(zero_copy_only=False)[0])
-            particle_hash = uint32_hash(orbit_id)
-
-        assist.Extras(sim, ephem)
-
-        # Add single particle
-        coords = orbit.coordinates
-        position_arrays = coords.r
-        velocity_arrays = coords.v
-
-        sim.add(
-            x=position_arrays[0, 0],
-            y=position_arrays[0, 1],
-            z=position_arrays[0, 2],
-            vx=velocity_arrays[0, 0],
-            vy=velocity_arrays[0, 1],
-            vz=velocity_arrays[0, 2],
-            hash=particle_hash,
+        self._native = NativeAssistPropagator(
+            self.planets_path,
+            self.asteroids_path,
+            min_dt=min_dt,
+            initial_dt=initial_dt,
+            adaptive_mode=adaptive_mode,
+            epsilon=epsilon,
         )
 
-        # Set integrator parameters
-        sim.dt = self.initial_dt
-        sim.ri_ias15.min_dt = self.min_dt
-        sim.ri_ias15.adaptive_mode = self.adaptive_mode
-        sim.ri_ias15.epsilon = self.epsilon
+    def __getstate__(self) -> dict[str, Any]:
+        """Return constructor state without the non-pickleable native handle."""
+        return {
+            "planets_path": self.planets_path,
+            "asteroids_path": self.asteroids_path,
+            "min_dt": self.min_dt,
+            "initial_dt": self.initial_dt,
+            "adaptive_mode": self.adaptive_mode,
+            "epsilon": self.epsilon,
+        }
 
-        # Prepare integration times (numpy only)
-        integrator_times = times.rescale("tdb").jd().to_numpy()
-        integrator_times = integrator_times - ephem.jd_ref
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Recreate process-local ASSIST/SPICE state after unpickling."""
+        ASSISTPropagator.__init__(self, **state)
 
-        # Integration loop (preallocate state array)
-        N = len(integrator_times)
-        if N == 0:
-            return VariantOrbits.empty() if is_variant else Orbits.empty()
-
-        xyzvxvyvz = np.zeros((N, 6), dtype="float64")
-        scratch = np.zeros((1, 6), dtype="float64")
-
-        for i in range(N):
-            sim.integrate(integrator_times[i])
-            scratch.fill(0.0)
-            sim.serialize_particle_data(xyzvxvyvz=scratch)
-            xyzvxvyvz[i, :] = scratch[0, :]
-
-        # Build results
-        jd_times = integrator_times + ephem.jd_ref
-        times_out = Timestamp.from_jd(jd_times, scale="tdb")
-        origin_codes = Origin.from_kwargs(
-            code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", xyzvxvyvz.shape[0])
+    def propagate_orbits(
+        self,
+        orbits: OrbitTable,
+        times: Timestamp,
+        covariance: bool = False,
+        covariance_method: Literal[
+            "auto", "sigma-point", "monte-carlo"
+        ] = "monte-carlo",
+        num_samples: int = 1000,
+        chunk_size: int | None = 100,
+        max_processes: int | None = 1,
+        seed: int | None = None,
+    ) -> OrbitTable:
+        if covariance and isinstance(orbits, VariantOrbits):
+            raise AssertionError("Covariance is not supported for VariantOrbits")
+        sorted_times = times.sort_by(["days", "nanos"])
+        result = self._propagate_orbits_native(
+            orbits,
+            sorted_times,
+            covariance=covariance,
+            covariance_method=covariance_method,
+            num_samples=num_samples,
+            seed=seed,
+            chunk_size=chunk_size,
+            thread_limit=max_processes,
+        )
+        if isinstance(result, VariantOrbits):
+            return result.sort_by(
+                [
+                    "orbit_id",
+                    "variant_id",
+                    "coordinates.time.days",
+                    "coordinates.time.nanos",
+                ]
+            )
+        return result.sort_by(
+            ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
         )
 
-        if is_variant:
-            orbit_ids_out = pa.repeat(pc_cast(orbit_id, pa.large_string()), N)
-            variant_ids_out = pa.repeat(pc_cast(variant_id, pa.large_string()), N)
-            object_id_out = pa.repeat(orbit.object_id[0], N)
-            weights_out = pa.repeat(orbit.weights[0], N)
-            weights_cov_out = pa.repeat(orbit.weights_cov[0], N)
-            physical_parameters_out = orbit.physical_parameters.take(
-                np.zeros(N, dtype=np.int64)
+    def _propagate_orbits(
+        self,
+        orbits: OrbitTable,
+        times: Timestamp,
+    ) -> OrbitTable:
+        """Satisfy the adam-core <=0.5.5 private propagator contract.
+
+        The public method remains the single implementation and performs the
+        one native Rust crossing. Newer adam-core releases make the public
+        method itself the abstract contract, while the published 0.5.5 base
+        class still requires this private hook before the class can be
+        instantiated.
+        """
+        return self.propagate_orbits(orbits, times)
+
+    def benchmark_last_native(
+        self, reps: int, trials: int = 1, warmup_reps: int = 1
+    ) -> tuple[str, list[list[float]]]:
+        """Time the last prepared propagation/ephemeris/collision operation.
+
+        Samples are owned by Rust ``std::time::Instant``; Python/PyO3 input and
+        output conversion occurred during the preceding public call and is not
+        included.
+        """
+        operation, samples = self._native.benchmark_last_native(
+            int(reps), int(trials), int(warmup_reps)
+        )
+        return str(operation), [list(map(float, trial)) for trial in samples]
+
+    def generate_ephemeris(
+        self,
+        orbits: Orbits,
+        observers: Observers,
+        covariance: bool = False,
+        covariance_method: Literal[
+            "auto", "sigma-point", "monte-carlo"
+        ] = "monte-carlo",
+        num_samples: int = 1000,
+        chunk_size: int | None = 100,
+        max_processes: int | None = 1,
+        seed: int | None = None,
+        predict_magnitudes: bool = True,
+        predict_phase_angle: bool = False,
+        *,
+        lt_tol: float = 1.0e-12,
+        max_iter: int = 1000,
+        tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+        output_time_scale: str | None = None,
+    ) -> Ephemeris:
+        """Rust-native ASSIST ephemeris matching adam_assist public semantics.
+
+        Observer Cartesian states come from the ``observers`` table (e.g.
+        ``Observers.from_codes``); the Rust path performs the barycentric
+        light-time geometry natively. Mirrors ``adam_assist`` light-time-only
+        (no stellar aberration) defaults.
+        """
+        orbit_coordinates = orbits.coordinates
+        orbit_scale, orbit_days, orbit_nanos = _time_parts(orbit_coordinates.time)
+        orbit_states: npt.NDArray[np.float64] = np.ascontiguousarray(
+            orbit_coordinates.values, dtype=np.float64
+        )
+        observer_coordinates = observers.coordinates
+        observer_scale, observer_days, observer_nanos = _time_parts(
+            observer_coordinates.time
+        )
+        observer_states: npt.NDArray[np.float64] = np.ascontiguousarray(
+            observer_coordinates.values, dtype=np.float64
+        )
+        out_scale = output_time_scale or "utc"
+
+        h_v: list[float | None] | None = None
+        g: list[float | None] | None = None
+        if predict_magnitudes:
+            h_v = _optional_float_column_to_list(orbits.physical_parameters.H_v)
+            g = _optional_float_column_to_list(orbits.physical_parameters.G)
+
+        # Covariance ephemeris: pass the orbit covariance matrix so the Rust
+        # backend can sample variants + collapse the variant ephemeris to
+        # per-row covariance in one crossing (mirrors the propagate path).
+        native_covariances: npt.NDArray[np.float64] | None = None
+        if covariance and not orbit_coordinates.covariance.is_all_nan():
+            native_covariances = np.ascontiguousarray(
+                orbit_coordinates.covariance.to_matrix().reshape(len(orbits), 36),
+                dtype=np.float64,
             )
 
-            return VariantOrbits.from_kwargs(
-                orbit_id=orbit_ids_out,
-                variant_id=variant_ids_out,
-                object_id=object_id_out,
-                weights=weights_out,
-                weights_cov=weights_cov_out,
-                physical_parameters=physical_parameters_out,
-                coordinates=CartesianCoordinates.from_kwargs(
-                    x=xyzvxvyvz[:, 0],
-                    y=xyzvxvyvz[:, 1],
-                    z=xyzvxvyvz[:, 2],
-                    vx=xyzvxvyvz[:, 3],
-                    vy=xyzvxvyvz[:, 4],
-                    vz=xyzvxvyvz[:, 5],
-                    time=times_out,
-                    origin=origin_codes,
-                    frame="equatorial",
-                ),
-            )
-        else:
-            orbit_ids_out = pa.repeat(pc_cast(orbit_id, pa.large_string()), N)
-            object_id_out = pa.repeat(orbit.object_id[0], N)
-            physical_parameters_out = orbit.physical_parameters.take(
-                np.zeros(N, dtype=np.int64)
-            )
-
-            return Orbits.from_kwargs(
-                coordinates=CartesianCoordinates.from_kwargs(
-                    x=xyzvxvyvz[:, 0],
-                    y=xyzvxvyvz[:, 1],
-                    z=xyzvxvyvz[:, 2],
-                    vx=xyzvxvyvz[:, 3],
-                    vy=xyzvxvyvz[:, 4],
-                    vz=xyzvxvyvz[:, 5],
-                    time=times_out,
-                    origin=origin_codes,
-                    frame="equatorial",
-                ),
-                orbit_id=orbit_ids_out,
-                object_id=object_id_out,
-                physical_parameters=physical_parameters_out,
-            )
-
-    def _propagate_orbits_inner(
-        self, orbits: OrbitType, times: TimestampType
-    ) -> OrbitType:
-        """
-        Propagates one or more orbits with the same epoch to the specified times.
-        """
-        ephem = assist.Ephem(
-            planets_path=de440,
-            asteroids_path=de441_n16,
+        native = self._native.generate_ephemeris(
+            _string_column_to_list(orbits.orbit_id),
+            _optional_string_column_to_list(orbits.object_id),
+            orbit_states,
+            _string_column_to_list(orbit_coordinates.origin.code),
+            orbit_coordinates.frame,
+            orbit_scale,
+            orbit_days,
+            orbit_nanos,
+            _string_column_to_list(observers.code),
+            observer_states,
+            _string_column_to_list(observer_coordinates.origin.code),
+            observer_coordinates.frame,
+            observer_scale,
+            observer_days,
+            observer_nanos,
+            out_scale,
+            lt_tol,
+            max_iter,
+            tol,
+            stellar_aberration,
+            max_lt_iter,
+            predict_magnitudes,
+            predict_phase_angle,
+            h_v,
+            g,
+            chunk_size,
+            max_processes,
+            covariance=covariance and native_covariances is not None,
+            covariances=native_covariances,
+            covariance_method=covariance_method,
+            num_samples=num_samples,
+            seed=seed,
         )
-        sim = None
-        sim = rebound.Simulation()
+        return _ephemeris_from_result(native)
 
-        # Set the simulation time, relative to the jd_ref
-        start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
-        start_tdb_time = start_tdb_time - ephem.jd_ref
-        sim.t = start_tdb_time
-
-        particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
-        separator = None
-
-        # Serialize the variantorbit
+    def _propagate_orbits_native(
+        self,
+        orbits: OrbitTable,
+        times: Timestamp,
+        *,
+        covariance: bool,
+        covariance_method: Literal["auto", "sigma-point", "monte-carlo"],
+        num_samples: int,
+        seed: int | None,
+        chunk_size: int | None,
+        thread_limit: int | None,
+    ) -> OrbitTable:
+        coordinates = orbits.coordinates
+        input_scale, input_days, input_nanos = _time_parts(coordinates.time)
+        target_scale, target_days, target_nanos = _time_parts(times)
+        states: npt.NDArray[np.float64] = np.ascontiguousarray(
+            coordinates.values, dtype=np.float64
+        )
+        variant_ids: list[str | None] | None
+        weights: list[float | None] | None
+        weights_cov: list[float | None] | None
+        native_covariances: npt.NDArray[np.float64] | None = None
+        native_covariance = False
         if isinstance(orbits, VariantOrbits):
-            orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
-            variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
-
-            # Generate a unique separator that doesn't appear in either array
-            separator = generate_unique_separator(orbit_ids, variant_ids)
-
-            # Use numpy string operations to concatenate the orbit_id and variant_id
-            particle_ids = np.char.add(
-                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
-                variant_ids,
-            )
-            particle_ids = np.array(particle_ids, dtype="object")
-
-        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
-        hash_to_index = {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
-
-        # Add the orbits as particles to the simulation
-        # OPTIMIZED: Use direct array access instead of DataFrame conversion
-        coords = orbits.coordinates
-        position_arrays = coords.r  # x, y, z columns
-        velocity_arrays = coords.v  # vx, vy, vz columns
-
-        assist.Extras(sim, ephem)
-
-        for i in range(len(position_arrays)):
-            sim.add(
-                x=position_arrays[i, 0],
-                y=position_arrays[i, 1],
-                z=position_arrays[i, 2],
-                vx=velocity_arrays[i, 0],
-                vy=velocity_arrays[i, 1],
-                vz=velocity_arrays[i, 2],
-                hash=uint_orbit_ids[i],
-            )
-
-        # Set the integrator parameters
-        sim.dt = self.initial_dt
-        sim.ri_ias15.min_dt = self.min_dt
-        sim.ri_ias15.adaptive_mode = self.adaptive_mode
-        sim.ri_ias15.epsilon = self.epsilon
-
-        # Prepare the times as jd - jd_ref
-        integrator_times = times.rescale("tdb").jd()
-        integrator_times = pc_subtract(integrator_times, ephem.jd_ref)
-        integrator_times = integrator_times.to_numpy()
-
-        # Unified accumulation for both Orbits and VariantOrbits
-        results = None
-        is_variant = isinstance(orbits, VariantOrbits)
-        step_states: List[npt.NDArray[np.float64]] = []
-        step_orbit_ids: List[npt.NDArray[np.object_]] = []
-        step_variant_ids: List[npt.NDArray[np.object_]] = []
-
-        # Step through each time, move the simulation forward and collect state
-        for i in range(len(integrator_times)):
-            sim.integrate(integrator_times[i])
-
-            orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
-            step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
-            sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
-
-            step_states.append(step_xyzvxvyvz)
-
-            if is_variant:
-                indices = np.fromiter(
-                    (hash_to_index[h] for h in orbit_id_hashes),
-                    dtype=np.int64,
-                    count=sim.N,
-                )
-                step_orbit_ids.append(orbit_ids[indices])
-                step_variant_ids.append(variant_ids[indices])
-            else:
-                indices = np.fromiter(
-                    (hash_to_index[h] for h in orbit_id_hashes),
-                    dtype=np.int64,
-                    count=sim.N,
-                )
-                step_orbit_ids.append(particle_ids[indices])
-
-        # Build a single result table
-        if len(step_states) == 0:
-            results = VariantOrbits.empty() if is_variant else Orbits.empty()
+            variant_ids = _optional_string_column_to_list(orbits.variant_id)
+            weights = _optional_float_column_to_list(orbits.weights)
+            weights_cov = _optional_float_column_to_list(orbits.weights_cov)
         else:
-            xyzvxvyvz = np.concatenate(step_states, axis=0)
-            jd_times = integrator_times + ephem.jd_ref
-            times_out = Timestamp.from_jd(np.repeat(jd_times, sim.N), scale="tdb")
-            origin_codes = Origin.from_kwargs(
-                code=pa.repeat("SOLAR_SYSTEM_BARYCENTER", xyzvxvyvz.shape[0])
+            variant_ids = None
+            weights = None
+            weights_cov = None
+            if covariance and not coordinates.covariance.is_all_nan():
+                native_covariance = True
+                native_covariances = np.ascontiguousarray(
+                    coordinates.covariance.to_matrix().reshape(len(orbits), 36),
+                    dtype=np.float64,
+                )
+
+        native_result = self._native.propagate_orbits(
+            _string_column_to_list(orbits.orbit_id),
+            _optional_string_column_to_list(orbits.object_id),
+            states,
+            _string_column_to_list(coordinates.origin.code),
+            coordinates.frame,
+            input_scale,
+            input_days,
+            input_nanos,
+            target_scale,
+            target_days,
+            target_nanos,
+            native_covariance,
+            covariances=native_covariances,
+            covariance_method=covariance_method,
+            num_samples=num_samples,
+            seed=seed,
+            chunk_size=chunk_size,
+            thread_limit=thread_limit,
+            variant_ids=variant_ids,
+            weights=weights,
+            weights_cov=weights_cov,
+        )
+        _raise_if_failed_rows(native_result)
+        output_coordinates = _coordinates_from_result(native_result)
+        physical_parameters = _physical_parameters_for_output(orbits, native_result)
+        if isinstance(orbits, VariantOrbits):
+            return VariantOrbits.from_kwargs(
+                orbit_id=native_result["orbit_id"],
+                object_id=native_result["object_id"],
+                variant_id=native_result["variant_id"],
+                weights=native_result["weights"],
+                weights_cov=native_result["weights_cov"],
+                coordinates=output_coordinates,
+                physical_parameters=physical_parameters,
             )
+        return Orbits.from_kwargs(
+            orbit_id=native_result["orbit_id"],
+            object_id=native_result["object_id"],
+            coordinates=output_coordinates,
+            physical_parameters=physical_parameters,
+        )
 
-            if is_variant:
-                orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
-                variant_ids_out = np.concatenate(step_variant_ids, axis=0)
-                object_id_out = np.tile(
-                    orbits.object_id.to_numpy(zero_copy_only=False),
-                    len(integrator_times),
-                )
-                # Repeat variant weights across all output time steps
-                num_steps = len(integrator_times)
-                weights_out = np.tile(
-                    orbits.weights.to_numpy(zero_copy_only=False), num_steps
-                )
-                weights_cov_out = np.tile(
-                    orbits.weights_cov.to_numpy(zero_copy_only=False), num_steps
-                )
-                physical_parameters_out = orbits.physical_parameters.take(
-                    np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
-                )
+    def fit_least_squares(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        *,
+        xtol: float = 1e-12,
+        ftol: float = 1e-12,
+        max_iterations: int = 100,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> tuple[Orbits, float, int, bool]:
+        """Backend-generic Gauss-Newton OD with the ASSIST propagator.
 
-                results = VariantOrbits.from_kwargs(
-                    orbit_id=orbit_ids_out,
-                    variant_id=variant_ids_out,
-                    object_id=object_id_out,
-                    weights=weights_out,
-                    weights_cov=weights_cov_out,
-                    physical_parameters=physical_parameters_out,
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=xyzvxvyvz[:, 0],
-                        y=xyzvxvyvz[:, 1],
-                        z=xyzvxvyvz[:, 2],
-                        vx=xyzvxvyvz[:, 3],
-                        vy=xyzvxvyvz[:, 4],
-                        vz=xyzvxvyvz[:, 5],
-                        time=times_out,
-                        origin=origin_codes,
-                        frame="equatorial",
-                    ),
-                )
-            else:
-                orbit_ids_out = np.concatenate(step_orbit_ids, axis=0)
-                object_id_out = np.tile(
-                    orbits.object_id.to_numpy(zero_copy_only=False),
-                    len(integrator_times),
-                )
-                num_steps = len(integrator_times)
-                physical_parameters_out = orbits.physical_parameters.take(
-                    np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
-                )
+        Mirrors the semantics of
+        ``adam_core.orbit_determination.fit_least_squares(orbit, observations,
+        propagator)`` for a single orbit: differentially corrects the orbit
+        state at its epoch against ``observations``
+        (``OrbitDeterminationObservations``: spherical astrometry with
+        covariance + observers). The Gauss-Newton driver lives in the
+        permissive core; this GPL package only supplies the ASSIST propagator
+        (each iteration batches the base + six perturbed candidates into one
+        same-epoch multi-particle ephemeris crossing). Returns
+        ``(fitted_orbit, chi2, iterations, converged)`` where the fitted orbit
+        carries the ``inv(J^T J)`` covariance in the input frame/origin.
+        """
+        assert len(orbit) == 1, "Only one orbit can be differentially corrected"
+        coordinates = orbit.coordinates
+        orbit_scale, orbit_days, orbit_nanos = _time_parts(coordinates.time)
+        observed = observations.coordinates
+        observers = observations.observers
+        observer_coordinates = observers.coordinates
+        observer_scale, observer_days, observer_nanos = _time_parts(
+            observer_coordinates.time
+        )
+        state, covariance, chi2, iterations, converged = (
+            self._native.fit_orbit_least_squares(
+                _string_column_to_list(orbit.orbit_id),
+                _optional_string_column_to_list(orbit.object_id),
+                np.ascontiguousarray(coordinates.values, dtype=np.float64),
+                _string_column_to_list(coordinates.origin.code),
+                coordinates.frame,
+                orbit_scale,
+                orbit_days,
+                orbit_nanos,
+                np.ascontiguousarray(observed.values, dtype=np.float64),
+                np.ascontiguousarray(
+                    observed.covariance.to_matrix().reshape(len(observed), 36),
+                    dtype=np.float64,
+                ),
+                _string_column_to_list(observers.code),
+                np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
+                _string_column_to_list(observer_coordinates.origin.code),
+                observer_coordinates.frame,
+                observer_scale,
+                observer_days,
+                observer_nanos,
+                xtol=xtol,
+                ftol=ftol,
+                max_iterations=max_iterations,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            )
+        )
+        state = np.asarray(state, dtype=np.float64)
+        covariance = np.asarray(covariance, dtype=np.float64).reshape(1, 6, 6)
+        fitted = Orbits.from_kwargs(
+            orbit_id=orbit.orbit_id,
+            object_id=orbit.object_id,
+            coordinates=CartesianCoordinates.from_kwargs(
+                x=[state[0]],
+                y=[state[1]],
+                z=[state[2]],
+                vx=[state[3]],
+                vy=[state[4]],
+                vz=[state[5]],
+                time=coordinates.time,
+                covariance=CoordinateCovariances.from_matrix(covariance),
+                origin=coordinates.origin,
+                frame=coordinates.frame,
+            ),
+        )
+        return fitted, float(chi2), int(iterations), bool(converged)
 
-                results = Orbits.from_kwargs(
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=xyzvxvyvz[:, 0],
-                        y=xyzvxvyvz[:, 1],
-                        z=xyzvxvyvz[:, 2],
-                        vx=xyzvxvyvz[:, 3],
-                        vy=xyzvxvyvz[:, 4],
-                        vz=xyzvxvyvz[:, 5],
-                        time=times_out,
-                        origin=origin_codes,
-                        frame="equatorial",
-                    ),
-                    orbit_id=orbit_ids_out,
-                    object_id=object_id_out,
-                    physical_parameters=physical_parameters_out,
-                )
+    def _od_problem_args(self, orbit: Orbits, observations: Any) -> tuple[Any, ...]:
+        """Marshal the shared OD-problem arguments used by the fused fit,
+        od, and Vallado native work units."""
+        assert len(orbit) == 1, "Only one orbit can be differentially corrected"
+        coordinates = orbit.coordinates
+        orbit_scale, orbit_days, orbit_nanos = _time_parts(coordinates.time)
+        observed = observations.coordinates
+        observers = observations.observers
+        observer_coordinates = observers.coordinates
+        observer_scale, observer_days, observer_nanos = _time_parts(
+            observer_coordinates.time
+        )
+        return (
+            _string_column_to_list(orbit.orbit_id),
+            _optional_string_column_to_list(orbit.object_id),
+            np.ascontiguousarray(coordinates.values, dtype=np.float64),
+            _string_column_to_list(coordinates.origin.code),
+            coordinates.frame,
+            orbit_scale,
+            orbit_days,
+            orbit_nanos,
+            np.ascontiguousarray(observed.values, dtype=np.float64),
+            np.ascontiguousarray(
+                observed.covariance.to_matrix().reshape(len(observed), 36),
+                dtype=np.float64,
+            ),
+            _string_column_to_list(observers.code),
+            np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
+            _string_column_to_list(observer_coordinates.origin.code),
+            observer_coordinates.frame,
+            observer_scale,
+            observer_days,
+            observer_nanos,
+        )
 
-        # Store the last simulation in a private variable for reference
-        self._last_simulation = sim
-        return results
+    def fit_least_squares_evaluated(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        ignore: list[bool] | None = None,
+        *,
+        xtol: float = 1e-12,
+        ftol: float = 1e-12,
+        max_iterations: int = 100,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict[str, Any]:
+        """Fused ``fit_least_squares`` work unit (bead personal-dqk): one
+        native crossing runs the Gauss-Newton fit on the non-ignored subset
+        followed by the final ``evaluate_orbits``-style residual/statistics
+        pass over the full observation set.
+
+        Returns a plain dict of arrays for the adam-core public veneer:
+        ``state``, ``covariance``, ``fit_chi2``, ``iterations``,
+        ``converged``, ``residual_values``, ``residual_chi2``,
+        ``residual_dof``, ``residual_probability``, ``chi2``,
+        ``reduced_chi2``, ``arc_length``, ``num_obs``, ``outlier``.
+        """
+        if ignore is None:
+            ignore = [False] * len(observations)
+        return cast(
+            dict[str, Any],
+            self._native.fit_orbit_least_squares_evaluated(
+                *self._od_problem_args(orbit, observations),
+                list(ignore),
+                xtol=xtol,
+                ftol=ftol,
+                max_iterations=max_iterations,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
+        )
+
+    def od_fit(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        *,
+        rchi2_threshold: float = 100.0,
+        min_obs: int = 5,
+        min_arc_length: float = 1.0,
+        contamination_percentage: float = 0.0,
+        delta: float = 1e-6,
+        max_iter: int = 20,
+        method: str = "central",
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict[str, Any]:
+        """The full legacy ``adam_core.orbit_determination.od`` loop for one
+        orbit in one native crossing (bead personal-dqk): delta bounding,
+        finite/central perturbation batching, weighted normal equations,
+        condition/covariance sanity rejections, acceptance bookkeeping, and
+        chi2-ranked outlier retries.
+
+        Returns a plain dict of arrays for the adam-core public veneer:
+        ``found``, ``state``, ``covariance``, ``arc_length``, ``num_obs``,
+        ``chi2``, ``reduced_chi2``, ``iterations``, ``improved``,
+        ``residual_values``, ``residual_chi2``, ``residual_dof``,
+        ``residual_probability``, ``outlier``.
+        """
+        return cast(
+            dict[str, Any],
+            self._native.od_fit(
+                *self._od_problem_args(orbit, observations),
+                rchi2_threshold=rchi2_threshold,
+                min_obs=min_obs,
+                min_arc_length=min_arc_length,
+                contamination_percentage=contamination_percentage,
+                delta=delta,
+                max_iter=max_iter,
+                method=method,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
+        )
+
+    def _iod_problem_args(self, observations: Any) -> tuple[Any, ...]:
+        observed = observations.coordinates
+        observed_scale, observed_days, observed_nanos = _time_parts(observed.time)
+        observers = observations.observers
+        observer_coordinates = observers.coordinates
+        observer_scale, observer_days, observer_nanos = _time_parts(
+            observer_coordinates.time
+        )
+        return (
+            _string_column_to_list(observations.id),
+            np.ascontiguousarray(observed.values, dtype=np.float64),
+            np.ascontiguousarray(
+                observed.covariance.to_matrix().reshape(len(observed), 36),
+                dtype=np.float64,
+            ),
+            _string_column_to_list(observed.origin.code),
+            observed.frame,
+            observed_scale,
+            observed_days,
+            observed_nanos,
+            _string_column_to_list(observers.code),
+            np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
+            _string_column_to_list(observer_coordinates.origin.code),
+            observer_coordinates.frame,
+            observer_scale,
+            observer_days,
+            observer_nanos,
+        )
+
+    def initial_orbit_determination(
+        self,
+        observations: Any,
+        linkage_ids: list[str],
+        member_linkage_ids: list[str],
+        member_obs_ids: list[str],
+        *,
+        min_obs: int = 6,
+        min_arc_length: float = 1.0,
+        contamination_percentage: float = 0.0,
+        rchi2_threshold: float = 200.0,
+        observation_selection_method: str = "combinations",
+        light_time: bool = True,
+        chunk_size: int = 1,
+        mu: float = 0.00029591220828411956,
+        speed_of_light: float = 173.14463267424034,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict[str, Any]:
+        """Run complete Gauss-IOD orchestration for every linkage in one
+        native crossing. Rust owns linkage/member indexing, chronological
+        ordering, triplet selection, candidate generation and ephemeris
+        scoring, outlier acceptance, exact-state deduplication, and final
+        linkage ordering. ``chunk_size`` is a Rust scheduling control.
+        ``mu`` and ``speed_of_light`` are supplied explicitly by adam-core so
+        the fused provider preserves the constants owned by the original
+        adam-core orchestration.
+        """
+        return cast(
+            dict[str, Any],
+            self._native.initial_orbit_determination(
+                *self._iod_problem_args(observations),
+                list(linkage_ids),
+                list(member_linkage_ids),
+                list(member_obs_ids),
+                min_obs=min_obs,
+                min_arc_length=min_arc_length,
+                contamination_percentage=contamination_percentage,
+                rchi2_threshold=rchi2_threshold,
+                observation_selection_method=observation_selection_method,
+                light_time=light_time,
+                chunk_size=chunk_size,
+                mu=mu,
+                speed_of_light=speed_of_light,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
+        )
+
+    def vallado_least_squares(
+        self,
+        orbit: Orbits,
+        observations: Any,
+        *,
+        use_central_difference: bool,
+        perturbation_initial_fraction: float = 1e-6,
+        perturbation_multiplier: float = 0.5,
+        rms_epsilon: float = 1e-3,
+        max_iterations: int = 20,
+        lt_tol: float = 1.0e-12,
+        eph_max_iter: int = 1000,
+        eph_tol: float = 1.0e-15,
+        stellar_aberration: bool = False,
+        max_lt_iter: int = 10,
+    ) -> dict[str, Any]:
+        """The public ``LeastSquares.least_squares`` Vallado RMS algorithm in
+        one native crossing (bead personal-dqk), including the debug
+        iteration trace, rejected-update semantics, and perturbation
+        backoff.
+
+        Returns a plain dict for the adam-core public veneer: ``status``
+        (``updated``/``initial``/``not_improved``), ``state``,
+        ``covariance``, ``num_observations``, parallel iteration-trace lists
+        (``iterations_rchi2``, ``iterations_rms``, ``iterations_delta_rms``,
+        ``iterations_converged``, ``iterations_perturbation``,
+        ``iterations_error``), ``corrections``, and ``exit_message``.
+        """
+        return cast(
+            dict[str, Any],
+            self._native.vallado_least_squares(
+                *self._od_problem_args(orbit, observations),
+                use_central_difference=use_central_difference,
+                perturbation_initial_fraction=perturbation_initial_fraction,
+                perturbation_multiplier=perturbation_multiplier,
+                rms_epsilon=rms_epsilon,
+                max_iterations=max_iterations,
+                lt_tol=lt_tol,
+                eph_max_iter=eph_max_iter,
+                eph_tol=eph_tol,
+                stellar_aberration=stellar_aberration,
+                max_lt_iter=max_lt_iter,
+            ),
+        )
+
+    def detect_collisions(
+        self,
+        orbits: OrbitTable,
+        num_days: int,
+        conditions: CollisionConditions | None = None,
+        max_processes: int | None = 1,
+        chunk_size: int | None = 100,
+    ) -> tuple[OrbitTable, CollisionEvent]:
+        """Single-crossing Rust collision detection (bead personal-cmy.33.9).
+
+        Standalone public entry: the Rust backend owns the whole same-epoch
+        detection in one crossing, so no Ray chunking is required.
+        ``max_processes``/``chunk_size`` are accepted for signature
+        compatibility with the abstract ``ImpactMixin.detect_collisions``
+        contract and are ignored (rayon handles internal parallelism). This
+        replaces the deleted adam_core ``ImpactMixin.detect_collisions`` Ray
+        composition that this propagator previously inherited.
+        """
+        if conditions is None:
+            conditions = CollisionConditions.from_kwargs(
+                condition_id=["Earth"],
+                collision_object=Origin.from_kwargs(code=["EARTH"]),
+                collision_distance=[EARTH_RADIUS_KM],
+                stopping_condition=[True],
+            )
+        propagated, impacts = self._detect_collisions(orbits, num_days, conditions)
+        propagated = ensure_input_origin_and_frame(orbits, propagated)
+        return propagated, impacts
 
     def _detect_collisions(
         self,
-        orbits: OrbitType,
+        orbits: OrbitTable,
         num_days: int,
         conditions: CollisionConditions,
-    ) -> Tuple[VariantOrbits, CollisionEvent]:
-        # Assert that the time for each orbit definition is the same for the simulator to work
-        assert len(pc_unique(orbits.coordinates.time.mjd())) == 1
+    ) -> tuple[OrbitTable, CollisionEvent]:
+        """Rust-native mirror of ``adam_assist.ASSISTPropagator._detect_collisions``.
 
-        # The coordinate frame is the equatorial International Celestial Reference Frame (ICRF).
-        # This is also the native coordinate system for the JPL binary files.
-        # For units we use solar masses, astronomical units, and days.
-        # The time coordinate is Barycentric Dynamical Time (TDB) in Julian days.
-
-        # KK Note: do we want to specify the version of spice kernels that were used- if we're doing
-        # addtional work down stream, to ensure that the same kernels are used? de440, 441 for asteroid position
+        The input transform (SSB/equatorial/TDB), the TDB Julian-date horizon
+        arithmetic, and the returned table shapes match the legacy Python
+        loop; the per-step integration and distance checks run in one Rust
+        crossing. Survivors are reported at the final executed (overshooting)
+        integrator step exactly like legacy.
+        """
+        assert len(pc.unique(orbits.coordinates.time.mjd())) == 1
 
         coords = transform_coordinates(
             orbits.coordinates,
             origin_out=OriginCodes.SOLAR_SYSTEM_BARYCENTER,
             frame_out="equatorial",
         )
-        input_orbit_times = coords.time.rescale("tdb")
-        coords = coords.set_column("time", input_orbit_times)
+        coords = coords.set_column("time", coords.time.rescale("tdb"))
         orbits = orbits.set_column("coordinates", coords)
 
-        ephem = assist.Ephem(
-            planets_path=de440,
-            asteroids_path=de441_n16,
+        epoch_jd = float(coords.time.jd().to_numpy(zero_copy_only=False)[0])
+        final_jd = float(
+            coords.time.add_days(num_days).jd().to_numpy(zero_copy_only=False)[0]
         )
-        sim = None
-        sim = rebound.Simulation()
 
-        # Set the simulation time, relative to the jd_ref
-        start_tdb_time = orbits.coordinates.time.jd().to_numpy()[0]
-        start_tdb_time = start_tdb_time - ephem.jd_ref
-        sim.t = start_tdb_time
-
-        backward_propagation = num_days < 0
-        if backward_propagation:
-            sim.dt = sim.dt * -1
-
-        particle_ids = orbits.orbit_id.to_numpy(zero_copy_only=False)
-        separator = None
-
-        # Serialize the variantorbit
-        if isinstance(orbits, VariantOrbits):
-            orbit_ids = orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str)
-            variant_ids = orbits.variant_id.to_numpy(zero_copy_only=False).astype(str)
-
-            # Generate a unique separator that doesn't appear in either array
-            separator = generate_unique_separator(orbit_ids, variant_ids)
-
-            # Use numpy string operations to concatenate the orbit_id and variant_id
-            particle_ids = np.char.add(
-                np.char.add(orbit_ids, np.repeat(separator, len(orbit_ids))),
-                variant_ids,
-            )
-            particle_ids = np.array(particle_ids, dtype="object")
-
-        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
-        {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
-
-        # Add the orbits as particles to the simulation
-        # OPTIMIZED: Use direct array access instead of DataFrame conversion
-        coords = orbits.coordinates
-        position_arrays = coords.r  # x, y, z columns
-        velocity_arrays = coords.v  # vx, vy, vz columns
-
-        assist.Extras(sim, ephem)
-
-        for i in range(len(position_arrays)):
-            sim.add(
-                x=position_arrays[i, 0],
-                y=position_arrays[i, 1],
-                z=position_arrays[i, 2],
-                vx=velocity_arrays[i, 0],
-                vy=velocity_arrays[i, 1],
-                vz=velocity_arrays[i, 2],
-                hash=uint_orbit_ids[i],
-            )
-
-        # Prepare the times as jd - jd_ref
-        final_integrator_time = (
-            orbits.coordinates.time.add_days(num_days).jd().to_numpy()[0]
+        native = self._native.detect_collisions(
+            np.ascontiguousarray(coords.values, dtype=np.float64),
+            epoch_jd,
+            final_jd,
+            _string_column_to_list(conditions.collision_object.code),
+            [float(value) for value in conditions.collision_distance.to_pylist()],
+            [bool(value) for value in conditions.stopping_condition.to_pylist()],
         )
-        final_integrator_time = final_integrator_time - ephem.jd_ref
 
-        # Results stores the final positions of the objects
-        # If an object is an impactor, this represents its position at impact time
-        results = None
-        collision_events = CollisionEvent.empty()
-        # Accumulators to reduce per-iteration concatenation
-        collisions_list: List[CollisionEvent] = []
-        colliders_list: List[OrbitType] = []
-        results_list: List[OrbitType] = []
-        past_integrator_time = False
-        time_step_results: Union[None, OrbitType] = None
+        impact_indices = np.asarray(native["impact_indices"], dtype=np.int64)
+        impact_states = np.asarray(native["impact_states"], dtype=np.float64).reshape(
+            -1, 6
+        )
+        impact_condition_indices = np.asarray(
+            native["impact_condition_indices"], dtype=np.int64
+        )
+        impact_times = np.asarray(native["impact_times_jd_tdb"], dtype=np.float64)
 
-        # Set the integrator parameters
-        sim.dt = self.initial_dt
-        sim.ri_ias15.min_dt = self.min_dt
-        sim.ri_ias15.adaptive_mode = self.adaptive_mode
-        sim.ri_ias15.epsilon = self.epsilon
+        events: list[CollisionEvent] = []
+        for condition_index in range(len(conditions)):
+            mask = impact_condition_indices == condition_index
+            if not mask.any():
+                continue
+            condition = conditions[condition_index : condition_index + 1]
+            rows = _collision_rows(
+                orbits,
+                impact_indices[mask],
+                impact_states[mask],
+                Timestamp.from_jd(pa.array(impact_times[mask]), scale="tdb"),
+            )
+            kwargs: dict[str, Any] = dict(
+                orbit_id=rows.orbit_id,
+                coordinates=rows.coordinates,
+                condition_id=pa.repeat(condition.condition_id[0].as_py(), len(rows)),
+                collision_coordinates=transform_coordinates(
+                    rows.coordinates,
+                    representation_out=SphericalCoordinates,
+                    origin_out=condition.collision_object.as_OriginCodes(),
+                    frame_out="ecliptic",
+                ),
+                collision_object=condition.collision_object.take(
+                    [0 for _ in range(len(rows))]
+                ),
+                stopping_condition=pa.repeat(
+                    bool(condition.stopping_condition[0].as_py()), len(rows)
+                ),
+            )
+            if isinstance(orbits, VariantOrbits):
+                kwargs["variant_id"] = rows.variant_id
+            events.append(CollisionEvent.from_kwargs(**kwargs))
+        collision_events = qv.concatenate(events) if events else CollisionEvent.empty()
 
-        if backward_propagation:
-            sim.dt = sim.dt * -1
-
-        # Step through each time, move the simulation forward and
-        # collect the results. End if all orbits are removed from
-        # the simulation or the final integrator time is reached.
-        while past_integrator_time is False and len(orbits) > 0:
-            sim.steps(1)
-            if (sim.t >= final_integrator_time and not backward_propagation) or (
-                backward_propagation and sim.t <= final_integrator_time
-            ):
-                past_integrator_time = True
-
-            # Get serialized particle data as numpy arrays
-            orbit_id_hashes = np.zeros(sim.N, dtype="uint32")
-            step_xyzvxvyvz = np.zeros((sim.N, 6), dtype="float64")
-
-            sim.serialize_particle_data(xyzvxvyvz=step_xyzvxvyvz, hash=orbit_id_hashes)
-
-            if isinstance(orbits, Orbits):
-                # Retrieve original orbit id from hash
-                orbit_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-                time_step_results = Orbits.from_kwargs(
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=step_xyzvxvyvz[:, 0],
-                        y=step_xyzvxvyvz[:, 1],
-                        z=step_xyzvxvyvz[:, 2],
-                        vx=step_xyzvxvyvz[:, 3],
-                        vy=step_xyzvxvyvz[:, 4],
-                        vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(
-                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
-                        ),
-                        origin=Origin.from_kwargs(
-                            code=pa.repeat(
-                                "SOLAR_SYSTEM_BARYCENTER",
-                                sim.N,
-                            )
-                        ),
-                        frame="equatorial",
-                    ),
-                    orbit_id=orbit_ids,
-                    object_id=orbits.object_id,
-                    physical_parameters=orbits.physical_parameters,
-                )
-            elif isinstance(orbits, VariantOrbits):
-                # Retrieve the orbit id and weights from hash
-                particle_ids = [orbit_id_mapping[h] for h in orbit_id_hashes]
-
-                orbit_ids, variant_ids = zip(
-                    *[particle_id.split(separator) for particle_id in particle_ids]
-                )
-
-                # Historically we've done a check here to make sure the orbit of the orbits
-                # and serialized particles is consistent
-                # np.testing.assert_array_equal(orbits.orbit_id.to_numpy(zero_copy_only=False).astype(str), orbit_ids)
-                # np.testing.assert_array_equal(orbits.variant_id.to_numpy(zero_copy_only=False).astype(str), variant_ids)
-
-                time_step_results = VariantOrbits.from_kwargs(
-                    orbit_id=orbit_ids,
-                    variant_id=variant_ids,
-                    object_id=orbits.object_id,
-                    weights=orbits.weights,
-                    weights_cov=orbits.weights_cov,
-                    physical_parameters=orbits.physical_parameters,
-                    coordinates=CartesianCoordinates.from_kwargs(
-                        x=step_xyzvxvyvz[:, 0],
-                        y=step_xyzvxvyvz[:, 1],
-                        z=step_xyzvxvyvz[:, 2],
-                        vx=step_xyzvxvyvz[:, 3],
-                        vy=step_xyzvxvyvz[:, 4],
-                        vz=step_xyzvxvyvz[:, 5],
-                        time=Timestamp.from_jd(
-                            pa.repeat(sim.t + ephem.jd_ref, sim.N), scale="tdb"
-                        ),
-                        origin=Origin.from_kwargs(
-                            code=pa.repeat(
-                                "SOLAR_SYSTEM_BARYCENTER",
-                                sim.N,
-                            )
-                        ),
-                        frame="equatorial",
+        # Results: rows removed by stopping conditions (at their impact-step
+        # states/times, in removal order) followed by the survivors at the
+        # final executed step, matching the legacy accumulation order.
+        stopping_by_condition = np.asarray(
+            [bool(value) for value in conditions.stopping_condition.to_pylist()],
+            dtype=bool,
+        )
+        removed_mask = stopping_by_condition[impact_condition_indices]
+        results_parts: list[OrbitTable] = []
+        if removed_mask.any():
+            results_parts.append(
+                _collision_rows(
+                    orbits,
+                    impact_indices[removed_mask],
+                    impact_states[removed_mask],
+                    Timestamp.from_jd(
+                        pa.array(impact_times[removed_mask]), scale="tdb"
                     ),
                 )
-
-            assert isinstance(time_step_results, OrbitType)
-
-            for condition in conditions:
-
-                collision_object_code = condition.collision_object.code[0].as_py()
-                particle_location = ephem.get_particle(
-                    collision_object_code,
-                    sim.t,
+            )
+        final_indices = np.asarray(native["final_indices"], dtype=np.int64)
+        final_states = np.asarray(native["final_states"], dtype=np.float64).reshape(
+            -1, 6
+        )
+        if len(final_indices) > 0:
+            final_jds = np.full(len(final_indices), native["final_time_jd_tdb"])
+            results_parts.append(
+                _collision_rows(
+                    orbits,
+                    final_indices,
+                    final_states,
+                    Timestamp.from_jd(pa.array(final_jds), scale="tdb"),
                 )
-                particle_location = CartesianCoordinates.from_kwargs(
-                    x=[particle_location.x],
-                    y=[particle_location.y],
-                    z=[particle_location.z],
-                    vx=[particle_location.vx],
-                    vy=[particle_location.vy],
-                    vz=[particle_location.vz],
-                    time=Timestamp.from_jd([sim.t + ephem.jd_ref], scale="tdb"),
-                    origin=Origin.from_kwargs(
-                        code=["SOLAR_SYSTEM_BARYCENTER"],
-                    ),
-                    frame="equatorial",
-                )
-                diff = time_step_results.coordinates.values - particle_location.values
-
-                # Calculate the distance in KM
-                # We use the IAU definition of the astronomical unit (149_597_870.7 km)
-                normalized_distance = np.linalg.norm(diff[:, :3], axis=1) * KM_P_AU
-
-                # Calculate which particles are within the collision distance
-                within_radius = normalized_distance < condition.collision_distance
-
-                # If any are within our collision distance, we record the impact
-                # and do bookkeeping to remove the particle from the simulation
-                if np.any(within_radius):
-                    colliding_orbits = time_step_results.apply_mask(within_radius)
-
-                    if isinstance(orbits, VariantOrbits):
-                        new_impacts = CollisionEvent.from_kwargs(
-                            orbit_id=colliding_orbits.orbit_id,
-                            coordinates=colliding_orbits.coordinates,
-                            variant_id=colliding_orbits.variant_id,
-                            condition_id=pa.repeat(
-                                condition.condition_id[0].as_py(), len(colliding_orbits)
-                            ),
-                            collision_coordinates=transform_coordinates(
-                                colliding_orbits.coordinates,
-                                representation_out=SphericalCoordinates,
-                                origin_out=condition.collision_object.as_OriginCodes(),
-                                frame_out="ecliptic",
-                            ),
-                            collision_object=condition.collision_object.take(
-                                [0 for _ in range(len(colliding_orbits))]
-                            ),
-                            stopping_condition=pa.repeat(
-                                condition.stopping_condition[0].as_py(),
-                                len(colliding_orbits),
-                            ),
-                        )
-                    elif isinstance(orbits, Orbits):
-                        new_impacts = CollisionEvent.from_kwargs(
-                            orbit_id=colliding_orbits.orbit_id,
-                            coordinates=colliding_orbits.coordinates,
-                            condition_id=pa.repeat(
-                                condition.condition_id[0].as_py(), len(colliding_orbits)
-                            ),
-                            collision_coordinates=transform_coordinates(
-                                colliding_orbits.coordinates,
-                                representation_out=SphericalCoordinates,
-                                origin_out=condition.collision_object.as_OriginCodes(),
-                                frame_out="ecliptic",
-                            ),
-                            collision_object=condition.collision_object.take(
-                                [0 for _ in range(len(colliding_orbits))]
-                            ),
-                            stopping_condition=pa.repeat(
-                                condition.stopping_condition[0].as_py(),
-                                len(colliding_orbits),
-                            ),
-                        )
-                    collision_events = qv.concatenate([collision_events, new_impacts])
-
-                    stopping_condition = condition.stopping_condition.to_numpy(
-                        zero_copy_only=False
-                    )[0]
-
-                    if stopping_condition:
-                        removed_hashes = orbit_id_hashes[within_radius]
-                        for hash_id in removed_hashes:
-                            sim.remove(hash=c_uint32(hash_id))
-                            # For some reason, it fails if we let rebound convert the hash to c_uint32
-
-                        if isinstance(orbits, VariantOrbits):
-                            keep_mask = pc_invert(
-                                pc_is_in(orbits.variant_id, colliding_orbits.variant_id)
-                            )
-                        else:
-                            keep_mask = pc_invert(
-                                pc_is_in(orbits.orbit_id, colliding_orbits.orbit_id)
-                            )
-
-                        orbits = orbits.apply_mask(keep_mask)
-                        # Accumulate impactors: add to results and colliders lists
-                        results_list.append(colliding_orbits)
-                        colliders_list.append(colliding_orbits)
-                    # Accumulate new impacts regardless of stopping condition
-                    collisions_list.append(new_impacts)
-
-        # Build collisions and colliders once
-        if len(collisions_list) > 0:
-            collision_events = qv.concatenate(collisions_list)
-        if len(colliders_list) > 0:
-            colliders = qv.concatenate(colliders_list)
-        else:
-            colliders = None
-
-        # Add the final positions of the particles that are not already in the results
-        if time_step_results is not None:
-            if colliders is None:
-                results_list.append(time_step_results)
-            else:
-                if isinstance(orbits, Orbits):
-                    still_in_simulation = pc_invert(
-                        pc_is_in(time_step_results.orbit_id, colliders.orbit_id)
-                    )
-                elif isinstance(orbits, VariantOrbits):
-                    still_in_simulation = pc_invert(
-                        pc_is_in(time_step_results.variant_id, colliders.variant_id)
-                    )
-                addl = time_step_results.apply_mask(still_in_simulation)
-                results_list.append(addl)
-
-        # Build results once
-        if len(results_list) > 0:
-            results = qv.concatenate(results_list)
+            )
+        if results_parts:
+            results = (
+                qv.concatenate(results_parts)
+                if len(results_parts) > 1
+                else results_parts[0]
+            )
         else:
             results = (
                 Orbits.empty() if isinstance(orbits, Orbits) else VariantOrbits.empty()
             )
-
         return results, collision_events
+
+
+__all__ = ["ASSISTPropagator", "NativeAssistPropagator"]

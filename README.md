@@ -24,11 +24,17 @@
 pip install adam-assist
 ```
 
+Native wheels support CPython 3.11-3.13 on manylinux 2.17+ x86-64/AArch64 and
+macOS Apple silicon/Intel. Windows is currently unsupported because
+``libassist-sys 1.2.1`` wraps upstream ASSIST code that requires POSIX
+``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
+unsupported.
+
 ## Usage
 
 ### Propagating Orbits
 
-Here we initialize a set of `adam_core.orbit.Orbit` objects from the JPL Small Bodies Database and propagate them using the `AdamAssistPropagator` class. You can manually initialize the orbits as well.
+Here we initialize a set of `adam_core.orbit.Orbit` objects from the JPL Small Bodies Database and propagate them using the Rust-backed `ASSISTPropagator` class. You can manually initialize the orbits as well.
 
 ```python
 from adam_core.orbits.query.sbdb import query_sbdb
@@ -78,7 +84,7 @@ propagated = propagator.propagate_orbits(orbits)
 
 ### Generating Ephemerides
 
-The `ASSISTPropagator` class uses the `adam-core` default ephemeris generator to generate ephemerides from the `ASSIST` propagated orbits. The default ephemeris generator accounts for light travel time and aberration. See `adam_core.propagator.propagator.EphemerisMixin` for implementation details.
+`ASSISTPropagator.generate_ephemeris` performs propagation, light-time geometry, optional covariance sampling/collapse, aberration, and photometry in the Rust backend behind one public Python call. Local parallelism uses Rayon rather than adam-core's former Python/Ray composition.
 
 
 ```python
