@@ -1,3 +1,4 @@
+import sys
 from importlib.metadata import version
 
 import pyarrow.compute as pc
@@ -29,11 +30,15 @@ def _expected_seeded_impacts() -> int:
     """Pin each supported adam-core RNG generation explicitly.
 
     Published adam-core 0.5.5 is the minimum CI dependency and yields 138;
-    the Rust migration candidate from 0.5.6 onward yields 123. Exact candidate
-    integration is additionally covered by adam-core's clean-wheel matrix.
+    the Rust migration candidate from 0.5.6rc1 yields 123. The corrected
+    scale-aware root in 0.5.6rc2 shifts one threshold-adjacent seeded impact on
+    glibc/Linux (124) while Darwin remains at 123 due platform libm last bits.
+    Both process-count lanes must retain the deterministic platform result.
     """
-    release = Version(version("adam-core")).release[:3]
-    return 123 if release >= (0, 5, 6) else 138
+    core_version = Version(version("adam-core"))
+    if core_version >= Version("0.5.6rc2"):
+        return 123 if sys.platform == "darwin" else 124
+    return 123 if core_version.release[:3] >= (0, 5, 6) else 138
 
 
 @pytest.mark.benchmark

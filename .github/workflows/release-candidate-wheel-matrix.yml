@@ -23,7 +23,7 @@ env:
   ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'v0.5.6rc2' }}
   PIP_ONLY_BINARY: ":all:"
   ADAM_CORE_PREVIEW_VERSION: "0.5.6rc2"
-  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc2"
+  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc3"
 
 jobs:
   artifact-acceptance:

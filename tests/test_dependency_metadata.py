@@ -58,5 +58,5 @@ def test_python_preview_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.4.0-rc.2"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc2"
+    assert cargo_version == "0.4.0-rc.3"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc3"

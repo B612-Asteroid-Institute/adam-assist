@@ -135,4 +135,4 @@ def test_legacy_constructor_parameters_remain_accepted() -> None:
 
 
 def test_rc_version_module_is_preserved() -> None:
-    assert __version__ == "0.4.0rc2"
+    assert __version__ == "0.4.0rc3"

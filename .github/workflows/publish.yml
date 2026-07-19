@@ -10,7 +10,7 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release-candidate version
         required: true
-        default: 0.4.0rc2
+        default: 0.4.0rc3
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core release candidate
@@ -75,7 +75,7 @@ jobs:
               raise SystemExit(f"missing exact preview dependency {expected}")
           cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
           cargo_version = cargo["package"]["version"]
-          if cargo_version != "0.4.0-rc.2" or str(assist) != "0.4.0rc2":
+          if cargo_version != "0.4.0-rc.3" or str(assist) != "0.4.0rc3":
               raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
           for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
               if cargo["dependencies"].get(name) != "=0.1.0-rc.2":
