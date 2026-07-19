@@ -33,13 +33,13 @@ def test_canonical_sys_crates_are_pinned_without_assist_rs() -> None:
 
 
 def test_preview_dependencies_are_exact_public_releases() -> None:
-    assert "adam-core==0.5.6rc1" in _project_dependencies()
+    assert "adam-core==0.5.6rc2" in _project_dependencies()
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.1"
-    assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.1"
+    assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.2"
+    assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.2"
     assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == {
-        "version": "=0.1.0-rc.1",
+        "version": "=0.1.0-rc.2",
         "default-features": False,
     }
     assert not (ROOT / "rust" / "vendor").exists()
@@ -58,5 +58,5 @@ def test_python_preview_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.4.0-rc.1"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc1"
+    assert cargo_version == "0.4.0-rc.2"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc2"

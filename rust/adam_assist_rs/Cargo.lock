@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "adam_assist_rs"
-version = "0.4.0-rc.1"
+version = "0.4.0-rc.2"
 dependencies = [
  "adam_core_rs_coords",
  "adam_core_rs_kernel_data",
@@ -21,15 +21,15 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_autodiff"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b26d36d0b39506e2dc7250ffbb3920ea045f31c230b85c1abcf29f4ea60ea835"
+checksum = "f6a407e475097f3760f0ff5e776577e3bc8e39b803b1b364f0813711da801f7d"
 
 [[package]]
 name = "adam_core_rs_coords"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26df58b327fb3055a04018b3b88258269c82e092559f0d6742b4c3446fb965fc"
+checksum = "59dfe28b8b6f7dc5ec265b074e4adaaafb46a42fd7a40e317e52e33bb2c62076"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -47,9 +47,9 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_kernel_data"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "312f06d8c034e81959d7126c363a1c82504deb3c1f00ac9b0ce066dde7ac43c4"
+checksum = "1de6effb8a85e60eb17e666141e3c5405a17d5b4000d57df4cf589b2bd45e949"
 dependencies = [
  "sha2",
  "ureq",
@@ -58,15 +58,15 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_orbit_determination"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a1da3c0e0b7ee46fdd9ab1dcc9b53c9ae47ccf394c006873234c1f23252d336"
+checksum = "2acdfec1b47151fe74c9a177403ed255e11eaa6eab8a1f567011712a2df0b89a"
 
 [[package]]
 name = "adam_core_rs_spice"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3a5d78c98bdaeff604183412e4eacec9ae5727d42a474713026c98c50e34ffc"
+checksum = "505f0eddaf058576da25b69270ac6c69ebb52b6dc2c6655c1bc9dc0ba53b04a7"
 dependencies = [
  "adam_core_rs_coords",
  "faer",

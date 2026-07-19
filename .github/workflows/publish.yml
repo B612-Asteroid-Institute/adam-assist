@@ -10,12 +10,12 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release-candidate version
         required: true
-        default: 0.4.0rc1
+        default: 0.4.0rc2
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core release candidate
         required: true
-        default: 0.5.6rc1
+        default: 0.5.6rc2
         type: string
       repository:
         description: Destination index
@@ -75,13 +75,13 @@ jobs:
               raise SystemExit(f"missing exact preview dependency {expected}")
           cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
           cargo_version = cargo["package"]["version"]
-          if cargo_version != "0.4.0-rc.1" or str(assist) != "0.4.0rc1":
+          if cargo_version != "0.4.0-rc.2" or str(assist) != "0.4.0rc2":
               raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
           for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
-              if cargo["dependencies"].get(name) != "=0.1.0-rc.1":
-                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.1")
+              if cargo["dependencies"].get(name) != "=0.1.0-rc.2":
+                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.2")
           kernel_data = cargo["dev-dependencies"].get("adam_core_rs_kernel_data")
-          if kernel_data != {"version": "=0.1.0-rc.1", "default-features": False}:
+          if kernel_data != {"version": "=0.1.0-rc.2", "default-features": False}:
               raise SystemExit("adam_core_rs_kernel_data is not exact-pinned")
           if Path("rust/vendor").exists():
               raise SystemExit("temporary vendored core crates must be absent")

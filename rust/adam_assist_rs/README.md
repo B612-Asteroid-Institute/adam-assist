@@ -6,7 +6,7 @@ GPL-3.0 backend crate implementing adam-assist propagation and ephemeris semanti
 
 - `libassist-sys` and `librebound-sys` provide versioned FFI and safe RAII wrappers.
 - `adam_assist_rs` owns orbit/frame normalization, propagation, same-epoch batching, simulation pools, STM/covariance transport, collision handling, ephemeris assembly, OD/IOD work units, Rayon scheduling, and package error semantics.
-- Exact `=0.1.0-rc.1` `adam_core_rs_*` dependencies provide the published permissive generic contracts.
+- Exact `=0.1.0-rc.2` `adam_core_rs_*` dependencies provide the published permissive generic contracts.
 
 The crate is packaged as `adam_assist._native`. It is not part of adam-core’s permissive Rust workspace because ASSIST/REBOUND and this adapter form the deliberate GPL boundary.
 

@@ -10,7 +10,7 @@ on:
       adam_core_ref:
         description: Exact published adam-core RC source tag to test
         required: true
-        default: v0.5.6rc1
+        default: v0.5.6rc2
 
 permissions:
   contents: read
@@ -20,10 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'v0.5.6rc1' }}
+  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'v0.5.6rc2' }}
   PIP_ONLY_BINARY: ":all:"
-  ADAM_CORE_PREVIEW_VERSION: "0.5.6rc1"
-  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc1"
+  ADAM_CORE_PREVIEW_VERSION: "0.5.6rc2"
+  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc2"
 
 jobs:
   artifact-acceptance:
