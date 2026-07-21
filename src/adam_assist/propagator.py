@@ -40,12 +40,13 @@ except ImportError:
 # adam_core defines it in au but we need it in km
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
-# pyarrow.compute type stubs are incomplete for the functions used here.
+# Keep pyarrow.compute call sites permissive: the stubs have historically
+# lagged the functions used here.
 pc_cast: Any = pc.cast
-pc_invert: Any = pc.invert  # type: ignore[attr-defined]
-pc_is_in: Any = pc.is_in  # type: ignore[attr-defined]
-pc_subtract: Any = pc.subtract  # type: ignore[attr-defined]
-pc_unique: Any = pc.unique  # type: ignore[attr-defined]
+pc_invert: Any = pc.invert
+pc_is_in: Any = pc.is_in
+pc_subtract: Any = pc.subtract
+pc_unique: Any = pc.unique
 
 
 def uint32_hash(s: str) -> c_uint32:
