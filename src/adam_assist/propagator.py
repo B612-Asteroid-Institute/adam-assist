@@ -145,12 +145,10 @@ def _extract_assist_particle_params(
     particle params, with nulls treated as zero (no force).
 
     ASSIST evaluates the non-gravitational g(r) with simulation-level Marsden
-    constants that default to alpha=1, nk=0, nm=2, nn=5.093, r0=1, i.e.
-    g(r) = (1 au / r)^2 -- the Yarkovsky/asteroid convention. adam_core's
-    canonical schema stores only Marsden-style A1/A2/A3 (its importers drop
-    solutions' non-standard g(r) constants and other parameters at ingestion
-    with a warning), so the A1/A2/A3 values received here are applied under
-    that standard force law.
+    constants (see `_configure_assist_non_gravitational_forces`, which sets
+    them from the orbits' ALN/NK/NM/NN/R0 columns; nulls mean the
+    asteroid-convention defaults alpha=1, nk=0, nm=2, nn=5.093, r0=1, i.e.
+    g(r) = (1 au / r)^2).
     """
     nongrav = getattr(orbits, "non_gravitational_parameters", None)
     if nongrav is None or len(orbits) == 0:
@@ -174,12 +172,106 @@ def _extract_assist_particle_params(
     return particle_params.reshape(-1)
 
 
+# ASSIST's built-in Marsden constant defaults: g(r) = (1 au / r)^2, the
+# Yarkovsky/asteroid convention. adam_core stores null constants to mean
+# exactly this convention.
+_MARSDEN_CONSTANT_DEFAULTS = {
+    "ALN": 1.0,
+    "NK": 0.0,
+    "NM": 2.0,
+    "NN": 5.093,
+    "R0": 1.0,
+}
+# adam_core column name -> assist.Extras field name.
+_MARSDEN_EXTRAS_FIELDS = {
+    "ALN": "alpha",
+    "NK": "nk",
+    "NM": "nm",
+    "NN": "nn",
+    "R0": "r0",
+}
+_MARSDEN_COLUMN_ORDER = tuple(_MARSDEN_CONSTANT_DEFAULTS)
+
+
+def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
+    """
+    Per-row (N, 5) Marsden g(r) constants in (ALN, NK, NM, NN, R0) order,
+    with nulls (or entirely absent columns on older adam_core schemas)
+    normalized to ASSIST's asteroid-convention defaults.
+    """
+    n = len(orbits)
+    out = np.tile(
+        [_MARSDEN_CONSTANT_DEFAULTS[name] for name in _MARSDEN_COLUMN_ORDER], (n, 1)
+    )
+    nongrav = getattr(orbits, "non_gravitational_parameters", None)
+    if nongrav is None:
+        return out
+    for j, name in enumerate(_MARSDEN_COLUMN_ORDER):
+        column = getattr(nongrav, name, None)
+        if column is None:
+            continue
+        for i, value in enumerate(_nongrav_column_to_numpy(column, n)):
+            if value is not None:
+                out[i, j] = float(value)
+    return out
+
+
+def _partition_by_marsden_constants(orbits: OrbitType) -> List[OrbitType]:
+    """
+    Split orbits into groups sharing a single g(r) constants tuple, since
+    ASSIST holds the Marsden constants per simulation rather than per
+    particle. Rows without non-gravitational accelerations are grouped with
+    the defaults (their constants are never applied).
+    """
+    if len(orbits) <= 1:
+        return [orbits]
+    constants = _marsden_constants_by_row(orbits)
+    nongrav = getattr(orbits, "non_gravitational_parameters", None)
+    if nongrav is None:
+        return [orbits]
+    a_values = np.zeros((len(orbits), 3))
+    for j, name in enumerate(("A1", "A2", "A3")):
+        for i, value in enumerate(
+            _nongrav_column_to_numpy(getattr(nongrav, name), len(orbits))
+        ):
+            if value is not None:
+                a_values[i, j] = float(value)
+    default = tuple(_MARSDEN_CONSTANT_DEFAULTS[name] for name in _MARSDEN_COLUMN_ORDER)
+    keys = [
+        tuple(float(v) for v in constants[i]) if np.any(a_values[i] != 0.0) else default
+        for i in range(len(orbits))
+    ]
+    unique_keys = list(dict.fromkeys(keys))
+    if len(unique_keys) == 1:
+        return [orbits]
+    return [
+        orbits.apply_mask(np.array([k == key for k in keys])) for key in unique_keys
+    ]
+
+
 def _configure_assist_non_gravitational_forces(
     extras: assist.Extras, orbits: OrbitType
 ) -> None:
     particle_params = _extract_assist_particle_params(orbits)
     if particle_params is None:
         return
+
+    # ASSIST evaluates g(r) with simulation-level constants: one tuple per
+    # Extras. All force-carrying orbits in this simulation must agree; the
+    # batch entry points partition by tuple before building simulations.
+    constants = _marsden_constants_by_row(orbits)
+    force_rows = np.any(particle_params.reshape(-1, 3) != 0.0, axis=1)
+    tuples = {tuple(row) for row in constants[force_rows]}
+    if len(tuples) > 1:
+        raise ValueError(
+            "Orbits in a single ASSIST simulation carry different Marsden "
+            f"g(r) constant tuples {sorted(tuples)}; partition them with "
+            "_partition_by_marsden_constants before configuring the simulation."
+        )
+    if tuples:
+        values = tuples.pop()
+        for name, value in zip(_MARSDEN_COLUMN_ORDER, values):
+            setattr(extras, _MARSDEN_EXTRAS_FIELDS[name], value)
 
     current_forces = list(extras.forces)
     if "NON_GRAVITATIONAL" not in current_forces:
@@ -248,17 +340,20 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         transformed_orbits = orbits.set_column("coordinates", transformed_coords)
 
-        # Group orbits by unique time, then propagate them
+        # Group orbits by unique time, then propagate them. Within an epoch,
+        # orbits are further partitioned by their Marsden g(r) constants:
+        # ASSIST holds those per simulation, not per particle.
         results = None
         unique_times = transformed_orbits.coordinates.time.unique()
         for epoch in unique_times:
             mask = transformed_orbits.coordinates.time.equals(epoch)
             epoch_orbits = transformed_orbits.apply_mask(mask)
-            propagated_orbits = self._propagate_orbits_inner(epoch_orbits, times)
-            if results is None:
-                results = propagated_orbits
-            else:
-                results = concatenate([results, propagated_orbits])
+            for partition in _partition_by_marsden_constants(epoch_orbits):
+                propagated_orbits = self._propagate_orbits_inner(partition, times)
+                if results is None:
+                    results = propagated_orbits
+                else:
+                    results = concatenate([results, propagated_orbits])
 
         # Sanity check that the results are of the correct type
         assert isinstance(results, OrbitType)
@@ -626,6 +721,20 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         num_days: int,
         conditions: CollisionConditions,
     ) -> Tuple[VariantOrbits, CollisionEvent]:
+        # ASSIST holds the Marsden g(r) constants per simulation: orbits with
+        # different constant tuples must run in separate simulations.
+        partitions = _partition_by_marsden_constants(orbits)
+        if len(partitions) > 1:
+            results_parts = []
+            event_parts = []
+            for partition in partitions:
+                partition_results, partition_events = self._detect_collisions(
+                    partition, num_days, conditions
+                )
+                results_parts.append(partition_results)
+                event_parts.append(partition_events)
+            return concatenate(results_parts), concatenate(event_parts)
+
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc_unique(orbits.coordinates.time.mjd())) == 1
 
