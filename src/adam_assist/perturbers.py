@@ -216,5 +216,5 @@ def unique_perturber_ids_from_candidates(
     if ids.size == 0:
         return np.array([], dtype=object)
     matched = is_perturber(ids)
-    non_none = matched[matched != None]  # noqa: E711
+    non_none = matched[matched != None]
     return np.unique(non_none) if non_none.size > 0 else np.array([], dtype=object)

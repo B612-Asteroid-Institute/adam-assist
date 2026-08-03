@@ -1,7 +1,7 @@
 import hashlib
 import random
 from ctypes import c_uint32
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any
 
 import assist
 import numpy as np
@@ -22,12 +22,11 @@ from adam_core.coordinates import (
 from adam_core.dynamics.impacts import CollisionConditions, CollisionEvent, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 from quivr.concat import concatenate
-
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 
 C = c.C
 
@@ -58,7 +57,7 @@ def uint32_hash(s: str) -> c_uint32:
 def hash_orbit_ids_to_uint32(
     # orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
     orbit_ids: npt.NDArray[np.str_],
-) -> Tuple[Dict[int, str], List[c_uint32]]:
+) -> tuple[dict[int, str], list[c_uint32]]:
     """
     Derive uint32 hashes from orbit id strigns
 
@@ -139,7 +138,7 @@ def _nongrav_column_to_numpy(column: Any, length: int) -> npt.NDArray[np.object_
 
 def _extract_assist_particle_params(
     orbits: OrbitType,
-) -> Union[None, npt.NDArray[np.float64]]:
+) -> None | npt.NDArray[np.float64]:
     """
     Flatten the canonical A1/A2/A3 non-gravitational parameters into ASSIST
     particle params, with nulls treated as zero (no force).
@@ -216,7 +215,7 @@ def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
     return out
 
 
-def _partition_by_marsden_constants(orbits: OrbitType) -> List[OrbitType]:
+def _partition_by_marsden_constants(orbits: OrbitType) -> list[OrbitType]:
     """
     Split orbits into groups sharing a single g(r) constants tuple, since
     ASSIST holds the Marsden constants per simulation rather than per
@@ -308,12 +307,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state.pop("_last_simulation", None)
         return state
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
@@ -555,7 +554,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             )
             particle_ids = np.array(particle_ids, dtype="object")
 
-        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
+        _orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
         hash_to_index = {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
 
         # Add the orbits as particles to the simulation
@@ -592,9 +591,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # Unified accumulation for both Orbits and VariantOrbits
         results = None
         is_variant = isinstance(orbits, VariantOrbits)
-        step_states: List[npt.NDArray[np.float64]] = []
-        step_orbit_ids: List[npt.NDArray[np.object_]] = []
-        step_variant_ids: List[npt.NDArray[np.object_]] = []
+        step_states: list[npt.NDArray[np.float64]] = []
+        step_orbit_ids: list[npt.NDArray[np.object_]] = []
+        step_variant_ids: list[npt.NDArray[np.object_]] = []
 
         # Step through each time, move the simulation forward and collect state
         for i in range(len(integrator_times)):
@@ -720,7 +719,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         orbits: OrbitType,
         num_days: int,
         conditions: CollisionConditions,
-    ) -> Tuple[VariantOrbits, CollisionEvent]:
+    ) -> tuple[VariantOrbits, CollisionEvent]:
         # ASSIST holds the Marsden g(r) constants per simulation: orbits with
         # different constant tuples must run in separate simulations.
         partitions = _partition_by_marsden_constants(orbits)
@@ -823,11 +822,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         results = None
         collision_events = CollisionEvent.empty()
         # Accumulators to reduce per-iteration concatenation
-        collisions_list: List[CollisionEvent] = []
-        colliders_list: List[OrbitType] = []
-        results_list: List[OrbitType] = []
+        collisions_list: list[CollisionEvent] = []
+        colliders_list: list[OrbitType] = []
+        results_list: list[OrbitType] = []
         past_integrator_time = False
-        time_step_results: Union[None, OrbitType] = None
+        time_step_results: None | OrbitType = None
 
         # Set the integrator parameters
         sim.dt = self.initial_dt

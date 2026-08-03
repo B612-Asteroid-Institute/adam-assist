@@ -1,6 +1,7 @@
-from adam_core.orbits import Orbits
 from adam_core.constants import KM_P_AU
 from adam_core.coordinates import Origin
+from adam_core.orbits import Orbits
+
 from src.adam_assist.propagator import ASSISTPropagator, CollisionConditions
 
 IMPACTOR_FILE_PATH_60 = "tests/data/I00007_orbit.parquet"
