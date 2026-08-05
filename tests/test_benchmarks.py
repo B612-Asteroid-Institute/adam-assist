@@ -1,12 +1,9 @@
-import time
-
 import numpy as np
 import pytest
 from adam_core.dynamics.impacts import CollisionConditions, calculate_impacts
 from adam_core.observers.observers import Observers
 from adam_core.orbits import Orbits
 from adam_core.orbits.query.sbdb import query_sbdb
-from adam_core.orbits.variants import VariantOrbits
 from adam_core.time import Timestamp
 
 from adam_assist import ASSISTPropagator
@@ -54,7 +51,7 @@ def test_benchmark_ephemeris_generation(benchmark):
 def test_benchmark_impact_detection(benchmark):
     impactor = Orbits.from_parquet("tests/data/I00007_orbit.parquet")[0]
     prop = ASSISTPropagator()
-    variants, impacts = benchmark(
+    variants, _impacts = benchmark(
         calculate_impacts,
         impactor,
         60,

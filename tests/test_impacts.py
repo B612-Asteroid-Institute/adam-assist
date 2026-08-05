@@ -2,9 +2,7 @@ import pyarrow.compute as pc
 import pytest
 from adam_core.constants import KM_P_AU
 from adam_core.constants import Constants as c
-from adam_core.coordinates import Origin
 from adam_core.dynamics.impacts import (
-    EARTH_RADIUS_KM,
     CollisionConditions,
     calculate_impacts,
 )
@@ -110,13 +108,13 @@ def test_detect_collisions_time_direction():
 
     propagator = ASSISTPropagator()
 
-    results, impacts = propagator._detect_collisions(orbit, 60, conditions)
+    results, _impacts = propagator._detect_collisions(orbit, 60, conditions)
     assert (
         results.coordinates.time.mjd().to_numpy()[0]
         >= orbit.coordinates.time.add_days(60).mjd().to_numpy()[0]
     )
 
-    results, impacts = propagator._detect_collisions(orbit, -60, conditions)
+    results, _impacts = propagator._detect_collisions(orbit, -60, conditions)
     assert (
         results.coordinates.time.mjd().to_numpy()[0]
         <= orbit.coordinates.time.add_days(-60).mjd().to_numpy()[0]

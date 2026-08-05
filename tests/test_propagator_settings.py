@@ -1,4 +1,3 @@
-import pyarrow as pa
 import pytest
 from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.orbits import Orbits

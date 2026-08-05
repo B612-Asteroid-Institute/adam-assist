@@ -197,6 +197,12 @@ def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
     Per-row (N, 5) Marsden g(r) constants in (ALN, NK, NM, NN, R0) order,
     with nulls (or entirely absent columns on older adam_core schemas)
     normalized to ASSIST's asteroid-convention defaults.
+
+    Degenerate laws are canonicalized: with NK = 0 the (1 + (r/R0)^NN)^-NK
+    factor is identically 1, so NN is dynamically irrelevant and is reset to
+    the default. This keeps e.g. an explicit inverse-square tuple stored with
+    NN = 0 from landing in a different simulation than the equivalent
+    null-constants rows.
     """
     n = len(orbits)
     out = np.tile(
@@ -212,7 +218,64 @@ def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
         for i, value in enumerate(_nongrav_column_to_numpy(column, n)):
             if value is not None:
                 out[i, j] = float(value)
+    nk = _MARSDEN_COLUMN_ORDER.index("NK")
+    nn = _MARSDEN_COLUMN_ORDER.index("NN")
+    out[out[:, nk] == 0.0, nn] = _MARSDEN_CONSTANT_DEFAULTS["NN"]
     return out
+
+
+def _validate_assist_non_gravitational_inputs(
+    orbits: OrbitType,
+    particle_params: npt.NDArray[np.float64],
+    constants: npt.NDArray[np.float64],
+    force_rows: npt.NDArray[np.bool_],
+) -> None:
+    """
+    Reject inputs that ASSIST would otherwise accept and integrate silently
+    wrong: non-finite A-values (NaN particle params yield NaN trajectories),
+    non-finite or partially-specified Marsden tuples, and degenerate
+    ALN <= 0 / R0 <= 0 values (R0 = 0 makes g(r) evaluate to zero,
+    suppressing the intended force without any error).
+    """
+    orbit_ids = orbits.orbit_id.to_pylist()
+    params = particle_params.reshape(-1, 3)
+    bad = ~np.isfinite(params).all(axis=1)
+    if bad.any():
+        raise ValueError(
+            "Non-finite non-gravitational A1/A2/A3 values for orbits "
+            f"{[orbit_ids[i] for i in np.flatnonzero(bad)]}."
+        )
+
+    nongrav = orbits.non_gravitational_parameters
+    set_counts = np.zeros(len(orbits), dtype=np.int64)
+    for name in _MARSDEN_COLUMN_ORDER:
+        set_counts += np.array(
+            [value is not None for value in getattr(nongrav, name).to_pylist()]
+        )
+    partial = (
+        force_rows & (set_counts != 0) & (set_counts != len(_MARSDEN_COLUMN_ORDER))
+    )
+    if partial.any():
+        raise ValueError(
+            "Partially-specified Marsden g(r) constants for orbits "
+            f"{[orbit_ids[i] for i in np.flatnonzero(partial)]}: set all of "
+            f"{_MARSDEN_COLUMN_ORDER} or none (null selects the asteroid "
+            "(1 au / r)^2 convention)."
+        )
+
+    aln = _MARSDEN_COLUMN_ORDER.index("ALN")
+    r0 = _MARSDEN_COLUMN_ORDER.index("R0")
+    invalid = force_rows & (
+        ~np.isfinite(constants).all(axis=1)
+        | (constants[:, aln] <= 0.0)
+        | (constants[:, r0] <= 0.0)
+    )
+    if invalid.any():
+        raise ValueError(
+            "Invalid Marsden g(r) constants for orbits "
+            f"{[orbit_ids[i] for i in np.flatnonzero(invalid)]}: all values "
+            "must be finite with ALN > 0 and R0 > 0."
+        )
 
 
 def _partition_by_marsden_constants(orbits: OrbitType) -> list[OrbitType]:
@@ -260,6 +323,9 @@ def _configure_assist_non_gravitational_forces(
     # batch entry points partition by tuple before building simulations.
     constants = _marsden_constants_by_row(orbits)
     force_rows = np.any(particle_params.reshape(-1, 3) != 0.0, axis=1)
+    _validate_assist_non_gravitational_inputs(
+        orbits, particle_params, constants, force_rows
+    )
     tuples = {tuple(row) for row in constants[force_rows]}
     if len(tuples) > 1:
         raise ValueError(
