@@ -294,6 +294,36 @@ def test_configure_rejects_invalid_marsden_constants(overrides):
         _configure_assist_non_gravitational_forces(FakeExtras(["SUN"]), orbits)
 
 
+@pytest.mark.parametrize("bad_nn", [float("nan"), float("inf")])
+def test_propagate_orbits_rejects_non_finite_nn_even_when_nk_zero(bad_nn):
+    # Regression for validation ordering: canonicalization rewrites NN when
+    # NK == 0 (it is dynamically irrelevant), but the *supplied* values must
+    # be validated first -- a non-finite NN is garbage data, not a valid law,
+    # and must be rejected on the public propagation path.
+    from adam_core.time import Timestamp
+
+    from adam_assist import ASSISTPropagator
+
+    orbits = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "SBDB"],
+            A1=[None, None],
+            A2=[-2.9e-14, -1.1e-14],
+            A3=[None, None],
+            ALN=[1.0, 1.0],
+            NK=[0.0, 0.0],
+            NM=[2.0, 2.0],
+            NN=[bad_nn, bad_nn],
+            R0=[1.0, 1.0],
+        )
+    )
+
+    with pytest.raises(ValueError, match="Invalid Marsden"):
+        ASSISTPropagator().propagate_orbits(
+            orbits, Timestamp.from_mjd([60010.0], scale="tdb")
+        )
+
+
 def test_partial_constants_allowed_on_force_free_rows():
     # A row without accelerations exerts no force: its (partial) constants
     # are never applied and must not be rejected.

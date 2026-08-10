@@ -198,11 +198,8 @@ def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
     with nulls (or entirely absent columns on older adam_core schemas)
     normalized to ASSIST's asteroid-convention defaults.
 
-    Degenerate laws are canonicalized: with NK = 0 the (1 + (r/R0)^NN)^-NK
-    factor is identically 1, so NN is dynamically irrelevant and is reset to
-    the default. This keeps e.g. an explicit inverse-square tuple stored with
-    NN = 0 from landing in a different simulation than the equivalent
-    null-constants rows.
+    Returns the values as supplied: validation must see them before
+    `_canonicalize_marsden_constants` rewrites dynamically irrelevant fields.
     """
     n = len(orbits)
     out = np.tile(
@@ -218,6 +215,22 @@ def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
         for i, value in enumerate(_nongrav_column_to_numpy(column, n)):
             if value is not None:
                 out[i, j] = float(value)
+    return out
+
+
+def _canonicalize_marsden_constants(
+    constants: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
+    """
+    Rewrite dynamically irrelevant fields to their defaults so equivalent
+    force laws produce identical tuples: with NK = 0 the
+    (1 + (r/R0)^NN)^-NK factor is identically 1, so NN is reset to the
+    default. This keeps e.g. an explicit inverse-square tuple stored with
+    NN = 0 from landing in a different simulation than the equivalent
+    null-constants rows. Runs only after the supplied values have been
+    validated -- canonicalizing first would mask non-finite NN values.
+    """
+    out = np.array(constants)
     nk = _MARSDEN_COLUMN_ORDER.index("NK")
     nn = _MARSDEN_COLUMN_ORDER.index("NN")
     out[out[:, nk] == 0.0, nn] = _MARSDEN_CONSTANT_DEFAULTS["NN"]
@@ -287,7 +300,7 @@ def _partition_by_marsden_constants(orbits: OrbitType) -> list[OrbitType]:
     """
     if len(orbits) <= 1:
         return [orbits]
-    constants = _marsden_constants_by_row(orbits)
+    constants = _canonicalize_marsden_constants(_marsden_constants_by_row(orbits))
     nongrav = getattr(orbits, "non_gravitational_parameters", None)
     if nongrav is None:
         return [orbits]
@@ -321,11 +334,12 @@ def _configure_assist_non_gravitational_forces(
     # ASSIST evaluates g(r) with simulation-level constants: one tuple per
     # Extras. All force-carrying orbits in this simulation must agree; the
     # batch entry points partition by tuple before building simulations.
-    constants = _marsden_constants_by_row(orbits)
+    raw_constants = _marsden_constants_by_row(orbits)
     force_rows = np.any(particle_params.reshape(-1, 3) != 0.0, axis=1)
     _validate_assist_non_gravitational_inputs(
-        orbits, particle_params, constants, force_rows
+        orbits, particle_params, raw_constants, force_rows
     )
+    constants = _canonicalize_marsden_constants(raw_constants)
     tuples = {tuple(row) for row in constants[force_rows]}
     if len(tuples) > 1:
         raise ValueError(
