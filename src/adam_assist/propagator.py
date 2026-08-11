@@ -1,7 +1,7 @@
 import hashlib
 import random
 from ctypes import c_uint32
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any
 
 import assist
 import numpy as np
@@ -22,12 +22,11 @@ from adam_core.coordinates import (
 from adam_core.dynamics.impacts import CollisionConditions, CollisionEvent, ImpactMixin
 from adam_core.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
+from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 from quivr.concat import concatenate
-
-from adam_core.propagator.propagator import OrbitType, Propagator, TimestampType
 
 C = c.C
 
@@ -40,12 +39,13 @@ except ImportError:
 # adam_core defines it in au but we need it in km
 EARTH_RADIUS_KM = c.R_EARTH_EQUATORIAL * KM_P_AU
 
-# pyarrow.compute type stubs are incomplete for the functions used here.
+# Keep pyarrow.compute call sites permissive: the stubs have historically
+# lagged the functions used here.
 pc_cast: Any = pc.cast
-pc_invert: Any = pc.invert  # type: ignore[attr-defined]
-pc_is_in: Any = pc.is_in  # type: ignore[attr-defined]
-pc_subtract: Any = pc.subtract  # type: ignore[attr-defined]
-pc_unique: Any = pc.unique  # type: ignore[attr-defined]
+pc_invert: Any = pc.invert
+pc_is_in: Any = pc.is_in
+pc_subtract: Any = pc.subtract
+pc_unique: Any = pc.unique
 
 
 def uint32_hash(s: str) -> c_uint32:
@@ -57,7 +57,7 @@ def uint32_hash(s: str) -> c_uint32:
 def hash_orbit_ids_to_uint32(
     # orbit_ids: np.ndarray[Tuple[np.dtype[np.int_]], np.dtype[np.str_]],
     orbit_ids: npt.NDArray[np.str_],
-) -> Tuple[Dict[int, str], List[c_uint32]]:
+) -> tuple[dict[int, str], list[c_uint32]]:
     """
     Derive uint32 hashes from orbit id strigns
 
@@ -127,7 +127,244 @@ def generate_unique_separator(
     )
 
 
+def _nongrav_column_to_numpy(column: Any, length: int) -> npt.NDArray[np.object_]:
+    values = column.to_pylist()
+    if len(values) != length:
+        raise ValueError(
+            f"Expected non-gravitational parameter column of length {length}, got {len(values)}"
+        )
+    return np.array(values, dtype=object)
+
+
+def _extract_assist_particle_params(
+    orbits: OrbitType,
+) -> None | npt.NDArray[np.float64]:
+    """
+    Flatten the canonical A1/A2/A3 non-gravitational parameters into ASSIST
+    particle params, with nulls treated as zero (no force).
+
+    ASSIST evaluates the non-gravitational g(r) with simulation-level Marsden
+    constants (see `_configure_assist_non_gravitational_forces`, which sets
+    them from the orbits' ALN/NK/NM/NN/R0 columns; nulls mean the
+    asteroid-convention defaults alpha=1, nk=0, nm=2, nn=5.093, r0=1, i.e.
+    g(r) = (1 au / r)^2).
+    """
+    nongrav = getattr(orbits, "non_gravitational_parameters", None)
+    if nongrav is None or len(orbits) == 0:
+        return None
+
+    a1 = _nongrav_column_to_numpy(nongrav.A1, len(orbits))
+    a2 = _nongrav_column_to_numpy(nongrav.A2, len(orbits))
+    a3 = _nongrav_column_to_numpy(nongrav.A3, len(orbits))
+    has_values = any(
+        (a1_i is not None) or (a2_i is not None) or (a3_i is not None)
+        for a1_i, a2_i, a3_i in zip(a1, a2, a3)
+    )
+    if not has_values:
+        return None
+
+    particle_params = np.zeros((len(orbits), 3), dtype=np.float64)
+    for i, (a1_i, a2_i, a3_i) in enumerate(zip(a1, a2, a3)):
+        particle_params[i, 0] = 0.0 if a1_i is None else float(a1_i)
+        particle_params[i, 1] = 0.0 if a2_i is None else float(a2_i)
+        particle_params[i, 2] = 0.0 if a3_i is None else float(a3_i)
+    return particle_params.reshape(-1)
+
+
+# ASSIST's built-in Marsden constant defaults: g(r) = (1 au / r)^2, the
+# Yarkovsky/asteroid convention. adam_core stores null constants to mean
+# exactly this convention.
+_MARSDEN_CONSTANT_DEFAULTS = {
+    "ALN": 1.0,
+    "NK": 0.0,
+    "NM": 2.0,
+    "NN": 5.093,
+    "R0": 1.0,
+}
+# adam_core column name -> assist.Extras field name.
+_MARSDEN_EXTRAS_FIELDS = {
+    "ALN": "alpha",
+    "NK": "nk",
+    "NM": "nm",
+    "NN": "nn",
+    "R0": "r0",
+}
+_MARSDEN_COLUMN_ORDER = tuple(_MARSDEN_CONSTANT_DEFAULTS)
+
+
+def _marsden_constants_by_row(orbits: OrbitType) -> npt.NDArray[np.float64]:
+    """
+    Per-row (N, 5) Marsden g(r) constants in (ALN, NK, NM, NN, R0) order,
+    with nulls (or entirely absent columns on older adam_core schemas)
+    normalized to ASSIST's asteroid-convention defaults.
+
+    Returns the values as supplied: validation must see them before
+    `_canonicalize_marsden_constants` rewrites dynamically irrelevant fields.
+    """
+    n = len(orbits)
+    out = np.tile(
+        [_MARSDEN_CONSTANT_DEFAULTS[name] for name in _MARSDEN_COLUMN_ORDER], (n, 1)
+    )
+    nongrav = getattr(orbits, "non_gravitational_parameters", None)
+    if nongrav is None:
+        return out
+    for j, name in enumerate(_MARSDEN_COLUMN_ORDER):
+        column = getattr(nongrav, name, None)
+        if column is None:
+            continue
+        for i, value in enumerate(_nongrav_column_to_numpy(column, n)):
+            if value is not None:
+                out[i, j] = float(value)
+    return out
+
+
+def _canonicalize_marsden_constants(
+    constants: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
+    """
+    Rewrite dynamically irrelevant fields to their defaults so equivalent
+    force laws produce identical tuples: with NK = 0 the
+    (1 + (r/R0)^NN)^-NK factor is identically 1, so NN is reset to the
+    default. This keeps e.g. an explicit inverse-square tuple stored with
+    NN = 0 from landing in a different simulation than the equivalent
+    null-constants rows. Runs only after the supplied values have been
+    validated -- canonicalizing first would mask non-finite NN values.
+    """
+    out = np.array(constants)
+    nk = _MARSDEN_COLUMN_ORDER.index("NK")
+    nn = _MARSDEN_COLUMN_ORDER.index("NN")
+    out[out[:, nk] == 0.0, nn] = _MARSDEN_CONSTANT_DEFAULTS["NN"]
+    return out
+
+
+def _validate_assist_non_gravitational_inputs(
+    orbits: OrbitType,
+    particle_params: npt.NDArray[np.float64],
+    constants: npt.NDArray[np.float64],
+    force_rows: npt.NDArray[np.bool_],
+) -> None:
+    """
+    Reject inputs that ASSIST would otherwise accept and integrate silently
+    wrong: non-finite A-values (NaN particle params yield NaN trajectories),
+    non-finite or partially-specified Marsden tuples, and degenerate
+    ALN <= 0 / R0 <= 0 values (R0 = 0 makes g(r) evaluate to zero,
+    suppressing the intended force without any error).
+    """
+    orbit_ids = orbits.orbit_id.to_pylist()
+    params = particle_params.reshape(-1, 3)
+    bad = ~np.isfinite(params).all(axis=1)
+    if bad.any():
+        raise ValueError(
+            "Non-finite non-gravitational A1/A2/A3 values for orbits "
+            f"{[orbit_ids[i] for i in np.flatnonzero(bad)]}."
+        )
+
+    nongrav = orbits.non_gravitational_parameters
+    set_counts = np.zeros(len(orbits), dtype=np.int64)
+    for name in _MARSDEN_COLUMN_ORDER:
+        set_counts += np.array(
+            [value is not None for value in getattr(nongrav, name).to_pylist()]
+        )
+    partial = (
+        force_rows & (set_counts != 0) & (set_counts != len(_MARSDEN_COLUMN_ORDER))
+    )
+    if partial.any():
+        raise ValueError(
+            "Partially-specified Marsden g(r) constants for orbits "
+            f"{[orbit_ids[i] for i in np.flatnonzero(partial)]}: set all of "
+            f"{_MARSDEN_COLUMN_ORDER} or none (null selects the asteroid "
+            "(1 au / r)^2 convention)."
+        )
+
+    aln = _MARSDEN_COLUMN_ORDER.index("ALN")
+    r0 = _MARSDEN_COLUMN_ORDER.index("R0")
+    invalid = force_rows & (
+        ~np.isfinite(constants).all(axis=1)
+        | (constants[:, aln] <= 0.0)
+        | (constants[:, r0] <= 0.0)
+    )
+    if invalid.any():
+        raise ValueError(
+            "Invalid Marsden g(r) constants for orbits "
+            f"{[orbit_ids[i] for i in np.flatnonzero(invalid)]}: all values "
+            "must be finite with ALN > 0 and R0 > 0."
+        )
+
+
+def _partition_by_marsden_constants(orbits: OrbitType) -> list[OrbitType]:
+    """
+    Split orbits into groups sharing a single g(r) constants tuple, since
+    ASSIST holds the Marsden constants per simulation rather than per
+    particle. Rows without non-gravitational accelerations are grouped with
+    the defaults (their constants are never applied).
+    """
+    if len(orbits) <= 1:
+        return [orbits]
+    constants = _canonicalize_marsden_constants(_marsden_constants_by_row(orbits))
+    nongrav = getattr(orbits, "non_gravitational_parameters", None)
+    if nongrav is None:
+        return [orbits]
+    a_values = np.zeros((len(orbits), 3))
+    for j, name in enumerate(("A1", "A2", "A3")):
+        for i, value in enumerate(
+            _nongrav_column_to_numpy(getattr(nongrav, name), len(orbits))
+        ):
+            if value is not None:
+                a_values[i, j] = float(value)
+    default = tuple(_MARSDEN_CONSTANT_DEFAULTS[name] for name in _MARSDEN_COLUMN_ORDER)
+    keys = [
+        tuple(float(v) for v in constants[i]) if np.any(a_values[i] != 0.0) else default
+        for i in range(len(orbits))
+    ]
+    unique_keys = list(dict.fromkeys(keys))
+    if len(unique_keys) == 1:
+        return [orbits]
+    return [
+        orbits.apply_mask(np.array([k == key for k in keys])) for key in unique_keys
+    ]
+
+
+def _configure_assist_non_gravitational_forces(
+    extras: assist.Extras, orbits: OrbitType
+) -> None:
+    particle_params = _extract_assist_particle_params(orbits)
+    if particle_params is None:
+        return
+
+    # ASSIST evaluates g(r) with simulation-level constants: one tuple per
+    # Extras. All force-carrying orbits in this simulation must agree; the
+    # batch entry points partition by tuple before building simulations.
+    raw_constants = _marsden_constants_by_row(orbits)
+    force_rows = np.any(particle_params.reshape(-1, 3) != 0.0, axis=1)
+    _validate_assist_non_gravitational_inputs(
+        orbits, particle_params, raw_constants, force_rows
+    )
+    constants = _canonicalize_marsden_constants(raw_constants)
+    tuples = {tuple(row) for row in constants[force_rows]}
+    if len(tuples) > 1:
+        raise ValueError(
+            "Orbits in a single ASSIST simulation carry different Marsden "
+            f"g(r) constant tuples {sorted(tuples)}; partition them with "
+            "_partition_by_marsden_constants before configuring the simulation."
+        )
+    if tuples:
+        values = tuples.pop()
+        for name, value in zip(_MARSDEN_COLUMN_ORDER, values):
+            setattr(extras, _MARSDEN_EXTRAS_FIELDS[name], value)
+
+    current_forces = list(extras.forces)
+    if "NON_GRAVITATIONAL" not in current_forces:
+        current_forces.append("NON_GRAVITATIONAL")
+        extras.forces = current_forces
+    extras.particle_params = particle_params
+
+
 class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
+
+    # Declares to adam_core's Propagator interface that this backend applies
+    # non-gravitational forces (Marsden-style A1/A2/A3), suppressing its
+    # "parameters may be silently ignored" warning.
+    supports_non_gravitational_forces = True
 
     def __init__(
         self,
@@ -150,12 +387,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state.pop("_last_simulation", None)
         return state
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: dict[str, Any]) -> None:
         self.__dict__.update(state)
 
     def _propagate_orbits(self, orbits: OrbitType, times: TimestampType) -> OrbitType:
@@ -182,17 +419,20 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         )
         transformed_orbits = orbits.set_column("coordinates", transformed_coords)
 
-        # Group orbits by unique time, then propagate them
+        # Group orbits by unique time, then propagate them. Within an epoch,
+        # orbits are further partitioned by their Marsden g(r) constants:
+        # ASSIST holds those per simulation, not per particle.
         results = None
         unique_times = transformed_orbits.coordinates.time.unique()
         for epoch in unique_times:
             mask = transformed_orbits.coordinates.time.equals(epoch)
             epoch_orbits = transformed_orbits.apply_mask(mask)
-            propagated_orbits = self._propagate_orbits_inner(epoch_orbits, times)
-            if results is None:
-                results = propagated_orbits
-            else:
-                results = concatenate([results, propagated_orbits])
+            for partition in _partition_by_marsden_constants(epoch_orbits):
+                propagated_orbits = self._propagate_orbits_inner(partition, times)
+                if results is None:
+                    results = propagated_orbits
+                else:
+                    results = concatenate([results, propagated_orbits])
 
         # Sanity check that the results are of the correct type
         assert isinstance(results, OrbitType)
@@ -248,7 +488,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             orbit_id = str(orbit.orbit_id.to_numpy(zero_copy_only=False)[0])
             particle_hash = uint32_hash(orbit_id)
 
-        assist.Extras(sim, ephem)
+        extras = assist.Extras(sim, ephem)
+        _configure_assist_non_gravitational_forces(extras, orbit)
 
         # Add single particle
         coords = orbit.coordinates
@@ -305,6 +546,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             physical_parameters_out = orbit.physical_parameters.take(
                 np.zeros(N, dtype=np.int64)
             )
+            non_gravitational_parameters_out = orbit.non_gravitational_parameters.take(
+                np.zeros(N, dtype=np.int64)
+            )
 
             return VariantOrbits.from_kwargs(
                 orbit_id=orbit_ids_out,
@@ -313,6 +557,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 weights=weights_out,
                 weights_cov=weights_cov_out,
                 physical_parameters=physical_parameters_out,
+                non_gravitational_parameters=non_gravitational_parameters_out,
                 coordinates=CartesianCoordinates.from_kwargs(
                     x=xyzvxvyvz[:, 0],
                     y=xyzvxvyvz[:, 1],
@@ -331,6 +576,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             physical_parameters_out = orbit.physical_parameters.take(
                 np.zeros(N, dtype=np.int64)
             )
+            non_gravitational_parameters_out = orbit.non_gravitational_parameters.take(
+                np.zeros(N, dtype=np.int64)
+            )
 
             return Orbits.from_kwargs(
                 coordinates=CartesianCoordinates.from_kwargs(
@@ -347,6 +595,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 orbit_id=orbit_ids_out,
                 object_id=object_id_out,
                 physical_parameters=physical_parameters_out,
+                non_gravitational_parameters=non_gravitational_parameters_out,
             )
 
     def _propagate_orbits_inner(
@@ -385,7 +634,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
             )
             particle_ids = np.array(particle_ids, dtype="object")
 
-        orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
+        _orbit_id_mapping, uint_orbit_ids = hash_orbit_ids_to_uint32(particle_ids)
         hash_to_index = {uint_orbit_ids[i].value: i for i in range(len(uint_orbit_ids))}
 
         # Add the orbits as particles to the simulation
@@ -394,7 +643,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         position_arrays = coords.r  # x, y, z columns
         velocity_arrays = coords.v  # vx, vy, vz columns
 
-        assist.Extras(sim, ephem)
+        extras = assist.Extras(sim, ephem)
+        _configure_assist_non_gravitational_forces(extras, orbits)
 
         for i in range(len(position_arrays)):
             sim.add(
@@ -421,9 +671,9 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         # Unified accumulation for both Orbits and VariantOrbits
         results = None
         is_variant = isinstance(orbits, VariantOrbits)
-        step_states: List[npt.NDArray[np.float64]] = []
-        step_orbit_ids: List[npt.NDArray[np.object_]] = []
-        step_variant_ids: List[npt.NDArray[np.object_]] = []
+        step_states: list[npt.NDArray[np.float64]] = []
+        step_orbit_ids: list[npt.NDArray[np.object_]] = []
+        step_variant_ids: list[npt.NDArray[np.object_]] = []
 
         # Step through each time, move the simulation forward and collect state
         for i in range(len(integrator_times)):
@@ -480,6 +730,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 physical_parameters_out = orbits.physical_parameters.take(
                     np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
                 )
+                non_gravitational_parameters_out = (
+                    orbits.non_gravitational_parameters.take(
+                        np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
+                    )
+                )
 
                 results = VariantOrbits.from_kwargs(
                     orbit_id=orbit_ids_out,
@@ -488,6 +743,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     weights=weights_out,
                     weights_cov=weights_cov_out,
                     physical_parameters=physical_parameters_out,
+                    non_gravitational_parameters=non_gravitational_parameters_out,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=xyzvxvyvz[:, 0],
                         y=xyzvxvyvz[:, 1],
@@ -510,6 +766,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                 physical_parameters_out = orbits.physical_parameters.take(
                     np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
                 )
+                non_gravitational_parameters_out = (
+                    orbits.non_gravitational_parameters.take(
+                        np.tile(np.arange(len(orbits), dtype=np.int64), num_steps)
+                    )
+                )
 
                 results = Orbits.from_kwargs(
                     coordinates=CartesianCoordinates.from_kwargs(
@@ -526,6 +787,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbit_id=orbit_ids_out,
                     object_id=object_id_out,
                     physical_parameters=physical_parameters_out,
+                    non_gravitational_parameters=non_gravitational_parameters_out,
                 )
 
         # Store the last simulation in a private variable for reference
@@ -537,7 +799,21 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         orbits: OrbitType,
         num_days: int,
         conditions: CollisionConditions,
-    ) -> Tuple[VariantOrbits, CollisionEvent]:
+    ) -> tuple[VariantOrbits, CollisionEvent]:
+        # ASSIST holds the Marsden g(r) constants per simulation: orbits with
+        # different constant tuples must run in separate simulations.
+        partitions = _partition_by_marsden_constants(orbits)
+        if len(partitions) > 1:
+            results_parts = []
+            event_parts = []
+            for partition in partitions:
+                partition_results, partition_events = self._detect_collisions(
+                    partition, num_days, conditions
+                )
+                results_parts.append(partition_results)
+                event_parts.append(partition_events)
+            return concatenate(results_parts), concatenate(event_parts)
+
         # Assert that the time for each orbit definition is the same for the simulator to work
         assert len(pc_unique(orbits.coordinates.time.mjd())) == 1
 
@@ -601,7 +877,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         position_arrays = coords.r  # x, y, z columns
         velocity_arrays = coords.v  # vx, vy, vz columns
 
-        assist.Extras(sim, ephem)
+        extras = assist.Extras(sim, ephem)
+        _configure_assist_non_gravitational_forces(extras, orbits)
 
         for i in range(len(position_arrays)):
             sim.add(
@@ -625,11 +902,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
         results = None
         collision_events = CollisionEvent.empty()
         # Accumulators to reduce per-iteration concatenation
-        collisions_list: List[CollisionEvent] = []
-        colliders_list: List[OrbitType] = []
-        results_list: List[OrbitType] = []
+        collisions_list: list[CollisionEvent] = []
+        colliders_list: list[OrbitType] = []
+        results_list: list[OrbitType] = []
         past_integrator_time = False
-        time_step_results: Union[None, OrbitType] = None
+        time_step_results: None | OrbitType = None
 
         # Set the integrator parameters
         sim.dt = self.initial_dt
@@ -681,6 +958,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     orbit_id=orbit_ids,
                     object_id=orbits.object_id,
                     physical_parameters=orbits.physical_parameters,
+                    non_gravitational_parameters=orbits.non_gravitational_parameters,
                 )
             elif isinstance(orbits, VariantOrbits):
                 # Retrieve the orbit id and weights from hash
@@ -702,6 +980,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore
                     weights=orbits.weights,
                     weights_cov=orbits.weights_cov,
                     physical_parameters=orbits.physical_parameters,
+                    non_gravitational_parameters=orbits.non_gravitational_parameters,
                     coordinates=CartesianCoordinates.from_kwargs(
                         x=step_xyzvxvyvz[:, 0],
                         y=step_xyzvxvyvz[:, 1],

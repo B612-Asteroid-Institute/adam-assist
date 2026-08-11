@@ -19,7 +19,11 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "adam-core>=0.5.4",
+    # Depends on the non_gravitational_parameters / solved_state_covariance
+    # columns (adam_core PR #201), which are not yet in a tagged adam_core
+    # release. Pin to the matching development branch until it lands.
+    # TODO: switch back to "adam-core>=<release>" once PR #201 is released.
+    "adam-core @ git+https://github.com/B612-Asteroid-Institute/adam_core.git@codex/nongrav-support",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     "assist>=1.2.3,<1.3",
