@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784332529791,
+  "lastUpdate": 1786465852680,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -696,6 +696,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.15898630045313583",
             "extra": "mean: 25.939131043600014 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "akoumjian@users.noreply.github.com",
+            "name": "Alec Koumjian",
+            "username": "akoumjian"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2",
+          "message": "Merge pull request #34 from B612-Asteroid-Institute/codex/nongrav-support\n\nCodex/nongrav support",
+          "timestamp": "2026-08-11T12:06:41-04:00",
+          "tree_id": "21f5e71f3e4c2e930932343cfad834190a4fece9",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2"
+        },
+        "date": 1786465852194,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.3207849675495123,
+            "unit": "iter/sec",
+            "range": "stddev: 0.014826433695403657",
+            "extra": "mean: 3.1173530593999943 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 9.605344499742856,
+            "unit": "iter/sec",
+            "range": "stddev: 0.10255751866457158",
+            "extra": "mean: 104.10870740000746 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 0.45257923766593683,
+            "unit": "iter/sec",
+            "range": "stddev: 0.028198876804048204",
+            "extra": "mean: 2.2095578337999937 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 0.4560034844393636,
+            "unit": "iter/sec",
+            "range": "stddev: 0.02610139823765546",
+            "extra": "mean: 2.19296569899999 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 0.6658178194348005,
+            "unit": "iter/sec",
+            "range": "stddev: 0.024884038973726434",
+            "extra": "mean: 1.5019123412 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 1.9064695429675955,
+            "unit": "iter/sec",
+            "range": "stddev: 0.006271255276351084",
+            "extra": "mean: 524.5297538000045 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 2.7029555152457925,
+            "unit": "iter/sec",
+            "range": "stddev: 0.003713961179847535",
+            "extra": "mean: 369.9653931999933 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.02039719494563121,
+            "unit": "iter/sec",
+            "range": "stddev: 0.2199706485591768",
+            "extra": "mean: 49.02634909679999 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.04154506795270358,
+            "unit": "iter/sec",
+            "range": "stddev: 0.12775347468918324",
+            "extra": "mean: 24.070245862600018 sec\nrounds: 5"
           }
         ]
       }
