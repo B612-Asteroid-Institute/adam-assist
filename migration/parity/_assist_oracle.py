@@ -33,7 +33,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_ASSIST_VENV_PYTHON = Path(
     os.environ.get(
         "ADAM_CORE_LEGACY_ASSIST_VENV_PYTHON",
-        str(REPO_ROOT / ".legacy-assist-venv" / "bin" / "python"),
+        str(
+            Path("/Users/aleck/Code/adam-core-rust-migration")
+            / ".legacy-assist-venv"
+            / "bin"
+            / "python"
+        ),
     )
 )
 CACHE_DIR = Path(
@@ -304,6 +309,22 @@ class LegacyAssistPropagator:
             response["debug_info"],
         )
 
+    def _time_od_problem(
+        self,
+        request_method: str,
+        orbit: Any,
+        observations: Any,
+        *,
+        repeats: int,
+        warmups: int,
+        **kwargs: Any,
+    ) -> list[float]:
+        return _time_request(
+            self._od_problem_request(request_method, orbit, observations, kwargs),
+            repeats=repeats,
+            warmups=warmups,
+        )
+
     def time_od(
         self,
         orbit: Any,
@@ -313,11 +334,48 @@ class LegacyAssistPropagator:
         warmups: int,
         **kwargs: Any,
     ) -> list[float]:
-        return _time_request(
-            self._od_problem_request("od", orbit, observations, kwargs),
+        return self._time_od_problem(
+            "od",
+            orbit,
+            observations,
             repeats=repeats,
             warmups=warmups,
+            **kwargs,
         )
+
+    def time_fit_least_squares_public(
+        self,
+        orbit: Any,
+        observations: Any,
+        *,
+        repeats: int,
+        warmups: int,
+        **kwargs: Any,
+    ) -> list[float]:
+        return self._time_od_problem(
+            "fit_least_squares",
+            orbit,
+            observations,
+            repeats=repeats,
+            warmups=warmups,
+            **kwargs,
+        )
+
+    def time_vallado_least_squares(
+        self,
+        orbit: Any,
+        observations: Any,
+        use_central_difference: bool,
+        *,
+        repeats: int,
+        warmups: int,
+        **kwargs: Any,
+    ) -> list[float]:
+        request = self._od_problem_request(
+            "vallado_least_squares", orbit, observations, kwargs
+        )
+        request["use_central_difference"] = use_central_difference
+        return _time_request(request, repeats=repeats, warmups=warmups)
 
     # -- timing (uncached; the loop runs inside the legacy runtime) ---------
     def time_propagate_orbits(

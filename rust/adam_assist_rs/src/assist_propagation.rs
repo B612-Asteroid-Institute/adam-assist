@@ -416,65 +416,91 @@ where
     }
 }
 
-/// N-body propagation of many gravity-only test particles sharing a single
-/// epoch, integrated **together in one simulation**.
+/// N-body propagation of many same-epoch test particles sharing one Marsden
+/// force model, integrated **together in one simulation**.
+///
+/// ASSIST stores the Marsden `g(r)` constants on the simulation, while A1/A2/A3
+/// are per-particle. Callers must therefore partition by the canonical scalar
+/// model before entering this function. Force-free rows may share the default
+/// asteroid model because their per-particle coefficients are zero.
 ///
 /// Unlike [`assist_propagate`], which builds one simulation per orbit, this
-/// adds every state as a massless test particle to a single REBOUND/ASSIST
-/// simulation and integrates the whole set jointly to each target epoch in
-/// the given order. That amortizes simulation setup and per-step ephemeris
-/// evaluation across the batch, which is the natural shape for workloads
-/// like finite-difference Jacobians or Monte Carlo variant clouds sampled at
-/// a shared epoch.
-///
-/// States are heliocentric ecliptic J2000 `[x, y, z, vx, vy, vz]`
-/// (AU, AU/day); `epoch` and `target_epochs` are MJD TDB. Gravity-only: no
-/// variational particles, no non-gravitational forces, no STM.
+/// adds every orbit as a massless test particle to a single REBOUND/ASSIST
+/// simulation and integrates the whole set jointly to each target epoch. That
+/// amortizes simulation setup and per-step planetary ephemeris evaluation.
 ///
 /// Because IAS15's adaptive step size is shared by all particles in a
 /// simulation, results can differ from per-orbit [`assist_propagate_single`]
-/// runs at the integrator-tolerance level; test particles are massless and
-/// do not otherwise influence one another.
+/// runs at the integrator-tolerance level; test particles are massless and do
+/// not otherwise influence one another.
 ///
 /// Shape: the returned `Vec<Vec<[f64; 6]>>` is indexed
-/// `[state_index][target_epoch_index]`.
-pub fn assist_propagate_states_same_epoch(
+/// `[orbit_index][target_epoch_index]`.
+pub fn assist_propagate_orbits_same_epoch(
     data: &AssistData,
-    states: &[[f64; 6]],
-    epoch: f64,
+    orbits: &[Orbit],
     target_epochs: &[f64],
     integrator: &IntegratorConfig,
 ) -> Result<Vec<Vec<[f64; 6]>>> {
-    if states.is_empty() {
+    if orbits.is_empty() {
         return Ok(Vec::new());
     }
+    let epoch = orbits[0].epoch;
+    if orbits.iter().any(|orbit| orbit.epoch != epoch) {
+        return Err(Error::Other(
+            "same-epoch ASSIST propagation received multiple input epochs".into(),
+        ));
+    }
+    let expected_model = nongrav_model_key(orbits[0].non_grav.as_ref());
+    if orbits
+        .iter()
+        .any(|orbit| nongrav_model_key(orbit.non_grav.as_ref()) != expected_model)
+    {
+        return Err(Error::Other(
+            "same-epoch ASSIST propagation received multiple Marsden models".into(),
+        ));
+    }
+
     let ephem = &data.ephem;
     let jd_ref = ephem.jd_ref();
     let t0 = mjd_to_assist_time(epoch, jd_ref);
+    let has_nongrav = orbits.iter().any(|orbit| orbit.non_grav.is_some());
 
     let mut sim = Simulation::new()?;
     sim.set_t(t0);
     integrator.apply(&mut sim);
     let mut asim = AssistSim::new(sim, ephem)?;
-    configure_forces(&mut asim, false);
+    configure_forces(&mut asim, has_nongrav);
 
-    for state in states {
-        let bary_eq = ecl_orbit_to_bary_eq(state, ephem, t0)?;
+    for orbit in orbits {
+        let bary_eq = ecl_orbit_to_bary_eq(&orbit.state, ephem, t0)?;
         asim.sim_mut().add_test_particle(
             bary_eq[0], bary_eq[1], bary_eq[2], bary_eq[3], bary_eq[4], bary_eq[5],
         );
     }
+    if let Some(model) = orbits.iter().find_map(|orbit| orbit.non_grav.as_ref()) {
+        apply_nongrav_scalars(&mut asim, model);
+        let mut particle_parameters = vec![0.0; 3 * orbits.len()];
+        for (row, orbit) in orbits.iter().enumerate() {
+            if let Some(parameters) = orbit.non_grav.as_ref() {
+                particle_parameters[3 * row] = parameters.a1;
+                particle_parameters[3 * row + 1] = parameters.a2;
+                particle_parameters[3 * row + 2] = parameters.a3;
+            }
+        }
+        asim.set_particle_params(particle_parameters);
+    }
 
-    let mut states_by_particle = vec![Vec::with_capacity(target_epochs.len()); states.len()];
+    let mut states_by_particle = vec![Vec::with_capacity(target_epochs.len()); orbits.len()];
     for &target_mjd in target_epochs {
         let t_target = mjd_to_assist_time(target_mjd, jd_ref);
         asim.integrate(t_target)?;
         let particles = asim.sim().particles();
-        if particles.len() < states.len() {
+        if particles.len() < orbits.len() {
             return Err(Error::Other("No particles after integration".into()));
         }
         let sun_t = ephem.get_body_state(ffi::ASSIST_BODY_SUN, t_target)?;
-        for (row, p) in particles.iter().take(states.len()).enumerate() {
+        for (row, p) in particles.iter().take(orbits.len()).enumerate() {
             let helio_eq = [
                 p.x - sun_t.x,
                 p.y - sun_t.y,
@@ -488,6 +514,38 @@ pub fn assist_propagate_states_same_epoch(
     }
 
     Ok(states_by_particle)
+}
+
+/// Gravity-only compatibility wrapper over [`assist_propagate_orbits_same_epoch`].
+pub fn assist_propagate_states_same_epoch(
+    data: &AssistData,
+    states: &[[f64; 6]],
+    epoch: f64,
+    target_epochs: &[f64],
+    integrator: &IntegratorConfig,
+) -> Result<Vec<Vec<[f64; 6]>>> {
+    let orbits = states
+        .iter()
+        .copied()
+        .map(|state| Orbit::new(state, epoch))
+        .collect::<Vec<_>>();
+    assist_propagate_orbits_same_epoch(data, &orbits, target_epochs, integrator)
+}
+
+pub(crate) fn nongrav_model_key(parameters: Option<&NonGravParams>) -> [f64; 5] {
+    let mut key = parameters.map_or([1.0, 0.0, 2.0, 5.093, 1.0], |parameters| {
+        [
+            parameters.alpha.unwrap_or(1.0),
+            parameters.nk.unwrap_or(0.0),
+            parameters.nm.unwrap_or(2.0),
+            parameters.nn.unwrap_or(5.093),
+            parameters.r0.unwrap_or(1.0),
+        ]
+    });
+    if key[1] == 0.0 {
+        key[3] = 5.093;
+    }
+    key
 }
 
 // ─── PropagatorPool: reusable simulation for many-orbit workloads ───────────
@@ -688,7 +746,7 @@ fn variational_count(compute_stm: bool, has_nongrav: bool) -> usize {
 }
 
 /// Apply the non-grav g(r) scalar parameters (α, nk, nm, nn, r0).
-fn apply_nongrav_scalars(asim: &mut AssistSim, ng: &NonGravParams) {
+pub(crate) fn apply_nongrav_scalars(asim: &mut AssistSim, ng: &NonGravParams) {
     if let Some(v) = ng.alpha {
         asim.set_alpha(v);
     }
@@ -770,7 +828,11 @@ fn init_variational_state_perturbations(asim: &mut AssistSim, n_var: usize) {
 }
 
 /// Build and install the `particle_params` array of length `3 * n_total`.
-fn install_particle_params(asim: &mut AssistSim, ng: &NonGravParams, want_nongrav_partials: bool) {
+pub(crate) fn install_particle_params(
+    asim: &mut AssistSim,
+    ng: &NonGravParams,
+    want_nongrav_partials: bool,
+) {
     let n_total = asim.sim().n_particles();
     let mut params = vec![0.0f64; 3 * n_total];
     params[0] = ng.a1;
@@ -959,6 +1021,42 @@ mod tests {
             }
         }
         m
+    }
+
+    #[test]
+    fn nongrav_model_key_canonicalizes_default_and_irrelevant_nn() {
+        let default = NonGravParams::new(1.0e-9, -2.0e-10, 0.0);
+        let explicit = NonGravParams {
+            a1: 3.0e-9,
+            a2: 0.0,
+            a3: 0.0,
+            alpha: Some(1.0),
+            nk: Some(0.0),
+            nm: Some(2.0),
+            nn: Some(0.0),
+            r0: Some(1.0),
+        };
+        assert_eq!(nongrav_model_key(None), nongrav_model_key(Some(&default)));
+        assert_eq!(nongrav_model_key(None), nongrav_model_key(Some(&explicit)));
+    }
+
+    #[test]
+    fn nongrav_model_key_separates_active_marsden_laws() {
+        let default = NonGravParams::new(1.0e-9, 0.0, 0.0);
+        let comet = NonGravParams {
+            a1: 1.0e-9,
+            a2: 0.0,
+            a3: 0.0,
+            alpha: Some(0.111_262_042_6),
+            nk: Some(4.614_2),
+            nm: Some(2.15),
+            nn: Some(5.093),
+            r0: Some(2.808),
+        };
+        assert_ne!(
+            nongrav_model_key(Some(&default)),
+            nongrav_model_key(Some(&comet))
+        );
     }
 
     #[test]

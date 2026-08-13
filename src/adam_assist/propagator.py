@@ -38,12 +38,11 @@ from adam_core.observers.observers import Observers
 from adam_core.orbits.ephemeris import Ephemeris
 from adam_core.orbits.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
+from adam_core.propagator.propagator import Propagator
+from adam_core.propagator.utils import ensure_input_origin_and_frame
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
-
-from adam_core.propagator.propagator import Propagator
-from adam_core.propagator.utils import ensure_input_origin_and_frame
 
 from ._native import NativeAssistPropagator
 from .version import __version__ as __version__
@@ -65,7 +64,11 @@ def uint32_hash(s: str) -> c_uint32:
 def hash_orbit_ids_to_uint32(
     orbit_ids: npt.NDArray[np.str_],
 ) -> tuple[dict[int, str], list[c_uint32]]:
-    """Preserve the published string-ID to uint32 compatibility helper."""
+    """Derive uint32 hashes from orbit id strings.
+
+    Rebound uses uint32 to track individual particles, but adam-assist uses
+    orbit ID strings. Return both the uint32-to-string mapping and hashes.
+    """
     hashes = [uint32_hash(orbit_id) for orbit_id in orbit_ids]
     mapping = {hashes[i].value: orbit_ids[i] for i in range(len(orbit_ids))}
     return mapping, hashes
@@ -76,7 +79,11 @@ def generate_unique_separator(
     alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
     length: int = 4,
 ) -> str:
-    """Generate a legacy-compatible random separator absent from all inputs."""
+    """Generate a random separator absent from every input string.
+
+    All generated characters differ, preventing misplaced substring matches
+    when splitting. Raise ``ValueError`` if 1,000 attempts are exhausted.
+    """
     all_strings = (
         np.concatenate([array.astype(str) for array in string_arrays])
         if string_arrays
@@ -146,14 +153,21 @@ def _physical_parameters_for_output(orbits: OrbitTable, result: dict[str, Any]) 
     return orbits.physical_parameters.take(input_indices)
 
 
+def _non_gravitational_parameters_for_output(
+    orbits: OrbitTable, result: dict[str, Any]
+) -> Any:
+    input_indices = np.asarray(result["input_orbit_indices"], dtype=np.int64)
+    return orbits.non_gravitational_parameters.take(input_indices)
+
+
 def _coordinates_from_result(result: dict[str, Any]) -> CartesianCoordinates:
     states = np.asarray(result["states"], dtype=np.float64)
     covariances = result.get("covariances")
     covariance = None
     if covariances is not None:
-        covariance_rows = np.asarray(covariances, dtype=np.float64).reshape(
-            states.shape[0], 6, 6
-        )
+        covariance_flat = np.asarray(covariances, dtype=np.float64)
+        dimension = int(np.sqrt(covariance_flat.shape[1]))
+        covariance_rows = covariance_flat.reshape(states.shape[0], dimension, dimension)
         covariance = CoordinateCovariances.from_matrix(covariance_rows)
     return CartesianCoordinates.from_kwargs(
         x=states[:, 0],
@@ -331,9 +345,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         chunk_size: int | None = 100,
         max_processes: int | None = 1,
         seed: int | None = None,
+        include_nongrav: bool = True,
     ) -> OrbitTable:
         if covariance and isinstance(orbits, VariantOrbits):
             raise AssertionError("Covariance is not supported for VariantOrbits")
+        if not include_nongrav:
+            orbits = orbits.without_non_gravitational_parameters()
         sorted_times = times.sort_by(["days", "nanos"])
         result = self._propagate_orbits_native(
             orbits,
@@ -376,7 +393,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     def benchmark_last_native(
         self, reps: int, trials: int = 1, warmup_reps: int = 1
     ) -> tuple[str, list[list[float]]]:
-        """Time the last prepared propagation/ephemeris/collision operation.
+        """Time the last prepared propagation, ephemeris, collision, OD, or IOD operation.
 
         Samples are owned by Rust ``std::time::Instant``; Python/PyO3 input and
         output conversion occurred during the preceding public call and is not
@@ -401,6 +418,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         seed: int | None = None,
         predict_magnitudes: bool = True,
         predict_phase_angle: bool = False,
+        include_nongrav: bool = True,
         *,
         lt_tol: float = 1.0e-12,
         max_iter: int = 1000,
@@ -416,6 +434,8 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         light-time geometry natively. Mirrors ``adam_assist`` light-time-only
         (no stellar aberration) defaults.
         """
+        if not include_nongrav:
+            orbits = orbits.without_non_gravitational_parameters()
         orbit_coordinates = orbits.coordinates
         orbit_scale, orbit_days, orbit_nanos = _time_parts(orbit_coordinates.time)
         orbit_states: npt.NDArray[np.float64] = np.ascontiguousarray(
@@ -442,10 +462,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         native_covariances: npt.NDArray[np.float64] | None = None
         if covariance and not orbit_coordinates.covariance.is_all_nan():
             native_covariances = np.ascontiguousarray(
-                orbit_coordinates.covariance.to_matrix().reshape(len(orbits), 36),
+                orbit_coordinates.covariance.to_transform_matrix().reshape(
+                    len(orbits), -1
+                ),
                 dtype=np.float64,
             )
 
+        nongrav = orbits.non_gravitational_parameters
         native = self._native.generate_ephemeris(
             _string_column_to_list(orbits.orbit_id),
             _optional_string_column_to_list(orbits.object_id),
@@ -479,6 +502,15 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             covariance_method=covariance_method,
             num_samples=num_samples,
             seed=seed,
+            nongrav_source=_optional_string_column_to_list(nongrav.source),
+            nongrav_a1=_optional_float_column_to_list(nongrav.A1),
+            nongrav_a2=_optional_float_column_to_list(nongrav.A2),
+            nongrav_a3=_optional_float_column_to_list(nongrav.A3),
+            nongrav_aln=_optional_float_column_to_list(nongrav.ALN),
+            nongrav_nk=_optional_float_column_to_list(nongrav.NK),
+            nongrav_nm=_optional_float_column_to_list(nongrav.NM),
+            nongrav_nn=_optional_float_column_to_list(nongrav.NN),
+            nongrav_r0=_optional_float_column_to_list(nongrav.R0),
         )
         return _ephemeris_from_result(native)
 
@@ -516,10 +548,13 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             if covariance and not coordinates.covariance.is_all_nan():
                 native_covariance = True
                 native_covariances = np.ascontiguousarray(
-                    coordinates.covariance.to_matrix().reshape(len(orbits), 36),
+                    coordinates.covariance.to_transform_matrix().reshape(
+                        len(orbits), -1
+                    ),
                     dtype=np.float64,
                 )
 
+        nongrav = orbits.non_gravitational_parameters
         native_result = self._native.propagate_orbits(
             _string_column_to_list(orbits.orbit_id),
             _optional_string_column_to_list(orbits.object_id),
@@ -542,10 +577,22 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             variant_ids=variant_ids,
             weights=weights,
             weights_cov=weights_cov,
+            nongrav_source=_optional_string_column_to_list(nongrav.source),
+            nongrav_a1=_optional_float_column_to_list(nongrav.A1),
+            nongrav_a2=_optional_float_column_to_list(nongrav.A2),
+            nongrav_a3=_optional_float_column_to_list(nongrav.A3),
+            nongrav_aln=_optional_float_column_to_list(nongrav.ALN),
+            nongrav_nk=_optional_float_column_to_list(nongrav.NK),
+            nongrav_nm=_optional_float_column_to_list(nongrav.NM),
+            nongrav_nn=_optional_float_column_to_list(nongrav.NN),
+            nongrav_r0=_optional_float_column_to_list(nongrav.R0),
         )
         _raise_if_failed_rows(native_result)
         output_coordinates = _coordinates_from_result(native_result)
         physical_parameters = _physical_parameters_for_output(orbits, native_result)
+        non_gravitational_parameters = _non_gravitational_parameters_for_output(
+            orbits, native_result
+        )
         if isinstance(orbits, VariantOrbits):
             return VariantOrbits.from_kwargs(
                 orbit_id=native_result["orbit_id"],
@@ -555,12 +602,14 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
                 weights_cov=native_result["weights_cov"],
                 coordinates=output_coordinates,
                 physical_parameters=physical_parameters,
+                non_gravitational_parameters=non_gravitational_parameters,
             )
         return Orbits.from_kwargs(
             orbit_id=native_result["orbit_id"],
             object_id=native_result["object_id"],
             coordinates=output_coordinates,
             physical_parameters=physical_parameters,
+            non_gravitational_parameters=non_gravitational_parameters,
         )
 
     def fit_least_squares(
@@ -967,13 +1016,24 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             coords.time.add_days(num_days).jd().to_numpy(zero_copy_only=False)[0]
         )
 
+        nongrav = orbits.non_gravitational_parameters
         native = self._native.detect_collisions(
+            _string_column_to_list(orbits.orbit_id),
             np.ascontiguousarray(coords.values, dtype=np.float64),
             epoch_jd,
             final_jd,
             _string_column_to_list(conditions.collision_object.code),
             [float(value) for value in conditions.collision_distance.to_pylist()],
             [bool(value) for value in conditions.stopping_condition.to_pylist()],
+            nongrav_source=_optional_string_column_to_list(nongrav.source),
+            nongrav_a1=_optional_float_column_to_list(nongrav.A1),
+            nongrav_a2=_optional_float_column_to_list(nongrav.A2),
+            nongrav_a3=_optional_float_column_to_list(nongrav.A3),
+            nongrav_aln=_optional_float_column_to_list(nongrav.ALN),
+            nongrav_nk=_optional_float_column_to_list(nongrav.NK),
+            nongrav_nm=_optional_float_column_to_list(nongrav.NM),
+            nongrav_nn=_optional_float_column_to_list(nongrav.NN),
+            nongrav_r0=_optional_float_column_to_list(nongrav.R0),
         )
 
         impact_indices = np.asarray(native["impact_indices"], dtype=np.int64)
@@ -1044,7 +1104,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             -1, 6
         )
         if len(final_indices) > 0:
-            final_jds = np.full(len(final_indices), native["final_time_jd_tdb"])
+            final_jds = np.asarray(native["final_times_jd_tdb"], dtype=np.float64)
             results_parts.append(
                 _collision_rows(
                     orbits,

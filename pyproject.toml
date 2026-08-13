@@ -20,7 +20,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "adam-core==0.5.6rc2",
+    "adam-core==0.5.6rc3",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     "numpy",
@@ -72,6 +72,7 @@ typecheck = "mypy --strict ./src/adam_assist"
 test = "pytest --benchmark-skip {args}"
 coverage = "pytest --benchmark-skip --cov=adam_assist --cov-report=xml {args}"
 benchmark = "pytest --benchmark-only {args}"
+benchmark-current = "python -m migration.scripts.benchmark_current {args}"
 assist-public-semantics-benchmark = "python migration/scripts/benchmark_assist_public_semantics.py"
 assist-two-runtime-benchmark = "python migration/scripts/perf_assist_two_runtime.py"
 

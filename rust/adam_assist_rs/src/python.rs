@@ -18,12 +18,12 @@ use adam_core_rs_coords::types::{SchemaResult, TimeScaleProvider};
 use adam_core_rs_coords::{
     collapse_propagated_variants_to_orbits, collapse_variant_ephemeris,
     create_sampled_orbit_variants, CoordinateBatch, CoordinateRepresentation, CovarianceBatch,
-    CovarianceUnits, EphemerisOptions, EphemerisPhotometryOptions, EphemerisResult, ObjectId,
-    ObservatoryCode, ObserverBatch, OrbitBatch, OrbitId, OrbitVariantBatch,
-    OrbitVariantSamplingMethod, OriginArray, OriginId, SchemaError, TimeArray, TimeScale,
-    VariantId,
+    CovarianceUnits, EphemerisOptions, EphemerisPhotometryOptions, EphemerisResult,
+    NonGravitationalParametersBatch, ObjectId, ObservatoryCode, ObserverBatch, OrbitBatch, OrbitId,
+    OrbitVariantBatch, OrbitVariantSamplingMethod, OriginArray, OriginId, SchemaError, TimeArray,
+    TimeScale, VariantId,
 };
-use adam_core_rs_coords::{CoordinateValues, LeastSquaresConfig};
+use adam_core_rs_coords::{CoordinateValues, LeastSquaresConfig, LeastSquaresFit};
 use adam_core_rs_spice::AdamCoreSpiceBackend;
 use libassist_sys::Ephemeris;
 use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
@@ -95,9 +95,14 @@ enum NativeBenchmark {
     },
     Collisions {
         states: Vec<[f64; 6]>,
+        non_gravitational_parameters: Vec<Option<crate::assist_propagation::NonGravParams>>,
         epoch_jd_tdb: f64,
         final_jd_tdb: f64,
         conditions: Vec<CollisionConditionSpec>,
+    },
+    Fit {
+        problem: OdProblem,
+        config: LeastSquaresConfig,
     },
     FitEvaluated {
         problem: OdProblem,
@@ -130,6 +135,7 @@ impl NativeBenchmark {
             Self::Propagation { .. } => "propagation",
             Self::Ephemeris { .. } => "ephemeris",
             Self::Collisions { .. } => "collisions",
+            Self::Fit { .. } => "fit_least_squares",
             Self::FitEvaluated { .. } => "fit_least_squares_evaluated",
             Self::OdFit { .. } => "od_fit",
             Self::Vallado { .. } => "vallado_least_squares",
@@ -271,7 +277,16 @@ impl NativeAssistPropagator {
         covariances=None,
         covariance_method="monte-carlo",
         num_samples=1000,
-        seed=None
+        seed=None,
+        nongrav_source=None,
+        nongrav_a1=None,
+        nongrav_a2=None,
+        nongrav_a3=None,
+        nongrav_aln=None,
+        nongrav_nk=None,
+        nongrav_nm=None,
+        nongrav_nn=None,
+        nongrav_r0=None
     ))]
     fn generate_ephemeris<'py>(
         &self,
@@ -308,6 +323,15 @@ impl NativeAssistPropagator {
         covariance_method: &str,
         num_samples: usize,
         seed: Option<u64>,
+        nongrav_source: Option<Vec<Option<String>>>,
+        nongrav_a1: Option<Vec<Option<f64>>>,
+        nongrav_a2: Option<Vec<Option<f64>>>,
+        nongrav_a3: Option<Vec<Option<f64>>>,
+        nongrav_aln: Option<Vec<Option<f64>>>,
+        nongrav_nk: Option<Vec<Option<f64>>>,
+        nongrav_nm: Option<Vec<Option<f64>>>,
+        nongrav_nn: Option<Vec<Option<f64>>>,
+        nongrav_r0: Option<Vec<Option<f64>>>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let orbit_state_rows = states_from_pyarray(orbit_states)?;
         let orbit_covariance_batch = match covariances {
@@ -334,6 +358,18 @@ impl NativeAssistPropagator {
             orbit_covariance_batch,
         )
         .map_err(py_value_error)?;
+        let nongrav = non_gravitational_parameters_batch(
+            nongrav_source,
+            nongrav_a1,
+            nongrav_a2,
+            nongrav_a3,
+            nongrav_aln,
+            nongrav_nk,
+            nongrav_nm,
+            nongrav_nn,
+            nongrav_r0,
+            orbit_coordinates.len(),
+        )?;
         let orbits = OrbitBatch::new(
             orbit_ids.into_iter().map(OrbitId).collect(),
             object_ids
@@ -343,6 +379,12 @@ impl NativeAssistPropagator {
             orbit_coordinates,
         )
         .map_err(py_value_error)?;
+        let orbits = match nongrav {
+            Some(parameters) => orbits
+                .with_non_gravitational_parameters(parameters)
+                .map_err(py_value_error)?,
+            None => orbits,
+        };
         let observer_coordinates = CoordinateBatch::cartesian(
             states_from_pyarray(observer_states)?,
             Frame::parse(observer_frame).map_err(py_value_error)?,
@@ -397,7 +439,7 @@ impl NativeAssistPropagator {
         };
         let result = py
             .allow_threads(|| run_ephemeris_benchmark(self, &benchmark))
-            .map_err(py_runtime_error)?;
+            .map_err(py_propagation_error)?;
         self.store_benchmark(benchmark)?;
         ephemeris_result_to_dict(py, &result)
     }
@@ -566,22 +608,18 @@ impl NativeAssistPropagator {
             stellar_aberration,
             max_lt_iter,
         };
+        let problem = OdProblem {
+            orbit,
+            observed,
+            observers,
+            options,
+        };
         let fit = py
-            .allow_threads(|| {
-                fit_orbit_least_squares_barycentric(
-                    &self.inner,
-                    &orbit,
-                    &observed,
-                    &observers,
-                    &options,
-                    &config,
-                    &PythonTimeProvider,
-                    &self.spice,
-                )
-            })
+            .allow_threads(|| run_fit(self, &problem, &config))
             .map_err(|err| {
                 PyRuntimeError::new_err(format!("assist least-squares fit failed: {err}"))
             })?;
+        self.store_benchmark(NativeBenchmark::Fit { problem, config })?;
         Ok((
             fit.state.to_vec(),
             fit.covariance.to_vec(),
@@ -1243,22 +1281,42 @@ impl NativeAssistPropagator {
     /// Julian-date times.
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
+        orbit_ids,
         states,
         epoch_jd_tdb,
         final_jd_tdb,
         condition_bodies,
         condition_distances_km,
-        condition_stopping
+        condition_stopping,
+        nongrav_source=None,
+        nongrav_a1=None,
+        nongrav_a2=None,
+        nongrav_a3=None,
+        nongrav_aln=None,
+        nongrav_nk=None,
+        nongrav_nm=None,
+        nongrav_nn=None,
+        nongrav_r0=None
     ))]
     fn detect_collisions<'py>(
         &self,
         py: Python<'py>,
+        orbit_ids: Vec<String>,
         states: PyReadonlyArray2<'py, f64>,
         epoch_jd_tdb: f64,
         final_jd_tdb: f64,
         condition_bodies: Vec<String>,
         condition_distances_km: Vec<f64>,
         condition_stopping: Vec<bool>,
+        nongrav_source: Option<Vec<Option<String>>>,
+        nongrav_a1: Option<Vec<Option<f64>>>,
+        nongrav_a2: Option<Vec<Option<f64>>>,
+        nongrav_a3: Option<Vec<Option<f64>>>,
+        nongrav_aln: Option<Vec<Option<f64>>>,
+        nongrav_nk: Option<Vec<Option<f64>>>,
+        nongrav_nm: Option<Vec<Option<f64>>>,
+        nongrav_nn: Option<Vec<Option<f64>>>,
+        nongrav_r0: Option<Vec<Option<f64>>>,
     ) -> PyResult<Bound<'py, PyDict>> {
         if condition_bodies.len() != condition_distances_km.len()
             || condition_bodies.len() != condition_stopping.len()
@@ -1284,8 +1342,36 @@ impl NativeAssistPropagator {
                 stopping,
             });
         }
+        let states = states_from_pyarray(states)?;
+        if orbit_ids.len() != states.len() {
+            return Err(PyValueError::new_err(
+                "collision orbit IDs must match state rows",
+            ));
+        }
+        let nongrav = non_gravitational_parameters_batch(
+            nongrav_source,
+            nongrav_a1,
+            nongrav_a2,
+            nongrav_a3,
+            nongrav_aln,
+            nongrav_nk,
+            nongrav_nm,
+            nongrav_nn,
+            nongrav_r0,
+            states.len(),
+        )?;
+        let non_gravitational_parameters = (0..states.len())
+            .map(|row| {
+                crate::assist_non_gravitational_parameters(
+                    nongrav.as_ref().map(|parameters| parameters.row(row)),
+                    &orbit_ids[row],
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(py_value_error)?;
         let benchmark = NativeBenchmark::Collisions {
-            states: states_from_pyarray(states)?,
+            states,
+            non_gravitational_parameters,
             epoch_jd_tdb,
             final_jd_tdb,
             conditions,
@@ -1309,6 +1395,7 @@ impl NativeAssistPropagator {
             shaped_states_array(py, &output.final_states)?,
         )?;
         dict.set_item("final_time_jd_tdb", output.final_time_jd_tdb)?;
+        dict.set_item("final_times_jd_tdb", output.final_times_jd_tdb.clone())?;
         dict.set_item(
             "impact_indices",
             output
@@ -1355,7 +1442,16 @@ impl NativeAssistPropagator {
         thread_limit=None,
         variant_ids=None,
         weights=None,
-        weights_cov=None
+        weights_cov=None,
+        nongrav_source=None,
+        nongrav_a1=None,
+        nongrav_a2=None,
+        nongrav_a3=None,
+        nongrav_aln=None,
+        nongrav_nk=None,
+        nongrav_nm=None,
+        nongrav_nn=None,
+        nongrav_r0=None
     ))]
     fn propagate_orbits<'py>(
         &self,
@@ -1381,6 +1477,15 @@ impl NativeAssistPropagator {
         variant_ids: Option<Vec<Option<String>>>,
         weights: Option<Vec<Option<f64>>>,
         weights_cov: Option<Vec<Option<f64>>>,
+        nongrav_source: Option<Vec<Option<String>>>,
+        nongrav_a1: Option<Vec<Option<f64>>>,
+        nongrav_a2: Option<Vec<Option<f64>>>,
+        nongrav_a3: Option<Vec<Option<f64>>>,
+        nongrav_aln: Option<Vec<Option<f64>>>,
+        nongrav_nk: Option<Vec<Option<f64>>>,
+        nongrav_nm: Option<Vec<Option<f64>>>,
+        nongrav_nn: Option<Vec<Option<f64>>>,
+        nongrav_r0: Option<Vec<Option<f64>>>,
     ) -> PyResult<Bound<'py, PyDict>> {
         let state_rows = states_from_pyarray(states)?;
         let input_times = time_array(time_scale, time_days, time_nanos)?;
@@ -1389,6 +1494,18 @@ impl NativeAssistPropagator {
             Some(covariances) => Some(covariance_from_pyarray(covariances, state_rows.len())?),
             None => None,
         };
+        let nongrav = non_gravitational_parameters_batch(
+            nongrav_source,
+            nongrav_a1,
+            nongrav_a2,
+            nongrav_a3,
+            nongrav_aln,
+            nongrav_nk,
+            nongrav_nm,
+            nongrav_nn,
+            nongrav_r0,
+            state_rows.len(),
+        )?;
         let coordinates = CoordinateBatch::cartesian(
             state_rows,
             Frame::parse(frame).map_err(py_value_error)?,
@@ -1415,26 +1532,30 @@ impl NativeAssistPropagator {
                 let weights_cov = weights_cov.ok_or_else(|| {
                     PyValueError::new_err("variant propagation requires weights_cov")
                 })?;
-                PreparedPropagationInput::Variants(
-                    OrbitVariantBatch::new(
-                        orbit_ids.into_iter().map(OrbitId).collect(),
-                        object_ids
-                            .into_iter()
-                            .map(|value| value.map(ObjectId))
-                            .collect(),
-                        variant_ids
-                            .into_iter()
-                            .map(|value| value.map(VariantId))
-                            .collect(),
-                        weights,
-                        weights_cov,
-                        coordinates,
-                    )
-                    .map_err(py_value_error)?,
+                let variants = OrbitVariantBatch::new(
+                    orbit_ids.into_iter().map(OrbitId).collect(),
+                    object_ids
+                        .into_iter()
+                        .map(|value| value.map(ObjectId))
+                        .collect(),
+                    variant_ids
+                        .into_iter()
+                        .map(|value| value.map(VariantId))
+                        .collect(),
+                    weights,
+                    weights_cov,
+                    coordinates,
                 )
+                .map_err(py_value_error)?;
+                PreparedPropagationInput::Variants(match nongrav {
+                    Some(parameters) => variants
+                        .with_non_gravitational_parameters(parameters)
+                        .map_err(py_value_error)?,
+                    None => variants,
+                })
             }
-            None => PreparedPropagationInput::Orbits(
-                OrbitBatch::new(
+            None => {
+                let orbits = OrbitBatch::new(
                     orbit_ids.into_iter().map(OrbitId).collect(),
                     object_ids
                         .into_iter()
@@ -1442,8 +1563,14 @@ impl NativeAssistPropagator {
                         .collect(),
                     coordinates,
                 )
-                .map_err(py_value_error)?,
-            ),
+                .map_err(py_value_error)?;
+                PreparedPropagationInput::Orbits(match nongrav {
+                    Some(parameters) => orbits
+                        .with_non_gravitational_parameters(parameters)
+                        .map_err(py_value_error)?,
+                    None => orbits,
+                })
+            }
         };
         let benchmark = NativeBenchmark::Propagation {
             input,
@@ -1456,7 +1583,7 @@ impl NativeAssistPropagator {
         };
         let result = py
             .allow_threads(|| run_propagation_benchmark(self, &benchmark))
-            .map_err(py_runtime_error)?;
+            .map_err(py_propagation_error)?;
         self.store_benchmark(benchmark)?;
         propagation_result_to_dict(py, &result)
     }
@@ -1504,6 +1631,7 @@ fn propagate_with_sampled_covariance_native(
         &nominal,
         &propagated_variants,
         &variant_samples.source_orbit_indices,
+        &variant_samples.source_covariance_dimensions,
     )
     .map_err(|err| err.to_string())
 }
@@ -1651,6 +1779,7 @@ fn run_collision_benchmark(
 ) -> Result<CollisionDetectionOutput, String> {
     let NativeBenchmark::Collisions {
         states,
+        non_gravitational_parameters,
         epoch_jd_tdb,
         final_jd_tdb,
         conditions,
@@ -1658,10 +1787,70 @@ fn run_collision_benchmark(
     else {
         return Err("prepared benchmark is not collision detection".to_string());
     };
-    propagator
-        .inner
-        .detect_collisions_same_epoch(states, *epoch_jd_tdb, *final_jd_tdb, conditions)
-        .map_err(|err| err.to_string())
+    let model_key = |parameters: Option<&crate::assist_propagation::NonGravParams>| {
+        let mut key = parameters.map_or([1.0, 0.0, 2.0, 5.093, 1.0], |parameters| {
+            [
+                parameters.alpha.unwrap_or(1.0),
+                parameters.nk.unwrap_or(0.0),
+                parameters.nm.unwrap_or(2.0),
+                parameters.nn.unwrap_or(5.093),
+                parameters.r0.unwrap_or(1.0),
+            ]
+        });
+        if key[1] == 0.0 {
+            key[3] = 5.093;
+        }
+        key
+    };
+    let mut groups: Vec<([f64; 5], Vec<usize>)> = Vec::new();
+    for (row, parameters) in non_gravitational_parameters.iter().enumerate() {
+        let key = model_key(parameters.as_ref());
+        if let Some((_, indices)) = groups.iter_mut().find(|(existing, _)| *existing == key) {
+            indices.push(row);
+        } else {
+            groups.push((key, vec![row]));
+        }
+    }
+    let mut combined = CollisionDetectionOutput {
+        final_time_jd_tdb: *epoch_jd_tdb,
+        ..CollisionDetectionOutput::default()
+    };
+    for (_, indices) in groups {
+        let group_states = indices.iter().map(|&row| states[row]).collect::<Vec<_>>();
+        let group_parameters = indices
+            .iter()
+            .map(|&row| non_gravitational_parameters[row].clone())
+            .collect::<Vec<_>>();
+        let output = propagator
+            .inner
+            .detect_collisions_same_epoch(
+                &group_states,
+                &group_parameters,
+                *epoch_jd_tdb,
+                *final_jd_tdb,
+                conditions,
+            )
+            .map_err(|err| err.to_string())?;
+        combined.final_time_jd_tdb = output.final_time_jd_tdb;
+        combined
+            .final_indices
+            .extend(output.final_indices.iter().map(|&row| indices[row]));
+        combined.final_states.extend(output.final_states);
+        combined
+            .final_times_jd_tdb
+            .extend(output.final_times_jd_tdb);
+        combined
+            .impact_indices
+            .extend(output.impact_indices.iter().map(|&row| indices[row]));
+        combined
+            .impact_condition_indices
+            .extend(output.impact_condition_indices);
+        combined.impact_states.extend(output.impact_states);
+        combined
+            .impact_times_jd_tdb
+            .extend(output.impact_times_jd_tdb);
+    }
+    Ok(combined)
 }
 
 fn run_native_benchmark(
@@ -1677,6 +1866,9 @@ fn run_native_benchmark(
         }
         NativeBenchmark::Collisions { .. } => {
             black_box(run_collision_benchmark(propagator, benchmark)?);
+        }
+        NativeBenchmark::Fit { problem, config } => {
+            black_box(run_fit(propagator, problem, config)?);
         }
         NativeBenchmark::FitEvaluated {
             problem,
@@ -1707,6 +1899,24 @@ fn run_native_benchmark(
         }
     }
     Ok(())
+}
+
+fn run_fit(
+    propagator: &NativeAssistPropagator,
+    problem: &OdProblem,
+    config: &LeastSquaresConfig,
+) -> Result<LeastSquaresFit, String> {
+    fit_orbit_least_squares_barycentric(
+        &propagator.inner,
+        &problem.orbit,
+        &problem.observed,
+        &problem.observers,
+        &problem.options,
+        config,
+        &PythonTimeProvider,
+        &propagator.spice,
+    )
+    .map_err(|err| err.to_string())
 }
 
 fn run_fit_evaluated(
@@ -2131,21 +2341,76 @@ fn time_array(scale: &str, days: Vec<i64>, nanos: Vec<i64>) -> PyResult<TimeArra
     .map_err(py_value_error)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn non_gravitational_parameters_batch(
+    source: Option<Vec<Option<String>>>,
+    a1: Option<Vec<Option<f64>>>,
+    a2: Option<Vec<Option<f64>>>,
+    a3: Option<Vec<Option<f64>>>,
+    aln: Option<Vec<Option<f64>>>,
+    nk: Option<Vec<Option<f64>>>,
+    nm: Option<Vec<Option<f64>>>,
+    nn: Option<Vec<Option<f64>>>,
+    r0: Option<Vec<Option<f64>>>,
+    rows: usize,
+) -> PyResult<Option<NonGravitationalParametersBatch>> {
+    let batch = match (source, a1, a2, a3, aln, nk, nm, nn, r0) {
+        (
+            Some(source),
+            Some(a1),
+            Some(a2),
+            Some(a3),
+            Some(aln),
+            Some(nk),
+            Some(nm),
+            Some(nn),
+            Some(r0),
+        ) => NonGravitationalParametersBatch {
+            source,
+            a1,
+            a2,
+            a3,
+            aln,
+            nk,
+            nm,
+            nn,
+            r0,
+        },
+        (None, None, None, None, None, None, None, None, None) => return Ok(None),
+        _ => {
+            return Err(PyValueError::new_err(
+                "non-gravitational parameter columns must be provided together",
+            ));
+        }
+    };
+    batch.validate(rows).map_err(py_value_error)?;
+    Ok(Some(batch))
+}
+
 fn covariance_from_pyarray(
     covariances: PyReadonlyArray2<'_, f64>,
     rows: usize,
 ) -> PyResult<CovarianceBatch> {
     let array = covariances.as_array();
-    if array.nrows() != rows || array.ncols() != 36 {
+    let dimension = match array.ncols() {
+        36 => 6,
+        81 => 9,
+        columns => {
+            return Err(PyValueError::new_err(format!(
+                "covariances must have shape ({rows}, 36) or ({rows}, 81); got ({}, {columns})",
+                array.nrows()
+            )));
+        }
+    };
+    if array.nrows() != rows {
         return Err(PyValueError::new_err(format!(
-            "covariances must have shape ({rows}, 36); got ({}, {})",
-            array.nrows(),
-            array.ncols()
+            "covariances must have {rows} rows; got {}",
+            array.nrows()
         )));
     }
     CovarianceBatch::new(
         rows,
-        6,
+        dimension,
         array.iter().copied().collect(),
         CovarianceUnits::Coordinate(CoordinateRepresentation::Cartesian),
     )
@@ -2455,6 +2720,15 @@ fn py_value_error(error: impl std::fmt::Display) -> PyErr {
 
 fn py_runtime_error(error: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(error.to_string())
+}
+
+fn py_propagation_error(error: impl std::fmt::Display) -> PyErr {
+    let message = error.to_string();
+    if message.starts_with("invalid propagation request:") {
+        PyValueError::new_err(message)
+    } else {
+        PyRuntimeError::new_err(message)
+    }
 }
 
 #[pymodule]

@@ -15,8 +15,9 @@ use adam_core_rs_coords::types::Frame;
 use adam_core_rs_coords::{
     generate_ephemeris_barycentric, rotate_ecliptic_to_equatorial6, rotate_equatorial_to_ecliptic6,
     CoordinateBatch, CovarianceBatch, CovarianceUnits, EphemerisOptions, EphemerisResult, Epoch,
-    ObserverBatch, OrbitBatch, OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider,
-    TimeArray, TimeScale, TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
+    NonGravitationalParametersBatch, NonGravitationalParametersRow, ObserverBatch, OrbitBatch,
+    OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider, TimeArray, TimeScale,
+    TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
 };
 use libassist_sys::{ffi, AssistSim};
 use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig, Simulation};
@@ -30,7 +31,8 @@ pub use assist_error::{AssistError, AssistResult};
 pub mod assist_propagation;
 pub use assist_propagation::AssistData;
 use assist_propagation::{
-    assist_propagate, assist_propagate_states_same_epoch, Orbit as AssistOrbit,
+    apply_nongrav_scalars, assist_propagate, assist_propagate_orbits_same_epoch, nongrav_model_key,
+    NonGravParams, Orbit as AssistOrbit,
 };
 
 #[cfg(feature = "python")]
@@ -238,6 +240,7 @@ struct SameEpochStateGroup {
     epoch: Epoch,
     time_indices: Vec<usize>,
     sorted_time_indices: Vec<usize>,
+    model_key: [f64; 5],
     orbit_indices: Vec<usize>,
 }
 
@@ -245,10 +248,15 @@ fn propagate_assist_chunk(
     context: &AssistChunkContext<'_, '_>,
     chunk: &[usize],
 ) -> PropagationResultValue<Vec<AssistOrbitBlock>> {
+    let has_non_gravitational_forces = context
+        .request
+        .input
+        .non_gravitational_parameters()
+        .is_some_and(NonGravitationalParametersBatch::has_values);
     if context.include_covariance {
         return propagate_assist_chunk_one_by_one(context, chunk);
     }
-    propagate_state_only_chunk(context, chunk)
+    propagate_state_only_chunk(context, chunk, has_non_gravitational_forces)
 }
 
 fn propagate_assist_chunk_one_by_one(
@@ -303,6 +311,7 @@ fn propagate_assist_chunk_one_by_one(
 fn propagate_state_only_chunk(
     context: &AssistChunkContext<'_, '_>,
     chunk: &[usize],
+    has_non_gravitational_forces: bool,
 ) -> PropagationResultValue<Vec<AssistOrbitBlock>> {
     let mut blocks = Vec::with_capacity(chunk.len());
     let mut groups: Vec<SameEpochStateGroup> = Vec::new();
@@ -321,10 +330,24 @@ fn propagate_state_only_chunk(
             continue;
         }
         let epoch = context.orbit_times_tdb.epochs[orbit_index];
+        let non_grav = if has_non_gravitational_forces {
+            assist_non_gravitational_parameters(
+                context
+                    .request
+                    .input
+                    .non_gravitational_parameters()
+                    .map(|parameters| parameters.row(orbit_index)),
+                &context.request.input.orbit_id()[orbit_index].0,
+            )?
+        } else {
+            None
+        };
+        let model_key = nongrav_model_key(non_grav.as_ref());
         if let Some(group) = groups.iter_mut().find(|group| {
             group.epoch == epoch
                 && group.time_indices == time_indices
                 && group.sorted_time_indices == sorted_time_indices
+                && group.model_key == model_key
         }) {
             group.orbit_indices.push(orbit_index);
         } else {
@@ -332,6 +355,7 @@ fn propagate_state_only_chunk(
                 epoch,
                 time_indices,
                 sorted_time_indices,
+                model_key,
                 orbit_indices: vec![orbit_index],
             });
         }
@@ -353,17 +377,33 @@ fn propagate_same_epoch_state_group(
         .iter()
         .map(|&time_index| context.target_times_tdb.epochs[time_index])
         .collect::<Vec<_>>();
-    let states = group
+    let orbits = group
         .orbit_indices
         .iter()
-        .map(|&orbit_index| context.normalized_states[orbit_index])
-        .collect::<Vec<_>>();
+        .map(|&orbit_index| {
+            let non_grav = assist_non_gravitational_parameters(
+                context
+                    .request
+                    .input
+                    .non_gravitational_parameters()
+                    .map(|parameters| parameters.row(orbit_index)),
+                &context.request.input.orbit_id()[orbit_index].0,
+            )?;
+            Ok(match non_grav {
+                Some(parameters) => AssistOrbit::with_non_grav(
+                    context.normalized_states[orbit_index],
+                    group.epoch.mjd(),
+                    parameters,
+                ),
+                None => AssistOrbit::new(context.normalized_states[orbit_index], group.epoch.mjd()),
+            })
+        })
+        .collect::<PropagationResultValue<Vec<_>>>()?;
 
-    match propagate_same_epoch_states(
+    match propagate_same_epoch_orbits(
         context.data.as_ref(),
         context.integrator,
-        &states,
-        group.epoch,
+        &orbits,
         &sorted_times,
     ) {
         Ok(group_states) => {
@@ -407,26 +447,19 @@ fn propagate_same_epoch_state_group(
     }
 }
 
-/// Joint single-simulation propagation of same-epoch gravity-only states.
-///
-/// Delegates to [`assist_propagation::assist_propagate_states_same_epoch`],
-/// this crate's permanent home for the orchestration primitive. The
-/// binding/RAII layer comes directly from the canonical sys crates. The
-/// obliquity constants are bit-identical to adam-core's
-/// (`np.cos/np.sin(Constants.OBLIQUITY)`), so the heliocentric-ecliptic
-/// round-trip is unchanged bit-for-bit.
-fn propagate_same_epoch_states(
+/// Joint single-simulation propagation of same-epoch rows sharing a canonical
+/// Marsden model. Per-particle A1/A2/A3 values stay attached to each orbit.
+fn propagate_same_epoch_orbits(
     data: &AssistData,
     integrator: IntegratorConfig,
-    states: &[[f64; 6]],
-    epoch: Epoch,
+    orbits: &[AssistOrbit],
     target_times: &[Epoch],
 ) -> Result<Vec<Vec<[f64; 6]>>, AssistError> {
     let target_mjds = target_times
         .iter()
         .map(|time| time.mjd())
         .collect::<Vec<_>>();
-    assist_propagate_states_same_epoch(data, states, epoch.mjd(), &target_mjds, &integrator)
+    assist_propagate_orbits_same_epoch(data, orbits, &target_mjds, &integrator)
 }
 
 fn particle_state(particle: ffi::reb_particle) -> [f64; 6] {
@@ -480,6 +513,7 @@ pub struct CollisionDetectionOutput {
     pub final_indices: Vec<usize>,
     pub final_states: Vec<[f64; 6]>,
     pub final_time_jd_tdb: f64,
+    pub final_times_jd_tdb: Vec<f64>,
     pub impact_indices: Vec<usize>,
     pub impact_condition_indices: Vec<usize>,
     pub impact_states: Vec<[f64; 6]>,
@@ -511,6 +545,7 @@ fn build_collision_sim(
     data: &AssistData,
     integrator: IntegratorConfig,
     states_bary_eq: &[[f64; 6]],
+    non_gravitational_parameters: &[Option<NonGravParams>],
     t: f64,
     backward: bool,
     dt_override: Option<f64>,
@@ -526,10 +561,28 @@ fn build_collision_sim(
         sim.set_dt(dt);
     }
     let mut asim = AssistSim::new(sim, &data.ephem)?;
-    asim.set_forces(ffi::ASSIST_FORCES_DEFAULT);
+    let has_non_gravitational_forces = non_gravitational_parameters.iter().any(Option::is_some);
+    let forces = if has_non_gravitational_forces {
+        ffi::ASSIST_FORCES_DEFAULT | ffi::ASSIST_FORCE_NON_GRAVITATIONAL
+    } else {
+        ffi::ASSIST_FORCES_DEFAULT
+    };
+    asim.set_forces(forces);
     for state in states_bary_eq {
         asim.sim_mut()
             .add_test_particle(state[0], state[1], state[2], state[3], state[4], state[5]);
+    }
+    if let Some(model) = non_gravitational_parameters.iter().flatten().next() {
+        apply_nongrav_scalars(&mut asim, model);
+        let mut particle_parameters = vec![0.0; 3 * states_bary_eq.len()];
+        for (row, parameters) in non_gravitational_parameters.iter().enumerate() {
+            if let Some(parameters) = parameters {
+                particle_parameters[3 * row] = parameters.a1;
+                particle_parameters[3 * row + 1] = parameters.a2;
+                particle_parameters[3 * row + 2] = parameters.a3;
+            }
+        }
+        asim.set_particle_params(particle_parameters);
     }
     Ok(asim)
 }
@@ -556,10 +609,16 @@ impl AssistPropagator {
     pub fn detect_collisions_same_epoch(
         &self,
         states_bary_eq: &[[f64; 6]],
+        non_gravitational_parameters: &[Option<NonGravParams>],
         epoch_jd_tdb: f64,
         final_jd_tdb: f64,
         conditions: &[CollisionConditionSpec],
     ) -> Result<CollisionDetectionOutput, AssistError> {
+        if non_gravitational_parameters.len() != states_bary_eq.len() {
+            return Err(AssistError::Other(
+                "collision non-gravitational parameter rows must match state rows".to_string(),
+            ));
+        }
         let ephem = &self.data.ephem;
         let jd_ref = ephem.jd_ref();
         let t0 = epoch_jd_tdb - jd_ref;
@@ -578,6 +637,7 @@ impl AssistPropagator {
             self.data.as_ref(),
             self.integrator,
             states_bary_eq,
+            non_gravitational_parameters,
             t0,
             backward,
             None,
@@ -637,6 +697,7 @@ impl AssistPropagator {
                 for &slot in &survivor_slots {
                     output.final_indices.push(active[slot]);
                     output.final_states.push(snapshot[slot]);
+                    output.final_times_jd_tdb.push(t + jd_ref);
                 }
                 return Ok(output);
             }
@@ -644,11 +705,16 @@ impl AssistPropagator {
                 let dt = asim.sim().dt();
                 let survivor_states: Vec<[f64; 6]> =
                     survivor_slots.iter().map(|&slot| snapshot[slot]).collect();
+                let survivor_parameters = survivor_slots
+                    .iter()
+                    .map(|&slot| non_gravitational_parameters[active[slot]].clone())
+                    .collect::<Vec<_>>();
                 active = survivor_slots.iter().map(|&slot| active[slot]).collect();
                 asim = build_collision_sim(
                     self.data.as_ref(),
                     self.integrator,
                     &survivor_states,
+                    &survivor_parameters,
                     t,
                     backward,
                     Some(dt),
@@ -704,6 +770,51 @@ fn state_only_failure_block(
     }
 }
 
+fn assist_non_gravitational_parameters(
+    row: Option<NonGravitationalParametersRow>,
+    orbit_id: &str,
+) -> PropagationResultValue<Option<NonGravParams>> {
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let a1 = row.a1.unwrap_or(0.0);
+    let a2 = row.a2.unwrap_or(0.0);
+    let a3 = row.a3.unwrap_or(0.0);
+    if ![a1, a2, a3].iter().all(|value| value.is_finite()) {
+        return Err(PropagationError::InvalidRequest(format!(
+            "Non-finite non-gravitational A1/A2/A3 values for orbit {orbit_id}."
+        )));
+    }
+    if a1 == 0.0 && a2 == 0.0 && a3 == 0.0 {
+        return Ok(None);
+    }
+    let constants = [row.aln, row.nk, row.nm, row.nn, row.r0];
+    let set_count = constants.iter().filter(|value| value.is_some()).count();
+    if set_count != 0 && set_count != constants.len() {
+        return Err(PropagationError::InvalidRequest(format!(
+            "Partially-specified Marsden g(r) constants for orbit {orbit_id}: set all of (ALN, NK, NM, NN, R0) or none (null selects the asteroid (1 au / r)^2 convention)."
+        )));
+    }
+    if let [Some(aln), Some(nk), Some(nm), Some(nn), Some(r0)] = constants {
+        if ![aln, nk, nm, nn, r0].iter().all(|value| value.is_finite()) || aln <= 0.0 || r0 <= 0.0 {
+            return Err(PropagationError::InvalidRequest(format!(
+                "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
+            )));
+        }
+        return Ok(Some(NonGravParams {
+            a1,
+            a2,
+            a3,
+            alpha: Some(aln),
+            nk: Some(nk),
+            nm: Some(nm),
+            nn: Some(nn),
+            r0: Some(r0),
+        }));
+    }
+    Ok(Some(NonGravParams::new(a1, a2, a3)))
+}
+
 #[derive(Clone)]
 pub struct AssistShard {
     data: Arc<AssistData>,
@@ -737,7 +848,16 @@ impl PropagatorShard for AssistShard {
             ));
         }
 
-        let assist_orbit = AssistOrbit::new(orbit.state, orbit.time.mjd());
+        let non_grav = assist_non_gravitational_parameters(
+            orbit.non_gravitational_parameters,
+            &orbit.orbit_id.0,
+        )?;
+        let assist_orbit = match non_grav {
+            Some(parameters) => {
+                AssistOrbit::with_non_grav(orbit.state, orbit.time.mjd(), parameters)
+            }
+            None => AssistOrbit::new(orbit.state, orbit.time.mjd()),
+        };
         let target_epochs = times.iter().map(|time| time.mjd()).collect::<Vec<_>>();
         let assist_orbits = [assist_orbit];
         let propagated = match assist_propagate(
@@ -777,7 +897,7 @@ impl PropagatorShard for AssistShard {
         let mut covariance_validity =
             covariance_requested.then(|| Vec::with_capacity(propagated.len()));
         let input_covariance = match (covariance_requested, orbit.covariance_valid) {
-            (true, true) => orbit.covariance.map(covariance_6x6),
+            (true, true) => orbit.covariance.map(assist_input_covariance),
             _ => None,
         }
         .transpose()?;
@@ -798,7 +918,7 @@ impl PropagatorShard for AssistShard {
             {
                 match input_covariance
                     .as_ref()
-                    .and_then(|covariance| state.propagate_covariance(covariance))
+                    .and_then(|covariance| covariance.propagate(&state))
                 {
                     Some(covariance) => {
                         rows.push(flatten_covariance(covariance));
@@ -1288,6 +1408,10 @@ fn orbit_row<'a>(
             .input
             .weights_cov()
             .and_then(|weights_cov| weights_cov[orbit_index]),
+        non_gravitational_parameters: request
+            .input
+            .non_gravitational_parameters()
+            .map(|parameters| parameters.row(orbit_index)),
         state: states[orbit_index],
         origin: &request.input.coordinates().origins.origins[orbit_index],
         mu: f64::NAN,
@@ -1350,6 +1474,7 @@ fn assemble_result(
     let mut covariance_values = output_has_covariance.then(|| Vec::with_capacity(output_rows * 36));
     let mut covariance_validity = output_has_covariance.then(|| Vec::with_capacity(output_rows));
     let input_physical_parameters = request.input.physical_parameters();
+    let input_non_gravitational_parameters = request.input.non_gravitational_parameters();
     let mut source_orbit_indices = Vec::with_capacity(output_rows);
 
     for block in blocks {
@@ -1443,9 +1568,14 @@ fn assemble_result(
                 weights_cov,
                 coordinates.clone(),
             )?;
-            Some(match input_physical_parameters {
+            let variants = match input_physical_parameters {
                 Some(physical_parameters) => variants
                     .with_physical_parameters(physical_parameters.take(&source_orbit_indices))?,
+                None => variants,
+            };
+            Some(match input_non_gravitational_parameters {
+                Some(parameters) => variants
+                    .with_non_gravitational_parameters(parameters.take(&source_orbit_indices))?,
                 None => variants,
             })
         }
@@ -1457,6 +1587,18 @@ fn assemble_result(
         }
     };
     let orbits = OrbitBatch::new(orbit_ids, object_ids, coordinates)?;
+    let orbits = match input_physical_parameters {
+        Some(parameters) => {
+            orbits.with_physical_parameters(parameters.take(&source_orbit_indices))?
+        }
+        None => orbits,
+    };
+    let orbits = match input_non_gravitational_parameters {
+        Some(parameters) => {
+            orbits.with_non_gravitational_parameters(parameters.take(&source_orbit_indices))?
+        }
+        None => orbits,
+    };
     Ok(PropagationResult {
         orbits,
         variants,
@@ -1496,20 +1638,47 @@ fn build_output_covariance(
     }
 }
 
-fn covariance_6x6(values: &[f64]) -> PropagationResultValue<[[f64; 6]; 6]> {
-    if values.len() != 36 {
-        return Err(PropagationError::InvalidRequest(format!(
-            "expected 36 covariance values for a Cartesian row, got {}",
-            values.len()
-        )));
-    }
-    let mut out = [[0.0; 6]; 6];
-    for row in 0..6 {
-        for col in 0..6 {
-            out[row][col] = values[row * 6 + col];
+enum AssistInputCovariance {
+    State(Box<[[f64; 6]; 6]>),
+    StateAndNongrav(Box<[[f64; 9]; 9]>),
+}
+
+impl AssistInputCovariance {
+    fn propagate(&self, state: &assist_propagation::PropagatedState) -> Option<[[f64; 6]; 6]> {
+        match self {
+            Self::State(covariance) => state.propagate_covariance(covariance),
+            Self::StateAndNongrav(covariance) => {
+                state.propagate_covariance_with_nongrav(covariance)
+            }
         }
     }
-    Ok(out)
+}
+
+fn assist_input_covariance(values: &[f64]) -> PropagationResultValue<AssistInputCovariance> {
+    match values.len() {
+        36 => {
+            let mut out = [[0.0; 6]; 6];
+            for row in 0..6 {
+                for col in 0..6 {
+                    out[row][col] = values[row * 6 + col];
+                }
+            }
+            Ok(AssistInputCovariance::State(Box::new(out)))
+        }
+        81 => {
+            let mut out = [[0.0; 9]; 9];
+            for row in 0..9 {
+                for col in 0..9 {
+                    out[row][col] = values[row * 9 + col];
+                }
+            }
+            Ok(AssistInputCovariance::StateAndNongrav(Box::new(out)))
+        }
+        _ => Err(PropagationError::InvalidRequest(format!(
+            "expected 36 or 81 covariance values for a Cartesian row, got {}",
+            values.len()
+        ))),
+    }
 }
 
 fn flatten_covariance(values: [[f64; 6]; 6]) -> [f64; 36] {
@@ -1685,6 +1854,35 @@ mod tests {
         assert_eq!(config.min_dt, Some(1.0e-9));
         assert_eq!(config.adaptive_mode, Some(Ias15AdaptiveMode::Global));
         assert_eq!(config.epsilon, Some(1.0e-6));
+    }
+
+    #[test]
+    fn extended_linearized_covariance_routes_through_nongrav_partials() {
+        let mut values = vec![0.0; 81];
+        for index in 0..9 {
+            values[index * 9 + index] = 1.0;
+        }
+        let covariance = assist_input_covariance(&values).unwrap();
+
+        let mut stm = [[0.0; 6]; 6];
+        for (index, row) in stm.iter_mut().enumerate() {
+            row[index] = 1.0;
+        }
+        let mut nongrav_partials = [[0.0; 3]; 6];
+        for (index, row) in nongrav_partials.iter_mut().take(3).enumerate() {
+            row[index] = 1.0;
+        }
+        let state = assist_propagation::PropagatedState {
+            state: [0.0; 6],
+            epoch: 0.0,
+            stm: Some(stm),
+            nongrav_partials: Some(nongrav_partials),
+        };
+
+        let propagated = covariance.propagate(&state).unwrap();
+        for (index, row) in propagated.iter().enumerate() {
+            assert_eq!(row[index], if index < 3 { 2.0 } else { 1.0 });
+        }
     }
 
     #[test]

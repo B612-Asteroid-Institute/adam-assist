@@ -11,7 +11,9 @@
 - [Installation](#installation)
 - [Usage](#usage)
   - [Propagating Orbits](#propagating-orbits)
+  - [Non-Gravitational Forces](#non-gravitational-forces)
   - [Generating Ephemerides](#generating-ephemerides)
+- [Benchmarking](#benchmarking)
 
 
 ## Overview
@@ -82,6 +84,31 @@ propagator = ASSISTPropagator()
 propagated = propagator.propagate_orbits(orbits)
 ```
 
+### Non-Gravitational Forces
+
+Orbits whose `non_gravitational_parameters` carry Marsden-style `A1`/`A2`/`A3`
+accelerations (au/d^2) are propagated with ASSIST's non-gravitational force.
+The g(r) law is selected by the `ALN`/`NK`/`NM`/`NN`/`R0` columns: null
+constants mean the asteroid convention g(r) = (1 au / r)^2, and an explicit
+tuple (for example the standard Marsden comet law, or a custom shape such as
+1I/'Oumuamua's) is applied simulation-wide. Batches mixing different g(r)
+tuples are automatically split into one simulation per force law, since
+ASSIST holds the constants per simulation rather than per particle.
+
+**Supported** (regression-tested against JPL Horizons to tens–hundreds of
+metres over ±300 days): symmetric inverse-square asteroid solutions
+(e.g. 99942 Apophis), the standard comet Marsden law (e.g. C/2022 E3), and
+custom symmetric (ALN, NK, NM, NN, R0) tuples (e.g. 1I/'Oumuamua).
+
+**Not supported**: the asymmetric-outgassing time offset `DT` (dropped with
+a warning by adam-core's importers — solutions that estimate DT, such as
+67P or 81P, retain km-scale model error through perihelion and should not
+be treated as JPL-parity), thermophysical Yarkovsky (`AMRAT`/`RHO`) models,
+and estimated (rather than fixed) g(r) shape parameters. Non-finite
+A-values, partial constants tuples, and degenerate `ALN <= 0` / `R0 <= 0`
+values are rejected with a `ValueError` rather than silently altering the
+force.
+
 ### Generating Ephemerides
 
 `ASSISTPropagator.generate_ephemeris` performs propagation, light-time geometry, optional covariance sampling/collapse, aberration, and photometry in the Rust backend behind one public Python call. Local parallelism uses Rayon rather than adam-core's former Python/Ray composition.
@@ -101,6 +128,22 @@ propagator = ASSISTPropagator()
 
 ephemerides = propagator.generate_ephemeris(sbdb_orbits, observers)
 ```
+
+## Benchmarking
+
+Run the complete current-only suite with:
+
+```console
+pdm run benchmark-current
+```
+
+It reuses the existing propagation, nongrav, ephemeris/covariance, collision,
+and orbit-determination workload builders. Results include current public
+Python timings, genuine Rust-owned `std::time::Instant` timings where
+available, public/native overhead, and exact workload shapes. It does not
+require a frozen Python environment or baseline timing cache, and all ASSIST
+workloads use `max_processes=1`. Use `--quick` for a smoke run or select, for
+example, `--domains nongrav ephemeris covariance --lanes tiny small`.
 
 ## Configuration
 

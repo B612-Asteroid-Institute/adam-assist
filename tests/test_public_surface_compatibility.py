@@ -5,14 +5,18 @@ import inspect
 import json
 from pathlib import Path
 
+from adam_core.propagator.propagator import Propagator
+
 import adam_assist
 from adam_assist.propagator import ASSISTPropagator
 from adam_assist.version import __version__
-from adam_core.propagator.propagator import Propagator
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = json.loads(
     (ROOT / "migration/public_surface/adam_assist_0_3_10.json").read_text()
+)
+CURRENT_MANIFEST = json.loads(
+    (ROOT / "migration/public_surface/manifest.json").read_text()
 )
 
 
@@ -52,7 +56,7 @@ def _parameters(method: object) -> list[inspect.Parameter]:
     return list(inspect.signature(method).parameters.values())
 
 
-def test_legacy_propagation_signature_is_preserved() -> None:
+def test_propagation_signature_preserves_legacy_prefix_and_latest_extensions() -> None:
     parameters = _parameters(ASSISTPropagator.propagate_orbits)
     assert [parameter.name for parameter in parameters] == [
         "self",
@@ -64,6 +68,7 @@ def test_legacy_propagation_signature_is_preserved() -> None:
         "chunk_size",
         "max_processes",
         "seed",
+        "include_nongrav",
     ]
     assert [parameter.default for parameter in parameters[3:]] == [
         False,
@@ -72,6 +77,7 @@ def test_legacy_propagation_signature_is_preserved() -> None:
         100,
         1,
         None,
+        True,
     ]
 
 
@@ -105,6 +111,8 @@ def test_legacy_ephemeris_positional_prefix_and_defaults_are_preserved() -> None
         True,
         False,
     ]
+    assert parameters[11].name == "include_nongrav"
+    assert parameters[11].default is True
 
 
 def test_legacy_collision_signature_is_preserved() -> None:
@@ -134,5 +142,28 @@ def test_legacy_constructor_parameters_remain_accepted() -> None:
         assert parameters[names.index(name)].default == default
 
 
+def test_current_surface_manifest_reconciles_latest_upstream() -> None:
+    summary = CURRENT_MANIFEST["summary"]
+    assert CURRENT_MANIFEST["scope"]["frozen_updated_upstream_commit"] == (
+        "cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2"
+    )
+    assert summary == {
+        "symbols": 25,
+        "frozen_updated_upstream_symbols": 14,
+        "missing_upstream_symbols": 0,
+        "latest_extension_symbols": 11,
+        "all_non_plotting_symbols_classified": True,
+    }
+    symbols = CURRENT_MANIFEST["symbols"]
+    assert len(symbols) == summary["symbols"]
+    assert len({symbol["id"] for symbol in symbols}) == len(symbols)
+    assert all(symbol["classification"] for symbol in symbols)
+    assert set(CURRENT_MANIFEST["correctness_classification"]) == {
+        "bitwise",
+        "tolerance-based",
+        "statistical",
+    }
+
+
 def test_rc_version_module_is_preserved() -> None:
-    assert __version__ == "0.4.0rc3"
+    assert __version__ == "0.4.0rc4"

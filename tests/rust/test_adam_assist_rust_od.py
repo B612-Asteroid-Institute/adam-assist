@@ -339,6 +339,11 @@ def test_native_od_timing_lanes(od_problem):
     _python_propagator, observations, initial = od_problem
     rust_propagator = RustASSISTPropagator()
 
+    rust_propagator.fit_least_squares(initial, observations)
+    operation, samples = rust_propagator.benchmark_last_native(2, 2, 1)
+    assert operation == "fit_least_squares"
+    assert len(samples) == 2 and all(len(trial) == 2 for trial in samples)
+
     rust_propagator.od_fit(initial, observations)
     operation, samples = rust_propagator.benchmark_last_native(2, 2, 1)
     assert operation == "od_fit"
