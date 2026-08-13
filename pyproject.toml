@@ -20,7 +20,7 @@ classifiers = [
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "adam-core==0.5.6rc3",
+    "adam-core==0.5.6rc4",
     "naif-de440",
     "jpl-small-bodies-de441-n16",
     "numpy",
@@ -73,6 +73,12 @@ test = "pytest --benchmark-skip {args}"
 coverage = "pytest --benchmark-skip --cov=adam_assist --cov-report=xml {args}"
 benchmark = "pytest --benchmark-only {args}"
 benchmark-current = "python -m migration.scripts.benchmark_current {args}"
+benchmark-current-ci = "python -m migration.scripts.benchmark_current --quick --lanes tiny --require-native --output migration/artifacts/benchmark_current_assist_ci.json --markdown migration/artifacts/benchmark_current_assist_ci.md"
+rust-quality = { composite = [
+    "cargo fmt --manifest-path rust/adam_assist_rs/Cargo.toml -- --check",
+    "cargo clippy --manifest-path rust/adam_assist_rs/Cargo.toml --all-targets --features python,extension-module -- -D warnings",
+    "cargo test --manifest-path rust/adam_assist_rs/Cargo.toml",
+] }
 assist-public-semantics-benchmark = "python migration/scripts/benchmark_assist_public_semantics.py"
 assist-two-runtime-benchmark = "python migration/scripts/perf_assist_two_runtime.py"
 

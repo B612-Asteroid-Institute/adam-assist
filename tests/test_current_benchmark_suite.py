@@ -21,6 +21,12 @@ def test_current_suite_has_no_legacy_runtime_arguments() -> None:
     assert "performance_timing_payload" not in source
 
 
+def test_current_suite_can_require_native_timing() -> None:
+    args = benchmark_current._build_arg_parser().parse_args(["--require-native"])
+
+    assert args.require_native is True
+
+
 def test_current_suite_reuses_existing_workload_builders() -> None:
     assert benchmark_current.propagation._workloads is propagation._workloads
     assert benchmark_current.nongrav._workloads is nongrav._workloads

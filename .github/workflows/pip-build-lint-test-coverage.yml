@@ -45,6 +45,28 @@ jobs:
       - name: Typecheck
         run: pdm run typecheck
 
+  rust-quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      # Exact adam_core_rs_* RC dependencies resolve from crates.io in normal
+      # CI. Before publication, local candidate validation uses temporary path
+      # patches and restores Cargo.lock afterward.
+      - name: Set up PDM
+        uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: '3.12'
+      - name: Install dev dependencies
+        run: pdm install -G dev
+      - name: Rust format, clippy, and tests
+        run: pdm run rust-quality
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -92,7 +114,7 @@ jobs:
 
   benchmark:
     runs-on: ubuntu-latest
-    needs: [ test ]
+    needs: [ test, rust-quality ]
     permissions:
       contents: write
       pull-requests: write
@@ -120,6 +142,16 @@ jobs:
         run: pdm install -G dev
       - name: Run benchmarks
         run: pdm run benchmark --benchmark-json bench.json
+      - name: Run current public/native benchmark smoke
+        run: pdm run benchmark-current-ci
+      - name: Upload current-only benchmark artifact
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: assist-current-benchmark
+          path: |
+            migration/artifacts/benchmark_current_assist_ci.json
+            migration/artifacts/benchmark_current_assist_ci.md
       - name: Upload benchmark artifact
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4

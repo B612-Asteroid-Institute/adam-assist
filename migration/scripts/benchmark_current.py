@@ -381,6 +381,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--domains", nargs="+", choices=DOMAINS, default=list(DOMAINS))
     parser.add_argument("--lanes", nargs="+", choices=LANES, default=list(LANES))
     parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument(
+        "--require-native",
+        action="store_true",
+        help="Fail if any selected workload lacks genuine Rust-owned timing.",
+    )
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument(
         "--quick",
@@ -463,6 +468,10 @@ def main(argv: list[str] | None = None) -> int:
         "warmups": warmups,
         "domains": args.domains,
         "lanes": args.lanes,
+        "native_unavailable_count": sum(
+            row["timing_seconds"]["native_rust"].get("status") != "measured"
+            for row in rows
+        ),
         "workloads": rows,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -471,7 +480,7 @@ def main(argv: list[str] | None = None) -> int:
     args.markdown.write_text(_markdown(payload))
     print(args.output)
     print(args.markdown)
-    return 0
+    return 1 if args.require_native and payload["native_unavailable_count"] else 0
 
 
 if __name__ == "__main__":
