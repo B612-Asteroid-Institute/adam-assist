@@ -10,12 +10,12 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release-candidate version
         required: true
-        default: 0.4.0rc5
+        default: 0.4.0rc6
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core release candidate
         required: true
-        default: 0.5.6rc4
+        default: 0.5.6rc5
         type: string
       repository:
         description: Destination index
@@ -75,7 +75,7 @@ jobs:
               raise SystemExit(f"missing exact preview dependency {expected}")
           cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
           cargo_version = cargo["package"]["version"]
-          if cargo_version != "0.4.0-rc.5" or str(assist) != "0.4.0rc5":
+          if cargo_version != "0.4.0-rc.6" or str(assist) != "0.4.0rc6":
               raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
           for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
               if cargo["dependencies"].get(name) != "=0.1.0-rc.4":
@@ -144,10 +144,31 @@ jobs:
               if canonicalize_name(name) != "adam-assist" or version != expected_version:
                   raise SystemExit(f"unexpected wheel identity: {wheel.name}")
               with zipfile.ZipFile(wheel) as archive:
-                  metadata_paths = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")]
+                  names = archive.namelist()
+                  metadata_paths = [n for n in names if n.endswith(".dist-info/METADATA")]
                   if len(metadata_paths) != 1:
                       raise SystemExit(f"{wheel.name}: unexpected METADATA files")
                   metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
+                  if "adam_assist/version.py" not in names:
+                      raise SystemExit(f"{wheel.name}: missing adam_assist/version.py")
+                  namespace = {}
+                  exec(archive.read("adam_assist/version.py"), namespace)
+                  if namespace.get("__version__") != str(expected_version):
+                      raise SystemExit(f"{wheel.name}: bad runtime version")
+                  if not any(
+                      name.startswith("adam_assist/_native")
+                      and name.endswith((".so", ".pyd", ".dylib"))
+                      for name in names
+                  ):
+                      raise SystemExit(f"{wheel.name}: missing native extension")
+                  packaged_tests = [
+                      name
+                      for name in names
+                      if name.startswith("adam_assist/")
+                      and ("/tests/" in name or Path(name).name.startswith("test_"))
+                  ]
+                  if packaged_tests:
+                      raise SystemExit(f"{wheel.name}: packaged tests {packaged_tests[:1]}")
               requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
               core_requirements = [r for r in requirements if canonicalize_name(r.name) == "adam-core"]
               if len(core_requirements) != 1 or str(core_requirements[0].specifier) != f"=={expected_core}":
