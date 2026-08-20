@@ -18,6 +18,12 @@ def _cargo_manifest() -> dict:
         return tomllib.load(cargo_file)
 
 
+def _cargo_lock_packages() -> dict[str, dict]:
+    with (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").open("rb") as lock_file:
+        packages = tomllib.load(lock_file)["package"]
+    return {package["name"]: package for package in packages}
+
+
 def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
     names = {
         dependency.split("=")[0].split(">")[0] for dependency in _project_dependencies()
@@ -43,6 +49,22 @@ def test_preview_dependencies_are_exact_public_releases() -> None:
         "default-features": False,
     }
     assert not (ROOT / "rust" / "vendor").exists()
+
+
+def test_lock_matches_exact_published_core_crates() -> None:
+    packages = _cargo_lock_packages()
+    assert packages["adam_assist_rs"]["version"] == "0.4.0-rc.6"
+    for name in (
+        "adam_core_rs_autodiff",
+        "adam_core_rs_coords",
+        "adam_core_rs_kernel_data",
+        "adam_core_rs_orbit_determination",
+        "adam_core_rs_spice",
+    ):
+        assert packages[name]["version"] == "0.1.0-rc.4"
+        assert packages[name]["source"] == (
+            "registry+https://github.com/rust-lang/crates.io-index"
+        )
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:
