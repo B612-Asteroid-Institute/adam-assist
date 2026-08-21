@@ -25,6 +25,16 @@ def test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark() -> None
     assert "migration/artifacts/benchmark_current_assist_ci.json" in workflow
 
 
+def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
+    for workflow in (ROOT / ".github" / "workflows").glob("*.yml"):
+        source = workflow.read_text()
+        if "dtolnay/rust-toolchain@" not in source:
+            continue
+        assert "dtolnay/rust-toolchain@stable" not in source, workflow.name
+        assert "dtolnay/rust-toolchain@1.87.0" in source, workflow.name
+        assert "components: rustfmt, clippy" in source, workflow.name
+
+
 def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     workflow = RELEASE_WORKFLOW.read_text()
     writer = "python adam-core/migration/scripts/write_maturin_version.py"

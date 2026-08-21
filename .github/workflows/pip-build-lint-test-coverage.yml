@@ -54,7 +54,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
       # Exact adam_core_rs_* RC dependencies resolve from crates.io in normal
       # CI. Before publication, local candidate validation uses temporary path
       # patches and restores Cargo.lock afterward.
