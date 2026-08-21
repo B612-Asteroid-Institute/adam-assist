@@ -168,7 +168,9 @@ jobs:
   full-current-benchmark:
     name: Full 35-workload current benchmark
     needs: artifact-acceptance
-    runs-on: ubuntu-latest
+    # The frozen direct-Rust fixture and its immutable last-bit residual envelope
+    # were captured on arm64; keep that scientific gate on its authority platform.
+    runs-on: macos-14
     steps:
       - name: Checkout adam-assist candidate
         uses: actions/checkout@v4

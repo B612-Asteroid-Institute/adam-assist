@@ -45,8 +45,12 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     assert 'ADAM_CORE_PREVIEW_VERSION: "0.5.6rc5"' in workflow
     assert 'ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc6"' in workflow
     assert "full-current-benchmark:" in workflow
-    assert "needs: artifact-acceptance" in workflow
-    assert "Full 35-workload current benchmark" in workflow
+    full_job_header = workflow.split("  full-current-benchmark:", maxsplit=1)[1].split(
+        "    steps:", maxsplit=1
+    )[0]
+    assert "needs: artifact-acceptance" in full_job_header
+    assert "runs-on: macos-14" in full_job_header
+    assert "Full 35-workload current benchmark" in full_job_header
     assert (
         "cargo test --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored"
         in workflow
