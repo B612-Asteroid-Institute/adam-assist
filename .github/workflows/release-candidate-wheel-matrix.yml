@@ -193,6 +193,8 @@ jobs:
           python -m pip install -e ".[dev]"
       - name: Run direct Rust frozen-fixture and kernel integrations
         run: cargo test --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored
+      - name: Run complete JPL Horizons accuracy matrix
+        run: python -m pytest -m live tests/test_propagate.py tests/test_ephemeris.py
       - name: Run complete current public/native benchmark grid
         run: |
           python -m migration.scripts.benchmark_current \

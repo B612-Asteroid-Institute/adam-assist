@@ -51,6 +51,10 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
         "cargo test --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored"
         in workflow
     )
+    assert (
+        "python -m pytest -m live tests/test_propagate.py tests/test_ephemeris.py"
+        in workflow
+    )
     assert "--lanes tiny small large" in workflow
     assert "--repeats 5" in workflow
     assert "--require-native" in workflow
