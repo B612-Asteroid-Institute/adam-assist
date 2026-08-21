@@ -51,6 +51,12 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     assert "needs: artifact-acceptance" in full_job_header
     assert "runs-on: macos-14" in full_job_header
     assert "Full 35-workload current benchmark" in full_job_header
+    assert "Pin frozen-fixture kernel bytes" in workflow
+    assert "assist_public_semantics_fixture_2026-05-20.json" in workflow
+    assert "ADAM_CORE_RS_ASSIST_PLANETS_PATH" in workflow
+    assert "ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH" in workflow
+    assert "assist_kernel_identity_ci.json" in workflow
+    assert "assist_public_semantics_residuals_ci.json" in workflow
     assert (
         "cargo test --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored"
         in workflow
