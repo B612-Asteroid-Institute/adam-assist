@@ -144,7 +144,9 @@ available, public/native overhead, and exact workload shapes. It does not
 require a frozen Python environment or baseline timing cache, and all ASSIST
 workloads use `max_processes=1`. Use `--quick` for a smoke run or select, for
 example, `--domains nongrav ephemeris covariance --lanes tiny small`. Release
-CI runs the complete 35-workload grid with native timing required.
+CI runs the complete 35-workload grid with native timing required. After wheel
+acceptance, release candidates also run all 54 live JPL Horizons propagation and
+ephemeris accuracy cases.
 
 The deterministic test suite uses reviewed, hash-pinned frozen outputs for all
 formerly two-runtime propagation, covariance, ephemeris, collision, typed
