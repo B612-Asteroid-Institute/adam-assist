@@ -44,3 +44,10 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     assert workflow.index(writer) < workflow.index(builder) < workflow.index(inspector)
     assert 'ADAM_CORE_PREVIEW_VERSION: "0.5.6rc5"' in workflow
     assert 'ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc6"' in workflow
+    assert "full-current-benchmark:" in workflow
+    assert "needs: artifact-acceptance" in workflow
+    assert "Full 35-workload current benchmark" in workflow
+    assert "--lanes tiny small large" in workflow
+    assert "--repeats 5" in workflow
+    assert "--require-native" in workflow
+    assert "assist-current-benchmark-full" in workflow

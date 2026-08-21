@@ -164,3 +164,48 @@ jobs:
             ${{ runner.temp }}/acceptance/wheelhouse/*.whl
             ${{ runner.temp }}/acceptance/logs/*.log
           if-no-files-found: error
+
+  full-current-benchmark:
+    name: Full 35-workload current benchmark
+    needs: artifact-acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout adam-assist candidate
+        uses: actions/checkout@v4
+      - name: Checkout exact adam-core candidate
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_REF }}
+          path: adam-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Install exact source pair
+        run: |
+          python -m pip install --upgrade pip maturin
+          python adam-core/migration/scripts/write_maturin_version.py
+          python -m pip install ./adam-core
+          python migration/scripts/write_maturin_version.py
+          python -m pip install -e ".[dev]"
+      - name: Run complete current public/native benchmark grid
+        run: |
+          python -m migration.scripts.benchmark_current \
+            --lanes tiny small large \
+            --repeats 5 \
+            --warmups 1 \
+            --require-native \
+            --output migration/artifacts/benchmark_current_assist_ci.json \
+            --markdown migration/artifacts/benchmark_current_assist_ci.md
+      - name: Upload complete benchmark artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: assist-current-benchmark-full
+          path: |
+            migration/artifacts/benchmark_current_assist_ci.json
+            migration/artifacts/benchmark_current_assist_ci.md
+          if-no-files-found: error
