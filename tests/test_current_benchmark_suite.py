@@ -1,4 +1,5 @@
 import inspect
+import sys
 
 from migration.scripts import benchmark_assist_ephemeris as ephemeris
 from migration.scripts import benchmark_assist_nongrav_propagation as nongrav
@@ -19,6 +20,8 @@ def test_current_suite_has_no_legacy_runtime_arguments() -> None:
     assert "LegacyAssistPropagator" not in source
     assert "LEGACY_ASSIST_VENV_PYTHON" not in source
     assert "performance_timing_payload" not in source
+    assert "migration.parity._assist_oracle" not in sys.modules
+    assert "migration.parity._assist_legacy_runner" not in sys.modules
 
 
 def test_current_suite_can_require_native_timing() -> None:

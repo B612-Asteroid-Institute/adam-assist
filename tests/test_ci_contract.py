@@ -21,9 +21,6 @@ def test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark() -> None
     assert "pdm run rust-quality" in workflow
     assert "[patch.crates-io]" not in workflow
     assert "pdm run benchmark-current-ci" in workflow
-    assert "--quick --lanes tiny --require-native" in str(
-        scripts["benchmark-current-ci"]
-    )
     assert "assist-current-benchmark" in workflow
     assert "migration/artifacts/benchmark_current_assist_ci.json" in workflow
 

@@ -49,10 +49,6 @@ from migration.parity._assist_bench import (  # noqa: E402
     time_native_rust,
     time_rust,
 )
-from migration.parity._assist_oracle import (  # noqa: E402
-    LEGACY_ASSIST_VENV_PYTHON,
-    LegacyAssistPropagator,
-)
 
 EPOCH_MJD = 60000.0
 NUM_DAYS = 30
@@ -143,6 +139,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from migration.parity._assist_oracle import (
+        LEGACY_ASSIST_VENV_PYTHON,
+        LegacyAssistPropagator,
+    )
+
     args = _build_arg_parser().parse_args(argv)
     if args.repeats < 3:
         raise ValueError("--repeats must be at least 3 to report p50/p95")

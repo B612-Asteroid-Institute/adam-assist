@@ -14,7 +14,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from adam_core.coordinates import CoordinateCovariances
@@ -27,6 +27,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from adam_assist import ASSISTPropagator  # noqa: E402
+
+if TYPE_CHECKING:
+    from migration.parity._assist_oracle import LegacyAssistPropagator
 from migration.parity._assist_bench import (  # noqa: E402
     PERFORMANCE_COLUMNS,
     TWO_RUNTIME_COMPARISON_MODE,
@@ -34,17 +37,10 @@ from migration.parity._assist_bench import (  # noqa: E402
     time_native_rust,
     time_rust,
 )
-from migration.parity._assist_oracle import (  # noqa: E402
-    LEGACY_ASSIST_VENV_PYTHON,
-    LegacyAssistPropagator,
-)
 from migration.scripts import benchmark_assist_public_semantics as base  # noqa: E402
 
 DEFAULT_OUTPUT = (
-    REPO_ROOT
-    / "migration"
-    / "artifacts"
-    / "assist_ephemeris_benchmark_2026-08-12.json"
+    REPO_ROOT / "migration" / "artifacts" / "assist_ephemeris_benchmark_2026-08-12.json"
 )
 
 
@@ -143,9 +139,7 @@ def _workloads() -> list[Workload]:
             "covariance_9d_nongrav_sigma_point_10x10",
             "Deterministic full 9D A1/A2/A3 sigma-point covariance ephemeris: 10 orbits by 10 X05 epochs.",
             _with_diagonal_covariance(
-                _with_nongrav(
-                    base._base_sun_ecliptic_orbits(10, mixed_epochs=False)
-                ),
+                _with_nongrav(base._base_sun_ecliptic_orbits(10, mixed_epochs=False)),
                 dimension=9,
             ),
             base._target_times(10, scale="utc", span_days=10.0),
@@ -160,9 +154,7 @@ def _residuals(actual: Any, expected: Any) -> dict[str, Any]:
     e_cov = np.asarray(expected.coordinates.covariance.to_matrix(), dtype=np.float64)
     finite = np.isfinite(a_cov) & np.isfinite(e_cov)
     covariance_max_abs = (
-        float(np.max(np.abs(a_cov[finite] - e_cov[finite])))
-        if np.any(finite)
-        else None
+        float(np.max(np.abs(a_cov[finite] - e_cov[finite]))) if np.any(finite) else None
     )
     actual_time = actual.coordinates.time
     expected_time = expected.coordinates.time
@@ -254,6 +246,11 @@ def _benchmark(
 
 
 def main() -> int:
+    from migration.parity._assist_oracle import (
+        LEGACY_ASSIST_VENV_PYTHON,
+        LegacyAssistPropagator,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)

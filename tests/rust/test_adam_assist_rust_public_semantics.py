@@ -53,18 +53,12 @@ def _bench_0079_unique_epoch_orbit() -> Orbits:
     )
 
 
-def test_same_epoch_multi_orbit_fast_path_matches_python_public(
-    python_reference_propagator,
+def test_same_epoch_multi_orbit_fast_path_matches_frozen_public_regression(
+    frozen_assist_regression,
 ) -> None:
     orbits = _same_epoch_orbits()
     times = Timestamp.from_mjd([60000.25, 60001.0], scale="tdb")
 
-    expected = python_reference_propagator.propagate_orbits(
-        orbits,
-        times,
-        max_processes=1,
-        chunk_size=10,
-    )
     propagator = RustASSISTPropagator()
     actual = propagator.propagate_orbits(
         orbits,
@@ -76,47 +70,39 @@ def test_same_epoch_multi_orbit_fast_path_matches_python_public(
     assert operation == "propagation"
     assert all(sample > 0.0 for trial in samples for sample in trial)
 
-    assert actual.orbit_id.to_pylist() == expected.orbit_id.to_pylist()
+    assert (
+        actual.orbit_id.to_pylist()
+        == frozen_assist_regression["public_same_epoch_orbit_id"].tolist()
+    )
     np.testing.assert_array_equal(
         actual.coordinates.time.mjd().to_numpy(zero_copy_only=False),
-        expected.coordinates.time.mjd().to_numpy(zero_copy_only=False),
+        frozen_assist_regression["public_same_epoch_time_mjd"],
     )
     np.testing.assert_allclose(
         actual.coordinates.values,
-        expected.coordinates.values,
+        frozen_assist_regression["public_same_epoch_state"],
         atol=1.0e-13,
         rtol=0,
     )
 
 
-def test_unique_epoch_long_horizon_regression_matches_python_public(
-    python_reference_propagator,
+def test_unique_epoch_long_horizon_matches_frozen_public_regression(
+    frozen_assist_regression,
 ) -> None:
     orbits = _bench_0079_unique_epoch_orbit()
     times = Timestamp.from_mjd([60365.25], scale="tdb")
 
-    expected = python_reference_propagator.propagate_orbits(
-        orbits,
-        times,
-        max_processes=1,
-        chunk_size=10,
-    )
     actual = RustASSISTPropagator().propagate_orbits(
         orbits,
         times,
         max_processes=1,
         chunk_size=10,
     )
+    expected = frozen_assist_regression["public_long_horizon_state"]
 
     np.testing.assert_allclose(
-        actual.coordinates.values[:, :3],
-        expected.coordinates.values[:, :3],
-        atol=3.0e-13,
-        rtol=0,
+        actual.coordinates.values[:, :3], expected[:, :3], atol=3.0e-13, rtol=0
     )
     np.testing.assert_allclose(
-        actual.coordinates.values[:, 3:],
-        expected.coordinates.values[:, 3:],
-        atol=3.0e-13,
-        rtol=0,
+        actual.coordinates.values[:, 3:], expected[:, 3:], atol=3.0e-13, rtol=0
     )

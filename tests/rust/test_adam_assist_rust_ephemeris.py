@@ -45,21 +45,37 @@ def _sorted_values(ephemeris) -> np.ndarray:
     return np.asarray(ordered.coordinates.values, dtype=np.float64)
 
 
-def test_generate_ephemeris_matches_python_adam_assist(
-    python_reference_propagator,
+def _sorted_covariance(ephemeris) -> np.ndarray:
+    ordered = ephemeris.sort_by(
+        [
+            "orbit_id",
+            "coordinates.time.days",
+            "coordinates.time.nanos",
+            "coordinates.origin.code",
+        ]
+    )
+    return ordered.coordinates.covariance.to_matrix()
+
+
+def _sorted_column(ephemeris, name: str) -> np.ndarray:
+    ordered = ephemeris.sort_by(
+        [
+            "orbit_id",
+            "coordinates.time.days",
+            "coordinates.time.nanos",
+            "coordinates.origin.code",
+        ]
+    )
+    return ordered.column(name).to_numpy(zero_copy_only=False)
+
+
+def test_generate_ephemeris_matches_frozen_adam_assist_regression(
+    frozen_assist_regression,
 ) -> None:
     orbits = _orbits()
     times = Timestamp.from_mjd([60000.5, 60001.0], scale="utc")
     observers = Observers.from_code("X05", times)
 
-    expected = python_reference_propagator.generate_ephemeris(
-        orbits,
-        observers,
-        covariance=False,
-        max_processes=1,
-        predict_magnitudes=False,
-        predict_phase_angle=False,
-    )
     actual = RustASSISTPropagator().generate_ephemeris(
         orbits,
         observers,
@@ -68,23 +84,18 @@ def test_generate_ephemeris_matches_python_adam_assist(
         max_processes=1,
     )
 
-    expected_values = _sorted_values(expected)
     actual_values = _sorted_values(actual)
+    expected_values = frozen_assist_regression["ephemeris_basic_state"]
     assert actual_values.shape == expected_values.shape
     np.testing.assert_allclose(
         actual_values, expected_values, atol=EPHEMERIS_STATE_ATOL, rtol=0
     )
 
 
-def test_generate_ephemeris_mixed_observers_and_photometry_matches_python(
-    python_reference_propagator,
+def test_generate_ephemeris_mixed_observers_and_photometry_matches_frozen(
+    frozen_assist_regression,
 ) -> None:
-    """Ownership decision (bead personal-cmy.17): the backend-generic
-    ``generate_ephemeris<P>`` in the permissive core owns light-time /
-    aberration / photometry semantics; the GPL adapter supplies ASSIST
-    propagation. This gates the remaining public-semantics slices vs Python
-    ``adam_assist``: mixed observer codes in one call and the photometry
-    columns (predicted V magnitude + phase angle)."""
+    """Mixed observer, light-time, phase-angle, and photometry regression."""
     import quivr as qv
     from adam_core.orbits.orbits import PhysicalParameters
 
@@ -103,14 +114,6 @@ def test_generate_ephemeris_mixed_observers_and_photometry_matches_python(
         [Observers.from_code("X05", times), Observers.from_code("500", times)]
     )
 
-    expected = python_reference_propagator.generate_ephemeris(
-        orbits,
-        observers,
-        covariance=False,
-        max_processes=1,
-        predict_magnitudes=True,
-        predict_phase_angle=True,
-    )
     actual = RustASSISTPropagator().generate_ephemeris(
         orbits,
         observers,
@@ -121,70 +124,40 @@ def test_generate_ephemeris_mixed_observers_and_photometry_matches_python(
 
     np.testing.assert_allclose(
         _sorted_values(actual),
-        _sorted_values(expected),
+        frozen_assist_regression["ephemeris_photometry_state"],
         atol=EPHEMERIS_STATE_ATOL,
         rtol=0,
     )
-
-    def _sorted_column(ephemeris, name):
-        ordered = ephemeris.sort_by(
-            [
-                "orbit_id",
-                "coordinates.time.days",
-                "coordinates.time.nanos",
-                "coordinates.origin.code",
-            ]
-        )
-        return ordered.column(name).to_numpy(zero_copy_only=False)
-
     np.testing.assert_allclose(
         _sorted_column(actual, "light_time"),
-        _sorted_column(expected, "light_time"),
+        frozen_assist_regression["ephemeris_photometry_light_time"],
         atol=1.0e-12,
         rtol=0,
     )
     np.testing.assert_allclose(
         _sorted_column(actual, "predicted_magnitude_v"),
-        _sorted_column(expected, "predicted_magnitude_v"),
+        frozen_assist_regression["ephemeris_photometry_predicted_magnitude_v"],
         atol=1.0e-9,
         rtol=0,
     )
     np.testing.assert_allclose(
         _sorted_column(actual, "alpha"),
-        _sorted_column(expected, "alpha"),
+        frozen_assist_regression["ephemeris_photometry_alpha"],
         atol=1.0e-9,
         rtol=0,
     )
 
 
-def _sorted_covariance(ephemeris) -> np.ndarray:
-    ordered = ephemeris.sort_by(
-        [
-            "orbit_id",
-            "coordinates.time.days",
-            "coordinates.time.nanos",
-            "coordinates.origin.code",
-        ]
-    )
-    return ordered.coordinates.covariance.to_matrix()
-
-
-def test_generate_ephemeris_covariance_matches_python_adam_assist(
-    python_reference_propagator,
+def test_generate_ephemeris_covariance_matches_frozen_adam_assist(
+    frozen_assist_regression,
 ) -> None:
-    """Rust-native covariance ephemeris (bead personal-cmy.33.2): sample orbit
-    variants, generate per-variant ephemeris, and collapse the variant
-    topocentric-spherical coordinates to per-row covariance -- all inside the
-    single Rust crossing -- must match the public ``adam_assist`` covariance
-    ephemeris (which does the same sample/propagate/collapse in Python via the
-    adam_core base composition). Sigma-point sampling is deterministic and
-    bit-identical across both, so this is a tight parity check modulo the
-    Rust-vs-Python ASSIST propagation + light-time differences."""
+    """Sigma-point covariance ephemeris remains within accepted parity floors."""
     from adam_core.coordinates.covariances import CoordinateCovariances
 
     base = _orbits()
     sigmas = np.tile(
-        np.array([1.0e-8, 1.0e-8, 1.0e-8, 1.0e-10, 1.0e-10, 1.0e-10]), (len(base), 1)
+        np.array([1.0e-8, 1.0e-8, 1.0e-8, 1.0e-10, 1.0e-10, 1.0e-10]),
+        (len(base), 1),
     )
     coordinates = base.coordinates.set_column(
         "covariance", CoordinateCovariances.from_sigmas(sigmas)
@@ -197,13 +170,6 @@ def test_generate_ephemeris_covariance_matches_python_adam_assist(
     times = Timestamp.from_mjd([60000.5, 60001.0], scale="utc")
     observers = Observers.from_code("X05", times)
 
-    expected = python_reference_propagator.generate_ephemeris(
-        orbits,
-        observers,
-        covariance=True,
-        covariance_method="sigma-point",
-        max_processes=1,
-    )
     actual = RustASSISTPropagator().generate_ephemeris(
         orbits,
         observers,
@@ -214,14 +180,14 @@ def test_generate_ephemeris_covariance_matches_python_adam_assist(
 
     np.testing.assert_allclose(
         _sorted_values(actual),
-        _sorted_values(expected),
+        frozen_assist_regression["ephemeris_covariance_state"],
         atol=EPHEMERIS_STATE_ATOL,
         rtol=0,
     )
     assert actual.coordinates.time.scale == "utc"
 
     actual_cov = _sorted_covariance(actual)
-    expected_cov = _sorted_covariance(expected)
+    expected_cov = frozen_assist_regression["ephemeris_covariance_covariance"]
     assert actual_cov.shape == expected_cov.shape
     assert not np.all(
         np.isnan(actual_cov)

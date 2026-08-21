@@ -98,70 +98,62 @@ def _earth_conditions() -> CollisionConditions:
 
 
 @pytest.fixture(scope="module")
-def python_propagator(python_reference_propagator):
-    return python_reference_propagator
-
-
-@pytest.fixture(scope="module")
 def rust_propagator() -> RustASSISTPropagator:
     return RustASSISTPropagator()
 
 
-def test_detect_collisions_orbits_parity(python_propagator, rust_propagator):
+def test_detect_collisions_orbits_matches_frozen_parity(
+    frozen_assist_regression, rust_propagator
+):
     orbits = _impact_study_orbits()
     conditions = _earth_conditions()
 
-    py_results, py_events = python_propagator._detect_collisions(
-        orbits, NUM_DAYS, conditions
-    )
     rust_results, rust_events = rust_propagator._detect_collisions(
         orbits, NUM_DAYS, conditions
     )
 
-    # Identical impact sets and survivor sets.
-    assert py_events.orbit_id.to_pylist() == ["impactor"]
-    assert rust_events.orbit_id.to_pylist() == ["impactor"]
-    assert sorted(py_results.orbit_id.to_pylist()) == sorted(
-        rust_results.orbit_id.to_pylist()
+    assert (
+        rust_events.orbit_id.to_pylist()
+        == frozen_assist_regression["impacts_orbits_event_orbit_id"].tolist()
+    )
+    assert sorted(rust_results.orbit_id.to_pylist()) == sorted(
+        frozen_assist_regression["impacts_orbits_result_orbit_id"].tolist()
     )
 
-    # Impact epoch and state agree within cross-build step-sequence noise.
-    py_time = py_events.coordinates.time.mjd().to_numpy(zero_copy_only=False)
     rust_time = rust_events.coordinates.time.mjd().to_numpy(zero_copy_only=False)
-    np.testing.assert_allclose(rust_time, py_time, rtol=0, atol=IMPACT_TIME_ATOL_DAYS)
+    np.testing.assert_allclose(
+        rust_time,
+        frozen_assist_regression["impacts_orbits_event_time_mjd"],
+        rtol=0,
+        atol=IMPACT_TIME_ATOL_DAYS,
+    )
     np.testing.assert_allclose(
         rust_events.coordinates.values,
-        py_events.coordinates.values,
+        frozen_assist_regression["impacts_orbits_event_state"],
         rtol=0,
         atol=IMPACT_STATE_ATOL_AU,
     )
 
-    # Both implementations report the impact within the collision radius.
-    for events in (py_events, rust_events):
-        spherical = events.collision_coordinates
-        assert (
-            spherical.rho.to_numpy(zero_copy_only=False) * 149_597_870.7
-            <= EARTH_RADIUS_KM
-        ).all()
+    spherical = rust_events.collision_coordinates
+    assert (
+        spherical.rho.to_numpy(zero_copy_only=False) * 149_597_870.7 <= EARTH_RADIUS_KM
+    ).all()
 
-    # Survivors are reported at each implementation's own overshooting final
-    # step; the step times must agree to within one large heliocentric step.
-    py_final = py_results.select("orbit_id", "safe")
     rust_final = rust_results.select("orbit_id", "safe")
-    py_final_time = py_final.coordinates.time.mjd().to_numpy(zero_copy_only=False)
     rust_final_time = rust_final.coordinates.time.mjd().to_numpy(zero_copy_only=False)
-    assert (py_final_time >= EPOCH_MJD + NUM_DAYS).all()
     assert (rust_final_time >= EPOCH_MJD + NUM_DAYS).all()
     np.testing.assert_allclose(
-        rust_final_time, py_final_time, rtol=0, atol=SURVIVOR_OVERSHOOT_ATOL_DAYS
+        rust_final_time,
+        frozen_assist_regression["impacts_orbits_safe_time_mjd"],
+        rtol=0,
+        atol=SURVIVOR_OVERSHOOT_ATOL_DAYS,
     )
 
 
-def test_detect_collisions_variants_parity(python_propagator, rust_propagator):
-    """Tightly-clustered Monte Carlo variants around the impactor must all
-    impact in both implementations; variants of the safe orbit must all
-    survive. Variant generation is seeded so both propagators see identical
-    inputs."""
+def test_detect_collisions_variants_matches_frozen_parity(
+    frozen_assist_regression, rust_propagator
+):
+    """Seeded impact and survivor variant sets retain accepted parity."""
     orbits = _impact_study_orbits()
     tiny = np.diag([1e-16, 1e-16, 1e-16, 1e-20, 1e-20, 1e-20])
     covariance = np.stack([tiny, tiny])
@@ -174,27 +166,34 @@ def test_detect_collisions_variants_parity(python_propagator, rust_propagator):
     )
     conditions = _earth_conditions()
 
-    py_results, py_events = python_propagator._detect_collisions(
-        variants, NUM_DAYS, conditions
-    )
     rust_results, rust_events = rust_propagator._detect_collisions(
         variants, NUM_DAYS, conditions
     )
 
-    def keys(events):
-        return sorted(zip(events.orbit_id.to_pylist(), events.variant_id.to_pylist()))
-
-    assert len(py_events) == 10
-    assert keys(py_events) == keys(rust_events)
-    assert sorted(py_results.orbit_id.to_pylist()) == sorted(
-        rust_results.orbit_id.to_pylist()
+    expected_keys = sorted(
+        zip(
+            frozen_assist_regression["impacts_variants_event_orbit_id"].tolist(),
+            frozen_assist_regression["impacts_variants_event_variant_id"].tolist(),
+        )
+    )
+    actual_keys = sorted(
+        zip(rust_events.orbit_id.to_pylist(), rust_events.variant_id.to_pylist())
+    )
+    assert len(rust_events) == 10
+    assert actual_keys == expected_keys
+    assert sorted(rust_results.orbit_id.to_pylist()) == sorted(
+        frozen_assist_regression["impacts_variants_result_orbit_id"].tolist()
     )
 
-    py_time = np.sort(py_events.coordinates.time.mjd().to_numpy(zero_copy_only=False))
     rust_time = np.sort(
         rust_events.coordinates.time.mjd().to_numpy(zero_copy_only=False)
     )
-    np.testing.assert_allclose(rust_time, py_time, rtol=0, atol=IMPACT_TIME_ATOL_DAYS)
+    np.testing.assert_allclose(
+        rust_time,
+        frozen_assist_regression["impacts_variants_event_time_mjd"],
+        rtol=0,
+        atol=IMPACT_TIME_ATOL_DAYS,
+    )
 
 
 def test_calculate_impacts_end_to_end(rust_propagator):

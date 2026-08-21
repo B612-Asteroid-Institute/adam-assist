@@ -115,20 +115,12 @@ def test_native_covariance_output_dictionary_has_flattened_covariance_rows() -> 
     assert np.isfinite(result["covariances"]).all()
 
 
-def test_sigma_point_covariance_matches_python_public_same_epoch(
-    python_reference_propagator,
+def test_sigma_point_covariance_matches_frozen_public_same_epoch(
+    frozen_assist_regression,
 ) -> None:
     orbits = _covariance_orbits()
     times = orbits.coordinates.time
 
-    expected = python_reference_propagator.propagate_orbits(
-        orbits,
-        times,
-        covariance=True,
-        covariance_method="sigma-point",
-        max_processes=1,
-        chunk_size=10,
-    )
     actual = ASSISTPropagator().propagate_orbits(
         orbits,
         times,
@@ -140,32 +132,24 @@ def test_sigma_point_covariance_matches_python_public_same_epoch(
 
     np.testing.assert_allclose(
         actual.coordinates.values,
-        expected.coordinates.values,
+        frozen_assist_regression["covariance_same_epoch_state"],
         atol=1.0e-14,
         rtol=0,
     )
     np.testing.assert_allclose(
         actual.coordinates.covariance.to_matrix(),
-        expected.coordinates.covariance.to_matrix(),
+        frozen_assist_regression["covariance_same_epoch_covariance"],
         atol=1.0e-18,
         rtol=0,
     )
 
 
-def test_sigma_point_covariance_matches_python_public_multiple_target_epochs(
-    python_reference_propagator,
+def test_sigma_point_covariance_matches_frozen_multiple_target_epochs(
+    frozen_assist_regression,
 ) -> None:
     orbits = _covariance_orbits()
     times = Timestamp.from_mjd([60000.25, 60001.0], scale="tdb")
 
-    expected = python_reference_propagator.propagate_orbits(
-        orbits,
-        times,
-        covariance=True,
-        covariance_method="sigma-point",
-        max_processes=1,
-        chunk_size=10,
-    )
     actual = ASSISTPropagator().propagate_orbits(
         orbits,
         times,
@@ -177,13 +161,13 @@ def test_sigma_point_covariance_matches_python_public_multiple_target_epochs(
 
     np.testing.assert_allclose(
         actual.coordinates.values,
-        expected.coordinates.values,
+        frozen_assist_regression["covariance_multiple_epochs_state"],
         atol=1.0e-14,
         rtol=0,
     )
     np.testing.assert_allclose(
         actual.coordinates.covariance.to_matrix(),
-        expected.coordinates.covariance.to_matrix(),
+        frozen_assist_regression["covariance_multiple_epochs_covariance"],
         atol=1.0e-25,
         rtol=0,
     )

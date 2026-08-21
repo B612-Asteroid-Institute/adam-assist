@@ -13,23 +13,22 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from adam_assist import ASSISTPropagator  # noqa: E402
+
+if TYPE_CHECKING:
+    from migration.parity._assist_oracle import LegacyAssistPropagator
 from migration.parity._assist_bench import (  # noqa: E402
     PERFORMANCE_COLUMNS,
     TWO_RUNTIME_COMPARISON_MODE,
     performance_timing_payload,
     time_native_rust,
     time_rust,
-)
-from migration.parity._assist_oracle import (  # noqa: E402
-    LEGACY_ASSIST_VENV_PYTHON,
-    LegacyAssistPropagator,
 )
 from migration.scripts import benchmark_assist_ephemeris as ephemeris  # noqa: E402
 from migration.scripts import benchmark_assist_public_semantics as base  # noqa: E402
@@ -139,6 +138,11 @@ def _benchmark(
 
 
 def main() -> int:
+    from migration.parity._assist_oracle import (
+        LEGACY_ASSIST_VENV_PYTHON,
+        LegacyAssistPropagator,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)

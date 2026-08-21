@@ -47,64 +47,67 @@ def _covariance_orbits() -> Orbits:
     )
 
 
-def test_variant_orbits_mapping_and_order_match_python_public(
-    python_reference_propagator,
+def test_variant_orbits_mapping_and_order_match_frozen_public_regression(
+    frozen_assist_regression,
 ) -> None:
     variants = VariantOrbits.create(_covariance_orbits(), method="sigma-point")
     times = Timestamp.from_mjd([60000.25, 60001.0], scale="tdb")
 
-    expected = python_reference_propagator.propagate_orbits(
-        variants, times, max_processes=1, chunk_size=100
-    )
     actual = RustASSISTPropagator().propagate_orbits(
         variants, times, max_processes=1, chunk_size=100
     )
 
     assert isinstance(actual, VariantOrbits)
-    assert actual.orbit_id.to_pylist() == expected.orbit_id.to_pylist()
-    assert actual.variant_id.to_pylist() == expected.variant_id.to_pylist()
+    assert (
+        actual.orbit_id.to_pylist()
+        == frozen_assist_regression["typed_variants_orbit_id"].tolist()
+    )
+    assert (
+        actual.variant_id.to_pylist()
+        == frozen_assist_regression["typed_variants_variant_id"].tolist()
+    )
     np.testing.assert_array_equal(
         actual.coordinates.time.mjd().to_numpy(zero_copy_only=False),
-        expected.coordinates.time.mjd().to_numpy(zero_copy_only=False),
+        frozen_assist_regression["typed_variants_time_mjd"],
     )
     np.testing.assert_allclose(
         actual.coordinates.values,
-        expected.coordinates.values,
+        frozen_assist_regression["typed_variants_state"],
         atol=1.0e-12,
         rtol=0,
     )
     np.testing.assert_array_equal(
         actual.weights.to_numpy(zero_copy_only=False),
-        expected.weights.to_numpy(zero_copy_only=False),
+        frozen_assist_regression["typed_variants_weights"],
     )
     np.testing.assert_array_equal(
         actual.weights_cov.to_numpy(zero_copy_only=False),
-        expected.weights_cov.to_numpy(zero_copy_only=False),
+        frozen_assist_regression["typed_variants_weights_cov"],
     )
 
 
-def test_non_tdb_utc_target_rescaling_matches_python_public(
-    python_reference_propagator,
+def test_non_tdb_utc_target_rescaling_matches_frozen_public_regression(
+    frozen_assist_regression,
 ) -> None:
     orbits = _covariance_orbits()
     utc_times = Timestamp.from_mjd([60000.25, 60001.0], scale="utc")
 
-    expected = python_reference_propagator.propagate_orbits(
-        orbits, utc_times, max_processes=1, chunk_size=100
-    )
     actual = RustASSISTPropagator().propagate_orbits(
         orbits, utc_times, max_processes=1, chunk_size=100
     )
 
     assert actual.coordinates.time.scale == "utc"
-    assert actual.orbit_id.to_pylist() == expected.orbit_id.to_pylist()
+    assert (
+        actual.orbit_id.to_pylist()
+        == frozen_assist_regression["typed_utc_orbit_id"].tolist()
+    )
     np.testing.assert_array_equal(
         actual.coordinates.time.mjd().to_numpy(zero_copy_only=False),
-        expected.coordinates.time.mjd().to_numpy(zero_copy_only=False),
+        frozen_assist_regression["typed_utc_time_mjd"],
     )
     np.testing.assert_allclose(
         actual.coordinates.values,
-        expected.coordinates.values,
+        frozen_assist_regression["typed_utc_state"],
         atol=1.0e-11,
         rtol=0,
     )

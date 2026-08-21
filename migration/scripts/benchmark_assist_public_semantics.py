@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pyarrow as pa
@@ -36,6 +36,9 @@ from naif_de440 import de440
 
 from adam_assist import ASSISTPropagator as RustASSISTPropagator
 
+if TYPE_CHECKING:
+    from migration.parity._assist_oracle import LegacyAssistPropagator
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -46,10 +49,6 @@ from migration.parity._assist_bench import (  # noqa: E402
     performance_timing_payload,
     time_native_rust,
     time_rust,
-)
-from migration.parity._assist_oracle import (  # noqa: E402
-    LEGACY_ASSIST_VENV_PYTHON,
-    LegacyAssistPropagator,
 )
 
 DEFAULT_OUTPUT = (
@@ -595,6 +594,11 @@ def _selected_lanes(lanes: list[str]) -> set[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from migration.parity._assist_oracle import (
+        LEGACY_ASSIST_VENV_PYTHON,
+        LegacyAssistPropagator,
+    )
+
     args = _build_arg_parser().parse_args(argv)
     if args.repeats < 3:
         raise ValueError("--repeats must be at least 3 to report p50/p95")

@@ -13,7 +13,7 @@ import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from adam_core.coordinates import (
@@ -32,6 +32,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from adam_assist import ASSISTPropagator  # noqa: E402
+
+if TYPE_CHECKING:
+    from migration.parity._assist_oracle import LegacyAssistPropagator
 from migration.parity._assist_bench import (  # noqa: E402
     PERFORMANCE_COLUMNS,
     TWO_RUNTIME_COMPARISON_MODE,
@@ -40,12 +43,10 @@ from migration.parity._assist_bench import (  # noqa: E402
     time_native_rust,
     time_rust,
 )
-from migration.parity._assist_oracle import (  # noqa: E402
-    LEGACY_ASSIST_VENV_PYTHON,
-    LegacyAssistPropagator,
-)
 
-DEFAULT_OUTPUT = REPO_ROOT / "migration" / "artifacts" / "assist_od_benchmark_2026-08-12.json"
+DEFAULT_OUTPUT = (
+    REPO_ROOT / "migration" / "artifacts" / "assist_od_benchmark_2026-08-12.json"
+)
 EPOCH_MJD = 60000.0
 TRUTH_STATE = np.array([1.2, 0.1, 0.05, -0.002, 0.016, 0.001])
 
@@ -55,8 +56,12 @@ def _make_orbit(state: np.ndarray, orbit_id: str) -> Orbits:
         orbit_id=[orbit_id],
         object_id=[orbit_id],
         coordinates=CartesianCoordinates.from_kwargs(
-            x=[state[0]], y=[state[1]], z=[state[2]],
-            vx=[state[3]], vy=[state[4]], vz=[state[5]],
+            x=[state[0]],
+            y=[state[1]],
+            z=[state[2]],
+            vx=[state[3]],
+            vy=[state[4]],
+            vz=[state[5]],
             time=Timestamp.from_mjd([EPOCH_MJD], scale="tdb"),
             origin=Origin.from_kwargs(code=["SUN"]),
             frame="ecliptic",
@@ -70,14 +75,18 @@ def _problem(rows: int) -> tuple[OrbitDeterminationObservations, Orbits]:
     )
     observers = Observers.from_code("X05", times)
     truth = _make_orbit(TRUTH_STATE, "truth")
-    predicted = ASSISTPropagator().generate_ephemeris(
-        truth,
-        observers,
-        covariance=False,
-        max_processes=1,
-        predict_magnitudes=False,
-        predict_phase_angle=False,
-    ).coordinates
+    predicted = (
+        ASSISTPropagator()
+        .generate_ephemeris(
+            truth,
+            observers,
+            covariance=False,
+            max_processes=1,
+            predict_magnitudes=False,
+            predict_phase_angle=False,
+        )
+        .coordinates
+    )
     arcsec_variance = (1.0 / 3600.0) ** 2
     covariance = np.tile(
         np.diag([1.0, arcsec_variance, arcsec_variance, 1.0, 1.0, 1.0]),
@@ -248,6 +257,11 @@ def _benchmark_operation(
 
 
 def main() -> int:
+    from migration.parity._assist_oracle import (
+        LEGACY_ASSIST_VENV_PYTHON,
+        LegacyAssistPropagator,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)

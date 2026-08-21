@@ -1,8 +1,14 @@
+import hashlib
 import importlib.util
+import json
 import tomllib
+from importlib.metadata import version
 from pathlib import Path
 
+from adam_core.utils.spice import DEFAULT_KERNELS
+
 from adam_assist.version import __version__
+from migration.scripts import benchmark_current
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -82,3 +88,76 @@ def test_python_preview_version_matches_cargo_semver() -> None:
     cargo_version = _cargo_manifest()["package"]["version"]
     assert cargo_version == "0.4.0-rc.6"
     assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc6"
+
+
+def test_current_benchmark_ci_is_the_complete_35_workload_grid() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        command = tomllib.load(pyproject_file)["tool"]["pdm"]["scripts"][
+            "benchmark-current-ci"
+        ]
+
+    assert "--lanes tiny small large" in command
+    assert "--repeats 5" in command
+    assert "--require-native" in command
+    assert "--quick" not in command
+
+    propagation_count = len(benchmark_current.propagation._workloads())
+    nongrav_count = len(benchmark_current.nongrav._workloads())
+    ephemeris_workloads = benchmark_current.ephemeris._workloads()
+    ephemeris_count = sum(not workload.covariance for workload in ephemeris_workloads)
+    covariance_count = sum(workload.covariance for workload in ephemeris_workloads)
+    collision_count = 3
+    od_count = 5
+
+    assert (
+        propagation_count,
+        nongrav_count,
+        ephemeris_count,
+        covariance_count,
+        collision_count,
+        od_count,
+    ) == (17, 3, 5, 2, 3, 5)
+    assert (
+        sum(
+            (
+                propagation_count,
+                nongrav_count,
+                ephemeris_count,
+                covariance_count,
+                collision_count,
+                od_count,
+            )
+        )
+        == 35
+    )
+
+
+def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
+    fixture_dir = ROOT / "tests" / "fixtures"
+    metadata = json.loads(
+        (fixture_dir / "assist_legacy_regression_v1.json").read_text()
+    )
+    fixture = fixture_dir / metadata["fixture"]
+
+    assert (
+        hashlib.sha256(fixture.read_bytes()).hexdigest() == metadata["fixture_sha256"]
+    )
+    assert metadata["array_count"] == 53
+    current_kernel_provenance = {
+        "naif_eop_high_prec_version": version("naif-eop-high-prec"),
+        "kernels": [
+            {
+                "name": Path(kernel).name,
+                "size_bytes": Path(kernel).stat().st_size,
+                "sha256": hashlib.sha256(Path(kernel).read_bytes()).hexdigest(),
+            }
+            for kernel in DEFAULT_KERNELS
+        ],
+    }
+    assert metadata["spice_kernel_provenance"] == current_kernel_provenance
+
+    rust_tests = ROOT / "tests" / "rust"
+    source = "\n".join(path.read_text() for path in rust_tests.glob("*.py"))
+    assert "python_reference_propagator" not in source
+    assert "_assist_oracle" not in source
+    assert ".legacy-assist-venv" not in source
