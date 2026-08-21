@@ -47,6 +47,10 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     assert "full-current-benchmark:" in workflow
     assert "needs: artifact-acceptance" in workflow
     assert "Full 35-workload current benchmark" in workflow
+    assert (
+        "cargo test --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored"
+        in workflow
+    )
     assert "--lanes tiny small large" in workflow
     assert "--repeats 5" in workflow
     assert "--require-native" in workflow

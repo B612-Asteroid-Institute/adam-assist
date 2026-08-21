@@ -132,6 +132,24 @@ def test_current_benchmark_ci_is_the_complete_35_workload_grid() -> None:
     )
 
 
+def test_rust_public_semantics_fixture_uses_the_final_legacy_authority() -> None:
+    fixture_path = (
+        ROOT
+        / "migration"
+        / "artifacts"
+        / "assist_public_semantics_fixture_2026-05-20.json"
+    )
+    assert hashlib.sha256(fixture_path.read_bytes()).hexdigest() == (
+        "31de414652f86a4d23399610e32407bb11e37022e5c28af27e1fbf85dc1aa913"
+    )
+    assert json.loads(fixture_path.read_text())["packages"] == {
+        "adam-assist": "0.3.11.dev12+gcb5bb14",
+        "assist": "1.2.3",
+        "rebound": "4.6.0",
+        "adam-core": "0.5.7.dev39+g757c09fc",
+    }
+
+
 def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
     fixture_dir = ROOT / "tests" / "fixtures"
     metadata = json.loads(
