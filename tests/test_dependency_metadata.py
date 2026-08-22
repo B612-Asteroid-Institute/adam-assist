@@ -44,6 +44,12 @@ def test_canonical_sys_crates_are_pinned_without_assist_rs() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
 
 
+def test_dev_lint_tool_is_pinned() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        pyproject = tomllib.load(pyproject_file)
+    assert "ruff==0.16.4" in pyproject["project"]["optional-dependencies"]["dev"]
+
+
 def test_preview_dependencies_are_exact_public_releases() -> None:
     assert "adam-core==0.5.6rc5" in _project_dependencies()
     manifest = _cargo_manifest()

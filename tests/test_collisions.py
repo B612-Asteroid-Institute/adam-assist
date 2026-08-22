@@ -21,7 +21,7 @@ def test_detect_collisions():
         collision_distance=[7000],
         stopping_condition=[True],
     )
-    results, collisions = propagator._detect_collisions(
+    _results, collisions = propagator._detect_collisions(
         orbits, 60, collision_conditions
     )
 
@@ -34,7 +34,7 @@ def test_detect_collisions():
         collision_distance=[10000, 7000],
         stopping_condition=[False, True],
     )
-    results, collisions = propagator._detect_collisions(
+    _results, collisions = propagator._detect_collisions(
         orbits, 60, collision_conditions
     )
 

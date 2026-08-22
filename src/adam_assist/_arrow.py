@@ -168,6 +168,6 @@ def orbits_from_flat_record_batch(batch: pa.RecordBatch) -> Orbits:
 __all__ = [
     "ORBIT_FLAT_FIELDS",
     "SCHEMA_NAME",
-    "orbits_to_flat_record_batch",
     "orbits_from_flat_record_batch",
+    "orbits_to_flat_record_batch",
 ]

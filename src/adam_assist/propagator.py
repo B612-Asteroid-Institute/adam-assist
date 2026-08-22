@@ -45,7 +45,7 @@ from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 
 from ._native import NativeAssistPropagator
-from .version import __version__ as __version__
+from .version import __version__ as __version__  # noqa: PLC0414
 
 C = c.C
 
@@ -1057,23 +1057,23 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
                 impact_states[mask],
                 Timestamp.from_jd(pa.array(impact_times[mask]), scale="tdb"),
             )
-            kwargs: dict[str, Any] = dict(
-                orbit_id=rows.orbit_id,
-                coordinates=rows.coordinates,
-                condition_id=pa.repeat(condition.condition_id[0].as_py(), len(rows)),
-                collision_coordinates=transform_coordinates(
+            kwargs: dict[str, Any] = {
+                "orbit_id": rows.orbit_id,
+                "coordinates": rows.coordinates,
+                "condition_id": pa.repeat(condition.condition_id[0].as_py(), len(rows)),
+                "collision_coordinates": transform_coordinates(
                     rows.coordinates,
                     representation_out=SphericalCoordinates,
                     origin_out=condition.collision_object.as_OriginCodes(),
                     frame_out="ecliptic",
                 ),
-                collision_object=condition.collision_object.take(
+                "collision_object": condition.collision_object.take(
                     [0 for _ in range(len(rows))]
                 ),
-                stopping_condition=pa.repeat(
+                "stopping_condition": pa.repeat(
                     bool(condition.stopping_condition[0].as_py()), len(rows)
                 ),
-            )
+            }
             if isinstance(orbits, VariantOrbits):
                 kwargs["variant_id"] = rows.variant_id
             events.append(CollisionEvent.from_kwargs(**kwargs))

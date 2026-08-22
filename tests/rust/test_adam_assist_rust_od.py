@@ -96,8 +96,8 @@ def od_problem(frozen_assist_regression):
 def test_rust_od_recovers_truth(od_problem):
     observations, initial = od_problem
 
-    fitted_rust, chi2, iterations, converged = RustASSISTPropagator().fit_least_squares(
-        initial, observations
+    fitted_rust, chi2, _iterations, converged = (
+        RustASSISTPropagator().fit_least_squares(initial, observations)
     )
     assert converged
     # Current Rust ephemeris velocity-floor yields chi2=0.00335 while the

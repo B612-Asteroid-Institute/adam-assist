@@ -42,7 +42,7 @@ def test_benchmark_ephemeris_generation(benchmark):
 def test_benchmark_impact_detection(benchmark):
     impactor = Orbits.from_parquet("tests/data/I00007_orbit.parquet")[0]
     prop = ASSISTPropagator()
-    variants, impacts = benchmark(
+    variants, _impacts = benchmark(
         calculate_impacts,
         impactor,
         60,

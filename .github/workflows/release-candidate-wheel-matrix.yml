@@ -241,7 +241,7 @@ jobs:
           PY
       - name: Run direct Rust frozen-fixture and kernel integrations
         env:
-          ADAM_CORE_RS_ASSIST_RESIDUALS_PATH: migration/artifacts/assist_public_semantics_residuals_ci.json
+          ADAM_CORE_RS_ASSIST_RESIDUALS_PATH: ${{ github.workspace }}/migration/artifacts/assist_public_semantics_residuals_ci.json
         run: cargo test --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored
       - name: Run complete JPL Horizons accuracy matrix
         run: python -m pytest -m live tests/test_propagate.py tests/test_ephemeris.py

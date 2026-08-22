@@ -45,7 +45,7 @@ Source = "https://github.com/B612-Asteroid-Institute/adam-assist"
 
 [project.optional-dependencies]
 dev = [
-    "ruff",
+    "ruff==0.16.4",
     "pdm",
     "mypy",
     "maturin>=1.7,<2",
