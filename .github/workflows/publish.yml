@@ -17,14 +17,8 @@ on:
         required: true
         default: 0.5.6rc5
         type: string
-      repository:
-        description: Destination index
-        required: true
-        default: testpypi
-        type: choice
-        options: [testpypi, pypi]
       confirmation:
-        description: Type "publish adam-assist <version> from <sha> to <repository>"
+        description: Type "publish adam-assist <version> from <sha> to pypi"
         required: true
         type: string
 
@@ -50,11 +44,10 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SHA: ${{ github.sha }}
-          DESTINATION: ${{ inputs.repository }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/tags/v$EXPECTED_VERSION"
-          test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to $DESTINATION"
+          test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
       - name: Verify source prerelease and exact adam-core dependency
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
@@ -74,18 +67,35 @@ jobs:
           if expected not in pyproject["project"]["dependencies"]:
               raise SystemExit(f"missing exact preview dependency {expected}")
           cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
-          cargo_version = cargo["package"]["version"]
+          package = cargo["package"]
+          cargo_version = package["version"]
           if cargo_version != "0.4.0-rc.6" or str(assist) != "0.4.0rc6":
               raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
+          if package["name"] != "adam_assist" or package["rust-version"] != "1.87":
+              raise SystemExit(f"unexpected public Rust package metadata: {package}")
+          if package.get("publish", True) is not True:
+              raise SystemExit("adam_assist Rust crate is not publishable")
           for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
               if cargo["dependencies"].get(name) != "=0.1.0-rc.4":
                   raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.4")
-          kernel_data = cargo["dev-dependencies"].get("adam_core_rs_kernel_data")
-          if kernel_data != {"version": "=0.1.0-rc.4", "default-features": False}:
+          kernel_data = cargo["dependencies"].get("adam_core_rs_kernel_data")
+          expected_kernel_data = {
+              "version": "=0.1.0-rc.4",
+              "default-features": False,
+              "optional": True,
+          }
+          if kernel_data != expected_kernel_data:
               raise SystemExit("adam_core_rs_kernel_data is not exact-pinned")
           if Path("rust/vendor").exists():
               raise SystemExit("temporary vendored core crates must be absent")
           PY
+      - name: Require the matching public Rust crate
+        run: |
+          set -euo pipefail
+          crate_json="$(curl --fail --silent --show-error \
+            https://crates.io/api/v1/crates/adam_assist/0.4.0-rc.6)"
+          test "$(jq -r .version.num <<<"$crate_json")" = "0.4.0-rc.6"
+          test "$(jq -r .version.yanked <<<"$crate_json")" = "false"
       - name: Verify acceptance provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,25 +214,7 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish-testpypi:
-    if: inputs.repository == 'testpypi'
-    needs: collect-tested-artifacts
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi-preview
-      url: https://test.pypi.org/p/adam-assist
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: adam-assist-${{ inputs.expected_version }}-tested-publication-set
-          path: dist
-      - run: rm dist/SHA256SUMS
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
   publish-pypi:
-    if: inputs.repository == 'pypi'
     needs: collect-tested-artifacts
     runs-on: ubuntu-latest
     environment:

@@ -8,18 +8,25 @@
 /// Errors used by adam-assist propagation orchestration.
 #[derive(Debug, thiserror::Error)]
 pub enum AssistError {
+    /// REBOUND stopped because the simulation contains no particles.
     #[error("integration ended: no particles remain in the simulation")]
     NoParticles,
+    /// REBOUND stopped at a configured close encounter.
     #[error("integration ended: close encounter")]
     CloseEncounter,
+    /// REBOUND stopped because a particle escaped.
     #[error("integration ended: particle escape")]
     Escape,
+    /// REBOUND stopped because particles collided.
     #[error("integration ended: collision")]
     Collision,
+    /// REBOUND returned an unclassified integration status code.
     #[error("REBOUND integration failed with status {0}")]
     IntegrationFailed(i32),
+    /// ASSIST could not load or query its ephemeris.
     #[error("ASSIST ephemeris error: {0}")]
     EphemerisError(String),
+    /// Another ASSIST orchestration error.
     #[error("{0}")]
     Other(String),
 }
@@ -47,4 +54,5 @@ impl From<libassist_sys::Error> for AssistError {
     }
 }
 
+/// Result type returned by public adam-assist operations.
 pub type AssistResult<T> = std::result::Result<T, AssistError>;

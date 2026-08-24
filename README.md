@@ -32,6 +32,31 @@ macOS Apple silicon/Intel. Windows is currently unsupported because
 ``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
 unsupported.
 
+### Pure Rust
+
+Rust-only consumers can use the same backend from crates.io without Python:
+
+```toml
+[dependencies]
+adam_core = "=0.1.0-rc.4"
+adam_assist = "=0.4.0-rc.6"
+```
+
+```rust,no_run
+use adam_assist::{AssistPropagator, AssistResult};
+
+fn main() -> AssistResult<()> {
+    let propagator = AssistPropagator::from_default_kernels()?;
+    let _integrator = propagator.integrator();
+    Ok(())
+}
+```
+
+The default resolver loads DE440 and SB441-n16 through adam-core's environment,
+installed-package, cache, and checksummed-fetch policy. Explicit/offline users
+can call `AssistPropagator::from_paths` and can disable default resolver support
+with `default-features = false`.
+
 ## Usage
 
 ### Propagating Orbits

@@ -17,13 +17,13 @@ Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
 
 - `libassist-sys` and `librebound-sys` own reusable FFI and RAII bindings.
 - `adam-assist` owns propagation/ephemeris orchestration, package semantics,
-  and its GPL Python wheel.
+  its GPL `adam_assist` Rust crate, and its GPL Python wheel.
 - `adam-core` owns permissive generic contracts and cross-package integration.
 
 The temporary identified snapshots under `rust/vendor` were removed after the
-adam-core Rust crates were published. The `0.4.0rc6` package exact-pins the
-public `adam_core_rs_coords`, `adam_core_rs_spice`, and test-only
-`adam_core_rs_kernel_data` crates to `=0.1.0-rc.4`; its Python metadata
+adam-core Rust crates were published. The `0.4.0-rc.6` Rust crate exact-pins
+public `adam_core_rs_coords`, `adam_core_rs_spice`, and optional default
+`adam_core_rs_kernel_data` dependencies to `=0.1.0-rc.4`; its Python metadata
 exact-pins `adam-core==0.5.6rc5`.
 
 ## Parity
@@ -39,15 +39,22 @@ name.
 
 ## Release candidate
 
-The opt-in Python preview versions are:
+The opt-in preview versions are:
 
 ```text
-adam-core==0.5.6rc5
-adam-assist==0.4.0rc6
+crates.io: adam_core = "=0.1.0-rc.4"
+crates.io: adam_assist = "=0.4.0-rc.6"
+PyPI: adam-core==0.5.6rc5
+PyPI: adam-assist==0.4.0rc6
 ```
 
-Pip excludes these from ordinary stable resolution. The adam-assist RC metadata
-must exact-pin the core RC before publication. Its 12 native wheels contain the
+Cargo and pip exclude these from ordinary stable resolution. The first
+`adam_assist` crate publication requires a narrowly-scoped bootstrap token;
+that token is revoked after creating the crate and configuring
+`publish-rust-crate.yml` as its crates.io trusted publisher. Candidate and
+publication workflows pass the same tested `.crate` bytes without repackaging.
+The adam-assist RC metadata must exact-pin the core RC before publication. Its
+12 native wheels contain the
 Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into
 adam-assist once; adam-core generic algorithms and ASSIST orchestration then

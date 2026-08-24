@@ -23,6 +23,7 @@
 use crate::{AssistError as Error, AssistResult as Result};
 use libassist_sys::{ffi, AssistSim, Ephemeris};
 use librebound_sys::{IntegratorConfig, Simulation};
+use std::path::Path;
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
 
@@ -35,8 +36,31 @@ pub struct AssistData {
 }
 
 impl AssistData {
+    /// Wrap an already loaded ASSIST ephemeris.
     pub fn new(ephem: Ephemeris) -> Self {
         Self { ephem }
+    }
+
+    /// Load the planetary and small-body ASSIST ephemeris kernels explicitly.
+    pub fn from_paths(
+        planets_path: impl AsRef<Path>,
+        asteroids_path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Ok(Self::new(Ephemeris::from_paths(
+            planets_path.as_ref(),
+            asteroids_path.as_ref(),
+        )?))
+    }
+
+    /// Resolve and load DE440 plus SB441-n16 using adam-core's pure-Rust
+    /// override -> installed-Python -> cache -> verified-wheel policy.
+    #[cfg(feature = "kernel-data")]
+    pub fn from_default_kernels() -> Result<Self> {
+        let resolver = adam_core_rs_kernel_data::Resolver::from_env();
+        let (planets, asteroids) = resolver
+            .assist_ephemeris_paths()
+            .map_err(|error| Error::Other(format!("failed to resolve ASSIST kernels: {error}")))?;
+        Self::from_paths(planets, asteroids)
     }
 }
 
@@ -141,7 +165,7 @@ const COS_EPS: f64 = 0.917_482_062_069_181_8;
 /// rotation matrices (`np.sin(Constants.OBLIQUITY)`).
 const SIN_EPS: f64 = 0.397_777_155_931_913_65;
 
-/// Rotate a 6-element state vector [x,y,z,vx,vy,vz] from equatorial to ecliptic.
+/// Rotate a 6-element state vector `[x, y, z, vx, vy, vz]` from equatorial to ecliptic.
 pub fn equatorial_to_ecliptic(state: &[f64; 6]) -> [f64; 6] {
     let [x, y, z, vx, vy, vz] = *state;
     [

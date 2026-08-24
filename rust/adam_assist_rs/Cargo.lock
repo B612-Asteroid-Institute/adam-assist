@@ -3,12 +3,16 @@
 version = 4
 
 [[package]]
-name = "adam_assist_rs"
+name = "adam_assist"
 version = "0.4.0-rc.6"
 dependencies = [
  "adam_core_rs_coords",
  "adam_core_rs_kernel_data",
  "adam_core_rs_spice",
+ "icu_locale_core",
+ "icu_normalizer",
+ "icu_properties",
+ "icu_provider",
  "libassist-sys",
  "librebound-sys",
  "ndarray",

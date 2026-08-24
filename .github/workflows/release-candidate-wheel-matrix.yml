@@ -10,7 +10,7 @@ on:
       adam_core_ref:
         description: Exact adam-core source revision to test
         required: true
-        default: release-candidate/adam-core-0.5.6rc5
+        default: 61cb2779b49ab2a641975942e3ce82d99b461ece
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'release-candidate/adam-core-0.5.6rc5' }}
+  ADAM_CORE_REF: ${{ inputs.adam_core_ref || '61cb2779b49ab2a641975942e3ce82d99b461ece' }}
   PIP_ONLY_BINARY: ":all:"
   ADAM_CORE_PREVIEW_VERSION: "0.5.6rc5"
   ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc6"

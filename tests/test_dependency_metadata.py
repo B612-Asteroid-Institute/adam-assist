@@ -37,11 +37,43 @@ def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
     assert {"assist", "rebound", "ray", "spiceypy"}.isdisjoint(names)
 
 
-def test_canonical_sys_crates_are_pinned_without_assist_rs() -> None:
-    dependencies = _cargo_manifest()["dependencies"]
+def test_public_rust_crate_metadata_and_dependencies() -> None:
+    manifest = _cargo_manifest()
+    package = manifest["package"]
+    assert package["name"] == "adam_assist"
+    assert package["version"] == "0.4.0-rc.6"
+    assert package["rust-version"] == "1.87"
+    assert package.get("publish", True) is True
+    assert package["license"] == "GPL-3.0"
+    assert package["readme"] == "README.md"
+
+    assert manifest["features"]["default"] == ["kernel-data"]
+    assert manifest["features"]["kernel-data"] == ["dep:adam_core_rs_kernel_data"]
+    dependencies = manifest["dependencies"]
     assert "assist-rs" not in dependencies
     assert dependencies["libassist-sys"] == "=1.2.1"
     assert dependencies["librebound-sys"] == "=4.6.0"
+    kernel_dependency = {
+        "version": "=0.1.0-rc.4",
+        "default-features": False,
+    }
+    assert dependencies["adam_core_rs_kernel_data"] == {
+        **kernel_dependency,
+        "optional": True,
+    }
+    assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == (
+        kernel_dependency
+    )
+    for name in (
+        "icu_locale_core",
+        "icu_normalizer",
+        "icu_properties",
+        "icu_provider",
+    ):
+        assert dependencies[name] == {
+            "version": "=2.2.0",
+            "default-features": False,
+        }
 
 
 def test_dev_lint_tool_is_pinned() -> None:
@@ -56,16 +88,12 @@ def test_preview_dependencies_are_exact_public_releases() -> None:
     dependencies = manifest["dependencies"]
     assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.4"
     assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.4"
-    assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == {
-        "version": "=0.1.0-rc.4",
-        "default-features": False,
-    }
     assert not (ROOT / "rust" / "vendor").exists()
 
 
 def test_lock_matches_exact_published_core_crates() -> None:
     packages = _cargo_lock_packages()
-    assert packages["adam_assist_rs"]["version"] == "0.4.0-rc.6"
+    assert packages["adam_assist"]["version"] == "0.4.0-rc.6"
     for name in (
         "adam_core_rs_autodiff",
         "adam_core_rs_coords",
@@ -77,6 +105,13 @@ def test_lock_matches_exact_published_core_crates() -> None:
         assert packages[name]["source"] == (
             "registry+https://github.com/rust-lang/crates.io-index"
         )
+    for name in (
+        "icu_locale_core",
+        "icu_normalizer",
+        "icu_properties",
+        "icu_provider",
+    ):
+        assert packages[name]["version"] == "2.2.0"
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:

@@ -1,3 +1,6 @@
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
+
 //! GPL ASSIST adapter for adam-core Rust propagation contracts.
 //!
 //! This crate is the deliberate GPL boundary for ASSIST/REBOUND-backed
@@ -19,8 +22,10 @@ use adam_core_rs_coords::{
     OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider, TimeArray, TimeScale,
     TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
 };
+pub use libassist_sys::Ephemeris;
 use libassist_sys::{ffi, AssistSim};
-use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig, Simulation};
+use librebound_sys::Simulation;
+pub use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::sync::Arc;
@@ -40,6 +45,8 @@ mod python;
 
 const BACKEND_NAME: &str = "assist_rs";
 
+/// ASSIST-backed implementation of adam-core propagation, ephemeris,
+/// covariance, and collision contracts.
 #[derive(Clone)]
 pub struct AssistPropagator {
     data: Arc<AssistData>,
@@ -47,6 +54,8 @@ pub struct AssistPropagator {
 }
 
 impl AssistPropagator {
+    /// Construct a propagator from already-loaded, shareable ASSIST data and
+    /// the public default IAS15 configuration.
     pub fn new(data: Arc<AssistData>) -> Self {
         Self {
             data,
@@ -54,14 +63,36 @@ impl AssistPropagator {
         }
     }
 
+    /// Load explicit ASSIST ephemeris paths and construct a propagator with
+    /// the public default integrator configuration.
+    pub fn from_paths(
+        planets_path: impl AsRef<std::path::Path>,
+        asteroids_path: impl AsRef<std::path::Path>,
+    ) -> AssistResult<Self> {
+        Ok(Self::new(Arc::new(AssistData::from_paths(
+            planets_path,
+            asteroids_path,
+        )?)))
+    }
+
+    /// Resolve DE440 and SB441-n16 with adam-core's pure-Rust kernel-data
+    /// policy and construct a propagator with the public default integrator.
+    #[cfg(feature = "kernel-data")]
+    pub fn from_default_kernels() -> AssistResult<Self> {
+        Ok(Self::new(Arc::new(AssistData::from_default_kernels()?)))
+    }
+
+    /// Construct a propagator with an explicit IAS15 configuration.
     pub fn with_integrator(data: Arc<AssistData>, integrator: IntegratorConfig) -> Self {
         Self { data, integrator }
     }
 
+    /// Return the shared ASSIST ephemeris data.
     pub fn data(&self) -> &Arc<AssistData> {
         &self.data
     }
 
+    /// Return this propagator's IAS15 configuration.
     pub fn integrator(&self) -> IntegratorConfig {
         self.integrator
     }
@@ -478,8 +509,11 @@ fn particle_state(particle: ffi::reb_particle) -> [f64; 6] {
 /// detection removes the particle from the simulation.
 #[derive(Debug, Clone, Copy)]
 pub struct CollisionConditionSpec {
+    /// ASSIST body identifier used for the distance check.
     pub body: i32,
+    /// Collision threshold in kilometers.
     pub distance_km: f64,
+    /// Whether detection removes the particle from the simulation.
     pub stopping: bool,
 }
 
@@ -510,13 +544,21 @@ pub struct CollisionConditionSpec {
 /// gates stay at step resolution by design.
 #[derive(Debug, Clone, Default)]
 pub struct CollisionDetectionOutput {
+    /// Input indices of particles that survived through their integration horizon.
     pub final_indices: Vec<usize>,
+    /// Final barycentric-equatorial states for surviving particles.
     pub final_states: Vec<[f64; 6]>,
+    /// Last simulation time, retained for compatibility with common-horizon calls.
     pub final_time_jd_tdb: f64,
+    /// Per-survivor final simulation times as TDB Julian dates.
     pub final_times_jd_tdb: Vec<f64>,
+    /// Input indices of particles detected inside a collision threshold.
     pub impact_indices: Vec<usize>,
+    /// Condition index that detected each corresponding impact.
     pub impact_condition_indices: Vec<usize>,
+    /// Barycentric-equatorial states at first in-threshold observation.
     pub impact_states: Vec<[f64; 6]>,
+    /// Step-resolution first-observation times as TDB Julian dates.
     pub impact_times_jd_tdb: Vec<f64>,
 }
 
@@ -815,6 +857,8 @@ fn assist_non_gravitational_parameters(
     Ok(Some(NonGravParams::new(a1, a2, a3)))
 }
 
+/// Mutable per-worker ASSIST propagation state implementing adam-core's
+/// [`PropagatorShard`] contract.
 #[derive(Clone)]
 pub struct AssistShard {
     data: Arc<AssistData>,
@@ -823,6 +867,8 @@ pub struct AssistShard {
 }
 
 impl AssistShard {
+    /// Construct a worker shard with shared ephemeris data, IAS15 settings,
+    /// and an explicit state-transition-matrix policy.
     pub fn new(data: Arc<AssistData>, integrator: IntegratorConfig, compute_stm: bool) -> Self {
         Self {
             data,
@@ -2245,12 +2291,8 @@ mod tests {
 
     fn live_propagator_from_env() -> AssistPropagator {
         let (planets, asteroids) = live_kernel_paths();
-        let ephem = libassist_sys::Ephemeris::from_paths(
-            std::path::Path::new(&planets),
-            std::path::Path::new(&asteroids),
-        )
-        .expect("failed to load ASSIST ephemeris kernels");
-        AssistPropagator::new(std::sync::Arc::new(AssistData::new(ephem)))
+        AssistPropagator::from_paths(planets, asteroids)
+            .expect("failed to load ASSIST ephemeris kernels")
     }
 
     fn json_array<'a>(value: &'a Value, field: &str) -> &'a Vec<Value> {
