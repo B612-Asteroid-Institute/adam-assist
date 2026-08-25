@@ -98,12 +98,11 @@ def test_dev_lint_tool_is_pinned() -> None:
 
 def test_preview_dependencies_are_exact_public_releases() -> None:
     dependencies = _project_dependencies()
-    assert "adam-core==0.5.6rc5" in dependencies
-    for requirement in (
+    assert dependencies == [
+        "adam-core==0.5.6rc5",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
-    ):
-        assert requirement in dependencies
+    ]
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         dev_dependencies = tomllib.load(pyproject_file)["project"][
             "optional-dependencies"

@@ -23,9 +23,6 @@ dependencies = [
     "adam-core==0.5.6rc5",
     "naif-de440==2020.12.21.1",
     "jpl-small-bodies-de441-n16==2021.3.31.1",
-    "numpy",
-    "pyarrow",
-    "quivr",
 ]
 
 [build-system]
