@@ -23,9 +23,64 @@
 use crate::{AssistError as Error, AssistResult as Result};
 use libassist_sys::{ffi, AssistSim, Ephemeris};
 use librebound_sys::{IntegratorConfig, Simulation};
+#[cfg(feature = "kernel-data")]
+use sha2::{Digest, Sha256};
+#[cfg(feature = "kernel-data")]
+use std::io::{BufReader, Read};
 use std::path::Path;
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
+
+#[cfg(feature = "kernel-data")]
+const DE440_SIZE_BYTES: u64 = 119_799_808;
+#[cfg(feature = "kernel-data")]
+const DE440_SHA256: &str = "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5";
+#[cfg(feature = "kernel-data")]
+const SB441_N16_SIZE_BYTES: u64 = 645_727_232;
+#[cfg(feature = "kernel-data")]
+const SB441_N16_SHA256: &str = "919d612ce3c72a78fc7158f9120156542d0f21e6b8b052e4c1339c759747fd90";
+
+#[cfg(feature = "kernel-data")]
+fn verify_kernel_identity(
+    path: &Path,
+    label: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<()> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| Error::Other(format!("failed to open {label} kernel: {error}")))?;
+    let size = file
+        .metadata()
+        .map_err(|error| Error::Other(format!("failed to inspect {label} kernel: {error}")))?
+        .len();
+    if size != expected_size {
+        return Err(Error::Other(format!(
+            "{label} kernel size mismatch for {}: expected {expected_size}, got {size}",
+            path.display()
+        )));
+    }
+
+    let mut reader = BufReader::new(file);
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| Error::Other(format!("failed to read {label} kernel: {error}")))?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    let actual_sha256 = format!("{:x}", hasher.finalize());
+    if actual_sha256 != expected_sha256 {
+        return Err(Error::Other(format!(
+            "{label} kernel SHA-256 mismatch for {}: expected {expected_sha256}, got {actual_sha256}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
 
 /// The data resource every propagation entry point needs: the JPL SPK
 /// [`Ephemeris`], loaded once (from `de440.bsp` + `sb441-n16.bsp`) and shared
@@ -52,14 +107,22 @@ impl AssistData {
         )?))
     }
 
-    /// Resolve and load DE440 plus SB441-n16 using adam-core's pure-Rust
-    /// override -> installed-Python -> cache -> verified-wheel policy.
+    /// Resolve DE440 plus SB441-n16 using adam-core's pure-Rust override ->
+    /// installed-Python -> cache -> verified-wheel policy, then verify the
+    /// reviewed file size and SHA-256 before loading either ephemeris.
     #[cfg(feature = "kernel-data")]
     pub fn from_default_kernels() -> Result<Self> {
         let resolver = adam_core_rs_kernel_data::Resolver::from_env();
         let (planets, asteroids) = resolver
             .assist_ephemeris_paths()
             .map_err(|error| Error::Other(format!("failed to resolve ASSIST kernels: {error}")))?;
+        verify_kernel_identity(&planets, "DE440", DE440_SIZE_BYTES, DE440_SHA256)?;
+        verify_kernel_identity(
+            &asteroids,
+            "SB441-n16",
+            SB441_N16_SIZE_BYTES,
+            SB441_N16_SHA256,
+        )?;
         Self::from_paths(planets, asteroids)
     }
 }
@@ -986,6 +1049,28 @@ fn mjd_to_assist_time(mjd_tdb: f64, jd_ref: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "kernel-data")]
+    #[test]
+    fn kernel_identity_rejects_wrong_size_and_digest() {
+        let path = std::env::temp_dir().join(format!(
+            "adam-assist-kernel-identity-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"kernel").unwrap();
+        verify_kernel_identity(
+            &path,
+            "test",
+            6,
+            "6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c",
+        )
+        .unwrap();
+        let size_error = verify_kernel_identity(&path, "test", 7, "unused").unwrap_err();
+        assert!(size_error.to_string().contains("size mismatch"));
+        let digest_error = verify_kernel_identity(&path, "test", 6, &"0".repeat(64)).unwrap_err();
+        assert!(digest_error.to_string().contains("SHA-256 mismatch"));
+        std::fs::remove_file(path).unwrap();
+    }
 
     // ── frame rotation contracts (moved from assist-rs coordinates.rs) ─────
 

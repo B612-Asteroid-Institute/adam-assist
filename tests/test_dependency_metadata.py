@@ -30,6 +30,12 @@ def _cargo_lock_packages() -> dict[str, dict]:
     return {package["name"]: package for package in packages}
 
 
+def _pdm_lock_packages() -> dict[str, dict]:
+    with (ROOT / "pdm.lock").open("rb") as lock_file:
+        packages = tomllib.load(lock_file)["package"]
+    return {package["name"]: package for package in packages}
+
+
 def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
     names = {
         dependency.split("=")[0].split(">")[0] for dependency in _project_dependencies()
@@ -46,13 +52,21 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert package.get("publish", True) is True
     assert package["license"] == "GPL-3.0"
     assert package["readme"] == "README.md"
+    crate_readme = (ROOT / "rust" / "adam_assist_rs" / package["readme"]).read_text()
+    assert "ADAM_CORE_KERNEL_DE440" in crate_readme
+    assert "ADAM_CORE_KERNEL_SB441_N16" in crate_readme
+    assert "ADAM_CORE_RS_ASSIST_PLANETS_PATH" not in crate_readme
 
     assert manifest["features"]["default"] == ["kernel-data"]
-    assert manifest["features"]["kernel-data"] == ["dep:adam_core_rs_kernel_data"]
+    assert manifest["features"]["kernel-data"] == [
+        "dep:adam_core_rs_kernel_data",
+        "dep:sha2",
+    ]
     dependencies = manifest["dependencies"]
     assert "assist-rs" not in dependencies
     assert dependencies["libassist-sys"] == "=1.2.1"
     assert dependencies["librebound-sys"] == "=4.6.0"
+    assert dependencies["sha2"] == {"version": "0.10", "optional": True}
     kernel_dependency = {
         "version": "=0.1.0-rc.4",
         "default-features": False,
@@ -83,12 +97,45 @@ def test_dev_lint_tool_is_pinned() -> None:
 
 
 def test_preview_dependencies_are_exact_public_releases() -> None:
-    assert "adam-core==0.5.6rc5" in _project_dependencies()
+    dependencies = _project_dependencies()
+    assert "adam-core==0.5.6rc5" in dependencies
+    for requirement in (
+        "naif-de440==2020.12.21.1",
+        "jpl-small-bodies-de441-n16==2021.3.31.1",
+    ):
+        assert requirement in dependencies
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        dev_dependencies = tomllib.load(pyproject_file)["project"][
+            "optional-dependencies"
+        ]["dev"]
+    for requirement in (
+        "naif-leapseconds==2025.4.22",
+        "naif-eop-predict==2024.8.28.1",
+        "naif-eop-historical==2024.8.28.1",
+        "naif-eop-high-prec==2026.5.9",
+        "naif-earth-itrf93==2007.4.3.1",
+    ):
+        assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
     assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.4"
     assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.4"
     assert not (ROOT / "rust" / "vendor").exists()
+
+
+def test_python_lock_matches_preview_and_kernel_authorities() -> None:
+    packages = _pdm_lock_packages()
+    expected = {
+        "adam-core": "0.5.6rc5",
+        "naif-de440": "2020.12.21.1",
+        "jpl-small-bodies-de441-n16": "2021.3.31.1",
+        "naif-leapseconds": "2025.4.22",
+        "naif-eop-predict": "2024.8.28.1",
+        "naif-eop-historical": "2024.8.28.1",
+        "naif-eop-high-prec": "2026.5.9",
+        "naif-earth-itrf93": "2007.4.3.1",
+    }
+    assert {name: packages[name]["version"] for name in expected} == expected
 
 
 def test_lock_matches_exact_published_core_crates() -> None:

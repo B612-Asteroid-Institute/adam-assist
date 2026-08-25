@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install --frozen-lockfile -G dev
       - name: Lint
         run: pdm run lint
       - name: Typecheck
@@ -65,13 +65,14 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install --frozen-lockfile -G dev
       - name: Rust format, clippy, and tests
         run: pdm run rust-quality
 
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: [ '3.11', '3.12', '3.13' ]
     defaults:
@@ -95,7 +96,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install --frozen-lockfile -G dev
       - name: Run tests (no coverage)
         if: matrix.python-version != '3.12'
         run: pdm run test
@@ -141,7 +142,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dev dependencies
-        run: pdm install -G dev
+        run: pdm install --frozen-lockfile -G dev
       - name: Run benchmarks
         run: pdm run benchmark --benchmark-json bench.json
       - name: Run current public/native benchmark smoke

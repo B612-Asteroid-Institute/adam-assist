@@ -21,9 +21,11 @@ adam_assist = "=0.4.0-rc.6"
 
 The default `kernel-data` feature uses adam-core's deterministic resolution
 chain: environment override, installed Python data package, local cache, then a
-checksummed wheel fetch. Set both `ADAM_CORE_RS_ASSIST_PLANETS_PATH` and
-`ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH` to use specific DE440 and SB441-n16
-files. `ADAM_CORE_KERNEL_OFFLINE=1` disables downloads.
+checksummed wheel fetch. Set `ADAM_CORE_KERNEL_DE440` and
+`ADAM_CORE_KERNEL_SB441_N16` to use specific DE440 and SB441-n16 files.
+`ADAM_CORE_KERNEL_OFFLINE=1` disables downloads. Regardless of which source
+wins, `from_default_kernels` verifies the reviewed file size and SHA-256 before
+ASSIST opens either ephemeris.
 
 ```no_run
 use adam_assist::{AssistPropagator, AssistResult};

@@ -111,7 +111,7 @@ poetry.lock
 
 .pdm-build/*
 .pdm-python
-pdm.lock
+# pdm.lock is committed so CI resolves the reviewed regression kernel bytes.
 
 # Rust / migration runtime artifacts
 target/

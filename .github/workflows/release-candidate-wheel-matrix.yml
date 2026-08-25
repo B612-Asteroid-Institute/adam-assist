@@ -148,6 +148,21 @@ jobs:
                   raise SystemExit(
                       f"{package} preview version mismatch: {metadata['Version']} != {expected[package]}"
                   )
+              if package == "adam_assist":
+                  requirements = {
+                      value.replace(" ", "").lower()
+                      for value in metadata.get_all("Requires-Dist", [])
+                  }
+                  expected_requirements = {
+                      "adam-core==0.5.6rc5",
+                      "naif-de440==2020.12.21.1",
+                      "jpl-small-bodies-de441-n16==2021.3.31.1",
+                  }
+                  if not expected_requirements <= requirements:
+                      raise SystemExit(
+                          f"adam-assist release dependencies missing: "
+                          f"{sorted(expected_requirements - requirements)}"
+                      )
           pattern = "*${{ matrix.platform.wheel_tag }}.whl"
           invalid = [p.name for p in core + assist if not fnmatch.fnmatch(p.name, pattern)]
           if invalid:
