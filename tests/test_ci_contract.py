@@ -69,8 +69,20 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
 
     python_publisher = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
     assert "Require the matching public Rust crate" in python_publisher
-    assert "api/v1/crates/adam_assist/0.4.0-rc.6" in python_publisher
-    assert 'test "$(jq -r .version.yanked' in python_publisher
+    assert "https://index.crates.io/ad/am/adam_assist" in python_publisher
+    assert "api/v1/crates/adam_assist" not in python_publisher
+    assert 'entry["yanked"]' in python_publisher
+    assert 'entry["cksum"]' in python_publisher
+    assert 'entry.get("rust_version") != "1.87"' in python_publisher
+    assert "release_sha:" in python_publisher
+    assert "recovery_from_main:" in python_publisher
+    assert "dry_run:" in python_publisher
+    assert "refs/heads/main" in python_publisher
+    assert "refs/heads/release/pypi-0.4.0rc6-recovery" in python_publisher
+    assert "if: inputs.dry_run == false" in python_publisher
+    assert "ref: v${{ inputs.expected_version }}" in python_publisher
+    assert "EXPECTED_SHA: ${{ inputs.release_sha }}" in python_publisher
+    assert "unconditional_requirements != expected_requirements" in python_publisher
     assert "testpypi" not in python_publisher.lower()
     assert "to pypi" in python_publisher
 
