@@ -30,6 +30,11 @@ on:
         required: true
         default: false
         type: boolean
+      dry_run:
+        description: Verify and assemble exact artifacts without entering the PyPI environment
+        required: true
+        default: false
+        type: boolean
       confirmation:
         description: Type "publish adam-assist <version> from <sha> to pypi"
         required: true
@@ -60,15 +65,30 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SHA: ${{ inputs.release_sha }}
           RECOVERY_FROM_MAIN: ${{ inputs.recovery_from_main }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
-            "refs/tags/v$EXPECTED_VERSION") test "$RECOVERY_FROM_MAIN" = "false" ;;
-            refs/heads/main) test "$RECOVERY_FROM_MAIN" = "true" ;;
-            *) echo "publication must run from the release tag or an explicit main recovery" >&2; exit 1 ;;
+            "refs/tags/v$EXPECTED_VERSION")
+              test "$RECOVERY_FROM_MAIN" = "false"
+              test "$DRY_RUN" = "false"
+              ;;
+            refs/heads/main)
+              test "$RECOVERY_FROM_MAIN" = "true"
+              test "$DRY_RUN" = "false"
+              ;;
+            refs/heads/release/pypi-0.4.0rc6-recovery)
+              test "$RECOVERY_FROM_MAIN" = "false"
+              test "$DRY_RUN" = "true"
+              ;;
+            *) echo "publication must run from the release tag or an explicit recovery" >&2; exit 1 ;;
           esac
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
+          if [ "$DRY_RUN" = "true" ]; then
+            test "$CONFIRMATION" = "verify adam-assist $EXPECTED_VERSION from $EXPECTED_SHA for pypi"
+          else
+            test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
+          fi
       - name: Verify source prerelease and exact adam-core dependency
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
@@ -272,6 +292,7 @@ jobs:
           if-no-files-found: error
 
   publish-pypi:
+    if: inputs.dry_run == false
     needs: collect-tested-artifacts
     runs-on: ubuntu-latest
     environment:

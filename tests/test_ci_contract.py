@@ -76,7 +76,10 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert 'entry.get("rust_version") != "1.87"' in python_publisher
     assert "release_sha:" in python_publisher
     assert "recovery_from_main:" in python_publisher
+    assert "dry_run:" in python_publisher
     assert "refs/heads/main" in python_publisher
+    assert "refs/heads/release/pypi-0.4.0rc6-recovery" in python_publisher
+    assert "if: inputs.dry_run == false" in python_publisher
     assert "ref: v${{ inputs.expected_version }}" in python_publisher
     assert "EXPECTED_SHA: ${{ inputs.release_sha }}" in python_publisher
     assert "unconditional_requirements != expected_requirements" in python_publisher
