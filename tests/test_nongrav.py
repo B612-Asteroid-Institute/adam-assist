@@ -1,16 +1,14 @@
 import numpy as np
 import pytest
+import quivr as qv
 from adam_core.coordinates.cartesian import CartesianCoordinates
 from adam_core.coordinates.origin import Origin
+from adam_core.dynamics.impacts import CollisionConditions
 from adam_core.orbits import Orbits
 from adam_core.orbits.non_gravitational_parameters import NonGravitationalParameters
 from adam_core.time import Timestamp
 
-from adam_assist.propagator import (
-    _configure_assist_non_gravitational_forces,
-    _extract_assist_particle_params,
-    _partition_by_marsden_constants,
-)
+from adam_assist import ASSISTPropagator
 
 COMET_CONSTANTS = {
     "ALN": 0.1112620426,
@@ -19,18 +17,6 @@ COMET_CONSTANTS = {
     "NN": 5.093,
     "R0": 2.808,
 }
-
-
-class FakeExtras:
-    def __init__(self, forces):
-        self.forces = list(forces)
-        self.particle_params = None
-        # assist.Extras ships with the asteroid-convention g(r) defaults.
-        self.alpha = 1.0
-        self.nk = 0.0
-        self.nm = 2.0
-        self.nn = 5.093
-        self.r0 = 1.0
 
 
 def make_orbits_with_nongrav(nongrav: NonGravitationalParameters) -> Orbits:
@@ -52,118 +38,132 @@ def make_orbits_with_nongrav(nongrav: NonGravitationalParameters) -> Orbits:
     )
 
 
-def test_extract_assist_particle_params_flattens_A1_A2_A3():
-    orbits = make_orbits_with_nongrav(
+def _propagate(orbits: Orbits, mjd: float = 60010.0) -> Orbits:
+    return ASSISTPropagator().propagate_orbits(
+        orbits, Timestamp.from_mjd([mjd], scale="tdb")
+    )
+
+
+def test_include_nongrav_false_matches_explicitly_stripped_gravity_only() -> None:
+    active = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "NEOCC"],
-            A1=[1.1e-13, None],
-            A2=[-8.72e-14, -2.90e-14],
-            A3=[None, 4.2e-15],
+            A1=[5.0e-9, None],
+            A2=[-2.9e-9, -4.6e-9],
+            A3=[None, 4.2e-10],
         )
     )
-
-    particle_params = _extract_assist_particle_params(orbits)
-
-    np.testing.assert_allclose(
-        particle_params,
-        np.array([1.1e-13, -8.72e-14, 0.0, 0.0, -2.90e-14, 4.2e-15]),
+    target = Timestamp.from_mjd([60010.0], scale="tdb")
+    propagator = ASSISTPropagator()
+    actual = propagator.propagate_orbits(active, target, include_nongrav=False)
+    expected = propagator.propagate_orbits(
+        active.without_non_gravitational_parameters(), target
     )
 
+    np.testing.assert_array_equal(
+        actual.coordinates.values, expected.coordinates.values
+    )
+    assert not actual.has_non_gravitational_parameters()
+    assert not actual.coordinates.covariance.has_nongrav_block()
 
-def test_extract_assist_particle_params_treats_null_values_as_zero():
-    orbits = make_orbits_with_nongrav(
+
+def test_non_gravitational_coefficients_change_trajectory_and_survive_output():
+    active = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "NEOCC"],
-            A1=[5.0e-13, None],
-            A2=[-2.9e-14, -4.6e-14],
-            A3=[None, None],
+            A1=[5.0e-9, None],
+            A2=[-2.9e-9, -4.6e-9],
+            A3=[None, 4.2e-10],
         )
     )
+    gravity_only = active.without_non_gravitational_parameters()
 
-    particle_params = _extract_assist_particle_params(orbits)
+    propagated = _propagate(active)
+    control = _propagate(gravity_only)
 
-    np.testing.assert_allclose(
-        particle_params,
-        np.array([5.0e-13, -2.9e-14, 0.0, 0.0, -4.6e-14, 0.0]),
+    assert (
+        np.max(np.abs(propagated.coordinates.values - control.coordinates.values))
+        > 1e-8
     )
+    assert propagated.non_gravitational_parameters.source.to_pylist() == [
+        "SBDB",
+        "NEOCC",
+    ]
+    assert propagated.non_gravitational_parameters.A2.to_pylist() == [
+        -2.9e-9,
+        -4.6e-9,
+    ]
 
 
-def test_extract_assist_particle_params_returns_none_without_values():
-    # A source stamp without any A1/A2/A3 values means no non-grav solution:
-    # no particle params and no NON_GRAVITATIONAL force should be configured.
-    orbits = make_orbits_with_nongrav(
+def test_null_and_zero_accelerations_are_force_free():
+    nulls = make_orbits_with_nongrav(NonGravitationalParameters.nulls(2))
+    zeros = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
-            source=["NEOCC", None],
-            A1=[None, None],
-            A2=[None, None],
-            A3=[None, None],
+            source=["SBDB", "NEOCC"],
+            A1=[0.0, None],
+            A2=[None, 0.0],
+            A3=[0.0, 0.0],
         )
     )
+    gravity_only = nulls.without_non_gravitational_parameters()
 
-    assert _extract_assist_particle_params(orbits) is None
-
-    extras = FakeExtras(["SUN", "PLANETS"])
-    _configure_assist_non_gravitational_forces(extras, orbits)
-    assert extras.forces == ["SUN", "PLANETS"]
-    assert extras.particle_params is None
+    expected = _propagate(gravity_only).coordinates.values
+    np.testing.assert_array_equal(_propagate(nulls).coordinates.values, expected)
+    np.testing.assert_array_equal(_propagate(zeros).coordinates.values, expected)
 
 
-def test_configure_assist_non_gravitational_forces_appends_force_and_params():
-    orbits = make_orbits_with_nongrav(
-        NonGravitationalParameters.from_kwargs(
-            source=["SBDB", "SBDB"],
-            A1=[None, None],
-            A2=[-8.72e-14, -2.90e-14],
-            A3=[None, None],
-        )
-    )
-    extras = FakeExtras(["SUN", "PLANETS"])
-
-    _configure_assist_non_gravitational_forces(extras, orbits)
-
-    assert extras.forces == ["SUN", "PLANETS", "NON_GRAVITATIONAL"]
-    np.testing.assert_allclose(
-        extras.particle_params,
-        [0.0, -8.72e-14, 0.0, 0.0, -2.90e-14, 0.0],
-    )
-    # Null constants leave the asteroid-convention defaults in place.
-    assert (extras.alpha, extras.nk, extras.nm, extras.nn, extras.r0) == (
-        1.0,
-        0.0,
-        2.0,
-        5.093,
-        1.0,
-    )
-
-
-def test_configure_assist_non_gravitational_forces_sets_marsden_constants():
-    orbits = make_orbits_with_nongrav(
+def test_explicit_marsden_constants_change_force_law():
+    default = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
-            A1=[1.07e-9, 8.9e-10],
-            A2=[-3.6e-11, -2.1e-11],
-            A3=[2.5e-11, None],
+            A1=[1.07e-7, 8.9e-8],
+            A2=[-3.6e-9, -2.1e-9],
+            A3=[2.5e-9, None],
+        )
+    )
+    comet = default.set_column(
+        "non_gravitational_parameters",
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "SBDB"],
+            A1=[1.07e-7, 8.9e-8],
+            A2=[-3.6e-9, -2.1e-9],
+            A3=[2.5e-9, None],
             **{name: [value, value] for name, value in COMET_CONSTANTS.items()},
+        ),
+    )
+
+    delta = (
+        _propagate(comet).coordinates.values - _propagate(default).coordinates.values
+    )
+    assert np.max(np.abs(delta)) > 1e-8
+
+
+def test_same_model_nongrav_batch_matches_solo_propagations():
+    batched_input = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "NEOCC"],
+            A1=[5.0e-9, None],
+            A2=[-2.9e-9, -4.6e-9],
+            A3=[None, 4.2e-10],
         )
     )
-    extras = FakeExtras(["SUN", "PLANETS"])
+    batched = _propagate(batched_input, mjd=60150.0)
+    solos = qv.concatenate(
+        [_propagate(batched_input[i : i + 1], mjd=60150.0) for i in range(2)]
+    ).sort_by(["orbit_id", "coordinates.time.days", "coordinates.time.nanos"])
 
-    _configure_assist_non_gravitational_forces(extras, orbits)
-
-    assert extras.forces == ["SUN", "PLANETS", "NON_GRAVITATIONAL"]
-    np.testing.assert_allclose(extras.alpha, COMET_CONSTANTS["ALN"])
-    np.testing.assert_allclose(extras.nk, COMET_CONSTANTS["NK"])
-    np.testing.assert_allclose(extras.nm, COMET_CONSTANTS["NM"])
-    np.testing.assert_allclose(extras.nn, COMET_CONSTANTS["NN"])
-    np.testing.assert_allclose(extras.r0, COMET_CONSTANTS["R0"])
+    position_residual_km = (
+        np.max(np.abs(batched.coordinates.r - solos.coordinates.r)) * 149597870.7
+    )
+    assert position_residual_km < 1e-4
 
 
-def test_configure_assist_non_gravitational_forces_rejects_mixed_constants():
-    orbits = make_orbits_with_nongrav(
+def test_mixed_marsden_batch_matches_solo_propagations():
+    mixed = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
-            A1=[1.07e-9, None],
-            A2=[-3.6e-11, -2.9e-14],
+            A1=[1.07e-9, 5.0e-10],
+            A2=[-3.6e-10, -2.9e-10],
             A3=[None, None],
             ALN=[COMET_CONSTANTS["ALN"], None],
             NK=[COMET_CONSTANTS["NK"], None],
@@ -172,20 +172,25 @@ def test_configure_assist_non_gravitational_forces_rejects_mixed_constants():
             R0=[COMET_CONSTANTS["R0"], None],
         )
     )
-    extras = FakeExtras(["SUN", "PLANETS"])
+    batched = _propagate(mixed)
+    solos = qv.concatenate([_propagate(mixed[i : i + 1]) for i in range(len(mixed))])
+    solos = solos.sort_by(
+        ["orbit_id", "coordinates.time.days", "coordinates.time.nanos"]
+    )
+    np.testing.assert_allclose(
+        batched.coordinates.values,
+        solos.coordinates.values,
+        rtol=0,
+        atol=2e-15,
+    )
 
-    with pytest.raises(ValueError, match="Marsden"):
-        _configure_assist_non_gravitational_forces(extras, orbits)
 
-
-def test_configure_ignores_constants_on_rows_without_accelerations():
-    # A row carrying comet constants but no A-values exerts no force, so its
-    # constants must not conflict with (or override) the active rows'.
-    orbits = make_orbits_with_nongrav(
+def test_collision_detection_groups_mixed_marsden_models_and_restores_rows():
+    mixed = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
-            A1=[None, 5.0e-13],
-            A2=[None, -2.9e-14],
+            A1=[1.07e-9, 5.0e-10],
+            A2=[-3.6e-10, -2.9e-10],
             A3=[None, None],
             ALN=[COMET_CONSTANTS["ALN"], None],
             NK=[COMET_CONSTANTS["NK"], None],
@@ -194,61 +199,38 @@ def test_configure_ignores_constants_on_rows_without_accelerations():
             R0=[COMET_CONSTANTS["R0"], None],
         )
     )
-    extras = FakeExtras(["SUN", "PLANETS"])
+    conditions = CollisionConditions.from_kwargs(
+        condition_id=["Earth"],
+        collision_object=Origin.from_kwargs(code=["EARTH"]),
+        collision_distance=[1.0],
+        stopping_condition=[False],
+    )
+    propagator = ASSISTPropagator()
+    batched, impacts = propagator._detect_collisions(mixed, 2, conditions)
+    solo_results = []
+    for index in range(len(mixed)):
+        result, solo_impacts = propagator._detect_collisions(
+            mixed[index : index + 1], 2, conditions
+        )
+        assert len(solo_impacts) == 0
+        solo_results.append(result)
+    solos = qv.concatenate(solo_results).sort_by(["orbit_id"])
+    batched = batched.sort_by(["orbit_id"])
 
-    _configure_assist_non_gravitational_forces(extras, orbits)
-
-    assert (extras.alpha, extras.nk, extras.nm, extras.nn, extras.r0) == (
-        1.0,
-        0.0,
-        2.0,
-        5.093,
-        1.0,
+    assert len(impacts) == 0
+    np.testing.assert_allclose(
+        batched.coordinates.values,
+        solos.coordinates.values,
+        rtol=0,
+        atol=2e-15,
+    )
+    np.testing.assert_array_equal(
+        batched.coordinates.time.mjd().to_numpy(),
+        solos.coordinates.time.mjd().to_numpy(),
     )
 
 
-def test_partition_by_marsden_constants_splits_mixed_tuples():
-    orbits = make_orbits_with_nongrav(
-        NonGravitationalParameters.from_kwargs(
-            source=["SBDB", "SBDB"],
-            A1=[1.07e-9, 5.0e-13],
-            A2=[-3.6e-11, -2.9e-14],
-            A3=[None, None],
-            ALN=[COMET_CONSTANTS["ALN"], None],
-            NK=[COMET_CONSTANTS["NK"], None],
-            NM=[COMET_CONSTANTS["NM"], None],
-            NN=[COMET_CONSTANTS["NN"], None],
-            R0=[COMET_CONSTANTS["R0"], None],
-        )
-    )
-
-    partitions = _partition_by_marsden_constants(orbits)
-
-    assert len(partitions) == 2
-    assert partitions[0].orbit_id.to_pylist() == ["o1"]
-    assert partitions[1].orbit_id.to_pylist() == ["o2"]
-    # Each partition now configures cleanly.
-    for partition in partitions:
-        _configure_assist_non_gravitational_forces(
-            FakeExtras(["SUN", "PLANETS"]), partition
-        )
-
-
-def test_configure_rejects_non_finite_a_values():
-    orbits = make_orbits_with_nongrav(
-        NonGravitationalParameters.from_kwargs(
-            source=["SBDB", "SBDB"],
-            A1=[float("nan"), 5.0e-13],
-            A2=[None, -2.9e-14],
-            A3=[None, None],
-        )
-    )
-
-    with pytest.raises(ValueError, match="Non-finite"):
-        _configure_assist_non_gravitational_forces(FakeExtras(["SUN"]), orbits)
-
-
-def test_configure_rejects_partial_marsden_tuples():
+def test_partial_constants_are_rejected_for_active_force():
     orbits = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
@@ -262,71 +244,11 @@ def test_configure_rejects_partial_marsden_tuples():
             R0=[COMET_CONSTANTS["R0"], None],
         )
     )
-
-    with pytest.raises(ValueError, match="Partially-specified"):
-        _configure_assist_non_gravitational_forces(FakeExtras(["SUN"]), orbits)
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"ALN": 0.0},
-        {"ALN": -1.0},
-        {"R0": 0.0},
-        {"R0": -2.808},
-        {"NM": float("nan")},
-        {"NN": float("inf")},
-    ],
-)
-def test_configure_rejects_invalid_marsden_constants(overrides):
-    constants = {**COMET_CONSTANTS, **overrides}
-    orbits = make_orbits_with_nongrav(
-        NonGravitationalParameters.from_kwargs(
-            source=["SBDB", "SBDB"],
-            A1=[1.07e-9, 8.9e-10],
-            A2=[-3.6e-11, -2.1e-11],
-            A3=[None, None],
-            **{name: [value, value] for name, value in constants.items()},
-        )
-    )
-
-    with pytest.raises(ValueError, match="Invalid Marsden"):
-        _configure_assist_non_gravitational_forces(FakeExtras(["SUN"]), orbits)
+    with pytest.raises(ValueError, match="Partially-specified Marsden"):
+        _propagate(orbits)
 
 
-@pytest.mark.parametrize("bad_nn", [float("nan"), float("inf")])
-def test_propagate_orbits_rejects_non_finite_nn_even_when_nk_zero(bad_nn):
-    # Regression for validation ordering: canonicalization rewrites NN when
-    # NK == 0 (it is dynamically irrelevant), but the *supplied* values must
-    # be validated first -- a non-finite NN is garbage data, not a valid law,
-    # and must be rejected on the public propagation path.
-    from adam_core.time import Timestamp
-
-    from adam_assist import ASSISTPropagator
-
-    orbits = make_orbits_with_nongrav(
-        NonGravitationalParameters.from_kwargs(
-            source=["SBDB", "SBDB"],
-            A1=[None, None],
-            A2=[-2.9e-14, -1.1e-14],
-            A3=[None, None],
-            ALN=[1.0, 1.0],
-            NK=[0.0, 0.0],
-            NM=[2.0, 2.0],
-            NN=[bad_nn, bad_nn],
-            R0=[1.0, 1.0],
-        )
-    )
-
-    with pytest.raises(ValueError, match="Invalid Marsden"):
-        ASSISTPropagator().propagate_orbits(
-            orbits, Timestamp.from_mjd([60010.0], scale="tdb")
-        )
-
-
-def test_partial_constants_allowed_on_force_free_rows():
-    # A row without accelerations exerts no force: its (partial) constants
-    # are never applied and must not be rejected.
+def test_partial_constants_are_ignored_on_force_free_rows():
     orbits = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
@@ -340,63 +262,62 @@ def test_partial_constants_allowed_on_force_free_rows():
             R0=[None, None],
         )
     )
-    extras = FakeExtras(["SUN", "PLANETS"])
-
-    _configure_assist_non_gravitational_forces(extras, orbits)
-
-    assert extras.forces == ["SUN", "PLANETS", "NON_GRAVITATIONAL"]
+    assert len(_propagate(orbits)) == 2
 
 
-def test_degenerate_nk_zero_law_is_canonicalized():
-    # With NK = 0 the (1 + (r/R0)^NN)^-NK factor is identically 1, so an
-    # explicit inverse-square tuple stored with NN = 0 (e.g. Phaethon's) is
-    # the same force law as null constants and must share a simulation.
+def test_non_finite_acceleration_is_rejected():
     orbits = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
-            A1=[None, 5.0e-13],
+            A1=[float("nan"), 5.0e-13],
+            A2=[None, -2.9e-14],
+            A3=[None, None],
+        )
+    )
+    with pytest.raises(ValueError, match="Non-finite"):
+        _propagate(orbits)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"ALN": 0.0},
+        {"ALN": -1.0},
+        {"R0": 0.0},
+        {"R0": -2.808},
+        {"NM": float("nan")},
+        {"NN": float("inf")},
+    ],
+)
+def test_invalid_marsden_constants_are_rejected(overrides):
+    constants = {**COMET_CONSTANTS, **overrides}
+    orbits = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "SBDB"],
+            A1=[1.07e-9, 8.9e-10],
+            A2=[-3.6e-11, -2.1e-11],
+            A3=[None, None],
+            **{name: [value, value] for name, value in constants.items()},
+        )
+    )
+    with pytest.raises(ValueError, match="Invalid Marsden"):
+        _propagate(orbits)
+
+
+@pytest.mark.parametrize("bad_nn", [float("nan"), float("inf")])
+def test_non_finite_nn_is_rejected_before_nk_zero_canonicalization(bad_nn):
+    orbits = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "SBDB"],
+            A1=[None, None],
             A2=[-2.9e-14, -1.1e-14],
             A3=[None, None],
-            ALN=[1.0, None],
-            NK=[0.0, None],
-            NM=[2.0, None],
-            NN=[0.0, None],
-            R0=[1.0, None],
+            ALN=[1.0, 1.0],
+            NK=[0.0, 0.0],
+            NM=[2.0, 2.0],
+            NN=[bad_nn, bad_nn],
+            R0=[1.0, 1.0],
         )
     )
-
-    partitions = _partition_by_marsden_constants(orbits)
-    assert len(partitions) == 1
-
-    extras = FakeExtras(["SUN"])
-    _configure_assist_non_gravitational_forces(extras, orbits)
-    assert (extras.alpha, extras.nk, extras.nm, extras.nn, extras.r0) == (
-        1.0,
-        0.0,
-        2.0,
-        5.093,
-        1.0,
-    )
-
-
-def test_partition_by_marsden_constants_keeps_uniform_batch_whole():
-    # Explicit asteroid-convention constants match null constants and
-    # force-free rows: numerically identical tuples must not split.
-    orbits = make_orbits_with_nongrav(
-        NonGravitationalParameters.from_kwargs(
-            source=["SBDB", "SBDB"],
-            A1=[5.0e-13, None],
-            A2=[-2.9e-14, None],
-            A3=[None, None],
-            ALN=[1.0, None],
-            NK=[0.0, None],
-            NM=[2.0, None],
-            NN=[5.093, None],
-            R0=[1.0, None],
-        )
-    )
-
-    partitions = _partition_by_marsden_constants(orbits)
-
-    assert len(partitions) == 1
-    assert len(partitions[0]) == 2
+    with pytest.raises(ValueError, match="Invalid Marsden"):
+        _propagate(orbits)

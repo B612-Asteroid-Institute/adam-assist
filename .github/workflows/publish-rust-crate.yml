@@ -1,0 +1,108 @@
+name: Publish tested adam-assist Rust crate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Successful Rust crate release candidate run ID for this exact commit
+        required: true
+        type: string
+      expected_version:
+        description: Exact Cargo prerelease version
+        required: true
+        default: 0.4.0-rc.6
+        type: string
+      authentication:
+        description: One-time bootstrap token for the first release; trusted publishing afterward
+        required: true
+        default: trusted-publishing
+        type: choice
+        options:
+          - bootstrap-token
+          - trusted-publishing
+      confirmation:
+        description: Type "publish adam_assist <version> from <sha> to crates.io"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: crates-io-preview
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Verify the exact RC tag and irreversible-action confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/tags/v0.4.0rc6"
+          test "$CONFIRMATION" = "publish adam_assist $EXPECTED_VERSION from $EXPECTED_SHA to crates.io"
+      - name: Verify crate identity and MSRV
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          manifest = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
+          package = manifest["package"]
+          assert package["name"] == "adam_assist"
+          assert package["version"] == os.environ["EXPECTED_VERSION"]
+          assert package["rust-version"] == "1.87"
+          assert package.get("publish", True) is True
+          PY
+      - name: Verify candidate-run provenance and success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}")"
+          test "$(jq -r .conclusion <<<"$run_json")" = success
+          test "$(jq -r .head_sha <<<"$run_json")" = "$EXPECTED_SHA"
+          test "$(jq -r .name <<<"$run_json")" = "Rust crate release candidate"
+          case "$(jq -r .event <<<"$run_json")" in
+            push|workflow_dispatch) ;;
+            *) echo "candidate must use an exact push or workflow-dispatch checkout" >&2; exit 1 ;;
+          esac
+      - name: Download and verify the exact tested archive
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+          name: adam-assist-rust-crate-publication-set
+          path: accepted-crate
+      - name: Verify archive bytes and publication metadata
+        run: |
+          set -euo pipefail
+          (cd accepted-crate && sha256sum -c SHA256SUMS)
+          test "$(find accepted-crate -maxdepth 1 -name '*.crate' | wc -l | tr -d ' ')" = 1
+          python migration/scripts/publish_crate_archive.py \
+            --archives accepted-crate \
+            --expected-version "${{ inputs.expected_version }}"
+      - name: Acquire a crates.io trusted-publishing token
+        if: inputs.authentication == 'trusted-publishing'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish the exact reviewed archive
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ inputs.authentication == 'trusted-publishing' && steps.auth.outputs.token || secrets.CRATES_IO_BOOTSTRAP_TOKEN }}
+        run: |
+          python migration/scripts/publish_crate_archive.py \
+            --archives accepted-crate \
+            --expected-version "${{ inputs.expected_version }}" \
+            --execute

@@ -1,0 +1,95 @@
+name: Rust crate release candidate
+
+on:
+  # Build an artifact for every candidate commit so the publication workflow
+  # can require an exact final-SHA provenance match.
+  push:
+    branches:
+      - "release-candidate/adam-assist-0.4.0rc6"
+  pull_request:
+    paths:
+      - "rust/**"
+      - "migration/scripts/publish_crate_archive.py"
+      - ".github/workflows/rust-crate-*.yml"
+      - ".github/workflows/publish-rust-crate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST_PREVIEW_VERSION: "0.4.0-rc.6"
+
+jobs:
+  package-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Test the public Rust surface at the MSRV
+        run: |
+          set -euo pipefail
+          manifest=rust/adam_assist_rs/Cargo.toml
+          cargo fmt --manifest-path "$manifest" -- --check
+          cargo clippy --manifest-path "$manifest" --locked --all-targets --all-features -- -D warnings
+          cargo test --manifest-path "$manifest" --locked
+          cargo test --manifest-path "$manifest" --locked --lib --no-default-features
+          RUSTDOCFLAGS="-D warnings -D missing-docs" \
+            cargo doc --manifest-path "$manifest" --locked --no-deps
+      - name: Package and verify the crate once
+        run: |
+          set -euo pipefail
+          manifest=rust/adam_assist_rs/Cargo.toml
+          rm -rf rust/adam_assist_rs/target/package crate-dist
+          mkdir -p crate-dist
+          cargo package --manifest-path "$manifest" --locked
+          cp rust/adam_assist_rs/target/package/adam_assist-${RUST_PREVIEW_VERSION}.crate crate-dist/
+          test "$(find crate-dist -maxdepth 1 -name '*.crate' | wc -l | tr -d ' ')" = 1
+          (cd crate-dist && sha256sum *.crate | tee SHA256SUMS)
+          python migration/scripts/publish_crate_archive.py \
+            --manifest-path "$manifest" \
+            --archives crate-dist \
+            --expected-version "$RUST_PREVIEW_VERSION"
+      - name: Check a pure-Rust consumer against the packaged source
+        run: |
+          set -euo pipefail
+          package="$GITHUB_WORKSPACE/rust/adam_assist_rs/target/package/adam_assist-${RUST_PREVIEW_VERSION}"
+          mkdir -p /tmp/adam-assist-consumer/src
+          cat > /tmp/adam-assist-consumer/Cargo.toml <<EOF
+          [package]
+          name = "adam-assist-consumer-smoke"
+          version = "0.0.0"
+          edition = "2021"
+
+          [features]
+          default = ["kernel-data"]
+          kernel-data = ["adam_assist/kernel-data"]
+
+          [dependencies]
+          adam_core = "=0.1.0-rc.4"
+          adam_assist = { path = "$package", default-features = false }
+          EOF
+          cat > /tmp/adam-assist-consumer/src/main.rs <<'EOF'
+          use adam_assist::{AssistPropagator, AssistResult};
+
+          fn main() {
+              let _: AssistResult<AssistPropagator> =
+                  AssistPropagator::from_paths("/nonexistent/de440", "/nonexistent/sb441-n16");
+              #[cfg(feature = "kernel-data")]
+              let _: fn() -> AssistResult<AssistPropagator> =
+                  AssistPropagator::from_default_kernels;
+              let _ = std::mem::size_of::<adam_core::coords::CoordinateBatch>();
+          }
+          EOF
+          cargo check --manifest-path /tmp/adam-assist-consumer/Cargo.toml
+          rm /tmp/adam-assist-consumer/Cargo.lock
+          cargo check --manifest-path /tmp/adam-assist-consumer/Cargo.toml \
+            --no-default-features
+      - name: Upload the exact crate publication set
+        uses: actions/upload-artifact@v4
+        with:
+          name: adam-assist-rust-crate-publication-set
+          path: crate-dist/
+          if-no-files-found: error

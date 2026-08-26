@@ -13,6 +13,7 @@
   - [Propagating Orbits](#propagating-orbits)
   - [Non-Gravitational Forces](#non-gravitational-forces)
   - [Generating Ephemerides](#generating-ephemerides)
+- [Benchmarking](#benchmarking)
 
 
 ## Overview
@@ -25,11 +26,42 @@
 pip install adam-assist
 ```
 
+Native wheels support CPython 3.11-3.13 on manylinux 2.17+ x86-64/AArch64 and
+macOS Apple silicon/Intel. Windows is currently unsupported because
+``libassist-sys 1.2.1`` wraps upstream ASSIST code that requires POSIX
+``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
+unsupported.
+
+### Pure Rust
+
+Rust-only consumers can use the same backend from crates.io without Python:
+
+```toml
+[dependencies]
+adam_core = "=0.1.0-rc.4"
+adam_assist = "=0.4.0-rc.6"
+```
+
+```rust,no_run
+use adam_assist::{AssistPropagator, AssistResult};
+
+fn main() -> AssistResult<()> {
+    let propagator = AssistPropagator::from_default_kernels()?;
+    let _integrator = propagator.integrator();
+    Ok(())
+}
+```
+
+The default resolver loads DE440 and SB441-n16 through adam-core's environment,
+installed-package, cache, and checksummed-fetch policy. Explicit/offline users
+can call `AssistPropagator::from_paths` and can disable default resolver support
+with `default-features = false`.
+
 ## Usage
 
 ### Propagating Orbits
 
-Here we initialize a set of `adam_core.orbit.Orbit` objects from the JPL Small Bodies Database and propagate them using the `AdamAssistPropagator` class. You can manually initialize the orbits as well.
+Here we initialize a set of `adam_core.orbit.Orbit` objects from the JPL Small Bodies Database and propagate them using the Rust-backed `ASSISTPropagator` class. You can manually initialize the orbits as well.
 
 ```python
 from adam_core.orbits.query.sbdb import query_sbdb
@@ -104,7 +136,7 @@ force.
 
 ### Generating Ephemerides
 
-The `ASSISTPropagator` class uses the `adam-core` default ephemeris generator to generate ephemerides from the `ASSIST` propagated orbits. The default ephemeris generator accounts for light travel time and aberration. See `adam_core.propagator.propagator.EphemerisMixin` for implementation details.
+`ASSISTPropagator.generate_ephemeris` performs propagation, light-time geometry, optional covariance sampling/collapse, aberration, and photometry in the Rust backend behind one public Python call. Local parallelism uses Rayon rather than adam-core's former Python/Ray composition.
 
 
 ```python
@@ -121,6 +153,31 @@ propagator = ASSISTPropagator()
 
 ephemerides = propagator.generate_ephemeris(sbdb_orbits, observers)
 ```
+
+## Benchmarking
+
+Run the complete current-only suite with:
+
+```console
+pdm run benchmark-current
+```
+
+It reuses the existing propagation, nongrav, ephemeris/covariance, collision,
+and orbit-determination workload builders. Results include current public
+Python timings, genuine Rust-owned `std::time::Instant` timings where
+available, public/native overhead, and exact workload shapes. It does not
+require a frozen Python environment or baseline timing cache, and all ASSIST
+workloads use `max_processes=1`. Use `--quick` for a smoke run or select, for
+example, `--domains nongrav ephemeris covariance --lanes tiny small`. Release
+CI runs the complete 35-workload grid with native timing required. After wheel
+acceptance, release candidates also run all 54 live JPL Horizons propagation and
+ephemeris accuracy cases.
+
+The deterministic test suite uses reviewed, hash-pinned frozen outputs for all
+formerly two-runtime propagation, covariance, ephemeris, collision, typed
+mapping, and OD/Vallado parity cases. Normal pytest and the current benchmark
+suite do not import or launch the archived ASSIST oracle and never skip because
+a legacy virtual environment is absent.
 
 ## Configuration
 

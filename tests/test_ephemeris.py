@@ -43,6 +43,7 @@ OBJECT_IDS = [
 ]
 
 
+@pytest.mark.live
 @pytest.mark.parametrize("object_id", OBJECT_IDS)
 def test_ephemeris(object_id):
     """

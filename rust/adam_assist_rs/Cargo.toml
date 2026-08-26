@@ -1,0 +1,55 @@
+[package]
+name = "adam_assist"
+version = "0.4.0-rc.6"
+edition = "2021"
+rust-version = "1.87"
+license = "GPL-3.0"
+description = "Pure-Rust ASSIST propagation and ephemeris backend for adam-core"
+repository = "https://github.com/B612-Asteroid-Institute/adam-assist"
+homepage = "https://github.com/B612-Asteroid-Institute/adam-assist"
+documentation = "https://docs.rs/adam_assist"
+readme = "README.md"
+keywords = ["astronomy", "asteroids", "orbits", "ephemeris", "propagation"]
+categories = ["science", "simulation"]
+
+[features]
+default = ["kernel-data"]
+kernel-data = ["dep:adam_core_rs_kernel_data", "dep:sha2"]
+python = ["dep:ndarray", "dep:numpy", "dep:pyo3"]
+extension-module = ["python", "pyo3/extension-module"]
+
+[dependencies]
+# Published permissive adam-core contracts, exact-pinned for the RC.
+adam_core_rs_coords = "=0.1.0-rc.4"
+adam_core_rs_spice = "=0.1.0-rc.4"
+adam_core_rs_kernel_data = { version = "=0.1.0-rc.4", default-features = false, optional = true }
+# Keep adam-core kernel-data's URL stack compatible with this crate's Rust 1.87
+# MSRV when downstream users resolve without this repository's Cargo.lock.
+icu_locale_core = { version = "=2.2.0", default-features = false }
+icu_normalizer = { version = "=2.2.0", default-features = false }
+icu_properties = { version = "=2.2.0", default-features = false }
+icu_provider = { version = "=2.2.0", default-features = false }
+# Canonical ASSIST/REBOUND FFI and RAII layers. All domain orchestration lives
+# in this crate; exact versions are the reviewed mainline sys-crate releases.
+libassist-sys = "=1.2.1"
+librebound-sys = "=4.6.0"
+thiserror = "2"
+ndarray = { version = "0.16", optional = true }
+numpy = { version = "0.22", optional = true }
+pyo3 = { version = "0.22", optional = true }
+rayon = "1.11"
+sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+adam_core_rs_kernel_data = { version = "=0.1.0-rc.4", default-features = false }
+serde_json = "1"
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+# Keep this standalone package from being implicitly adopted by an ancestor
+# Cargo workspace when adam-assist is checked out beneath another repository
+# (as in adam-core's release-candidate wheel matrix).
+[workspace]
+resolver = "2"

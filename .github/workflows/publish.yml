@@ -10,21 +10,15 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release-candidate version
         required: true
-        default: 0.4.0rc1
+        default: 0.4.0rc6
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core release candidate
         required: true
-        default: 0.5.6rc1
+        default: 0.5.6rc5
         type: string
-      repository:
-        description: Destination index
-        required: true
-        default: testpypi
-        type: choice
-        options: [testpypi, pypi]
       confirmation:
-        description: Type "publish adam-assist <version> from <sha> to <repository>"
+        description: Type "publish adam-assist <version> from <sha> to pypi"
         required: true
         type: string
 
@@ -50,11 +44,10 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SHA: ${{ github.sha }}
-          DESTINATION: ${{ inputs.repository }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/tags/v$EXPECTED_VERSION"
-          test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to $DESTINATION"
+          test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
       - name: Verify source prerelease and exact adam-core dependency
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
@@ -74,18 +67,35 @@ jobs:
           if expected not in pyproject["project"]["dependencies"]:
               raise SystemExit(f"missing exact preview dependency {expected}")
           cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
-          cargo_version = cargo["package"]["version"]
-          if cargo_version != "0.4.0-rc.1" or str(assist) != "0.4.0rc1":
+          package = cargo["package"]
+          cargo_version = package["version"]
+          if cargo_version != "0.4.0-rc.6" or str(assist) != "0.4.0rc6":
               raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
+          if package["name"] != "adam_assist" or package["rust-version"] != "1.87":
+              raise SystemExit(f"unexpected public Rust package metadata: {package}")
+          if package.get("publish", True) is not True:
+              raise SystemExit("adam_assist Rust crate is not publishable")
           for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
-              if cargo["dependencies"].get(name) != "=0.1.0-rc.1":
-                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.1")
-          kernel_data = cargo["dev-dependencies"].get("adam_core_rs_kernel_data")
-          if kernel_data != {"version": "=0.1.0-rc.1", "default-features": False}:
+              if cargo["dependencies"].get(name) != "=0.1.0-rc.4":
+                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.4")
+          kernel_data = cargo["dependencies"].get("adam_core_rs_kernel_data")
+          expected_kernel_data = {
+              "version": "=0.1.0-rc.4",
+              "default-features": False,
+              "optional": True,
+          }
+          if kernel_data != expected_kernel_data:
               raise SystemExit("adam_core_rs_kernel_data is not exact-pinned")
           if Path("rust/vendor").exists():
               raise SystemExit("temporary vendored core crates must be absent")
           PY
+      - name: Require the matching public Rust crate
+        run: |
+          set -euo pipefail
+          crate_json="$(curl --fail --silent --show-error \
+            https://crates.io/api/v1/crates/adam_assist/0.4.0-rc.6)"
+          test "$(jq -r .version.num <<<"$crate_json")" = "0.4.0-rc.6"
+          test "$(jq -r .version.yanked <<<"$crate_json")" = "false"
       - name: Verify acceptance provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -127,6 +137,11 @@ jobs:
 
           expected_version = Version(os.environ["EXPECTED_VERSION"])
           expected_core = Version(os.environ["EXPECTED_CORE_VERSION"])
+          expected_requirements = {
+              "adam-core": f"=={expected_core}",
+              "naif-de440": "==2020.12.21.1",
+              "jpl-small-bodies-de441-n16": "==2021.3.31.1",
+          }
           expected_python = {"cp311", "cp312", "cp313"}
           expected_platforms = {
               "manylinux_2_17_x86_64",
@@ -144,14 +159,42 @@ jobs:
               if canonicalize_name(name) != "adam-assist" or version != expected_version:
                   raise SystemExit(f"unexpected wheel identity: {wheel.name}")
               with zipfile.ZipFile(wheel) as archive:
-                  metadata_paths = [n for n in archive.namelist() if n.endswith(".dist-info/METADATA")]
+                  names = archive.namelist()
+                  metadata_paths = [n for n in names if n.endswith(".dist-info/METADATA")]
                   if len(metadata_paths) != 1:
                       raise SystemExit(f"{wheel.name}: unexpected METADATA files")
                   metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
+                  if "adam_assist/version.py" not in names:
+                      raise SystemExit(f"{wheel.name}: missing adam_assist/version.py")
+                  namespace = {}
+                  exec(archive.read("adam_assist/version.py"), namespace)
+                  if namespace.get("__version__") != str(expected_version):
+                      raise SystemExit(f"{wheel.name}: bad runtime version")
+                  if not any(
+                      name.startswith("adam_assist/_native")
+                      and name.endswith((".so", ".pyd", ".dylib"))
+                      for name in names
+                  ):
+                      raise SystemExit(f"{wheel.name}: missing native extension")
+                  packaged_tests = [
+                      name
+                      for name in names
+                      if name.startswith("adam_assist/")
+                      and ("/tests/" in name or Path(name).name.startswith("test_"))
+                  ]
+                  if packaged_tests:
+                      raise SystemExit(f"{wheel.name}: packaged tests {packaged_tests[:1]}")
               requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
-              core_requirements = [r for r in requirements if canonicalize_name(r.name) == "adam-core"]
-              if len(core_requirements) != 1 or str(core_requirements[0].specifier) != f"=={expected_core}":
-                  raise SystemExit(f"{wheel.name}: bad adam-core dependency {core_requirements}")
+              by_name = {canonicalize_name(requirement.name): requirement for requirement in requirements}
+              observed_requirements = {
+                  name: str(by_name[name].specifier)
+                  for name in expected_requirements
+                  if name in by_name
+              }
+              if observed_requirements != expected_requirements:
+                  raise SystemExit(
+                      f"{wheel.name}: bad release dependencies {observed_requirements}"
+                  )
               interpreters = {tag.interpreter for tag in tags}
               abis = {tag.abi for tag in tags}
               platforms = {tag.platform for tag in tags}
@@ -183,25 +226,7 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish-testpypi:
-    if: inputs.repository == 'testpypi'
-    needs: collect-tested-artifacts
-    runs-on: ubuntu-latest
-    environment:
-      name: testpypi-preview
-      url: https://test.pypi.org/p/adam-assist
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: adam-assist-${{ inputs.expected_version }}-tested-publication-set
-          path: dist
-      - run: rm dist/SHA256SUMS
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
   publish-pypi:
-    if: inputs.repository == 'pypi'
     needs: collect-tested-artifacts
     runs-on: ubuntu-latest
     environment:

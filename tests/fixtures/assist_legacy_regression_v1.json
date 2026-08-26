@@ -1,0 +1,59 @@
+{
+  "accepted_candidate": {
+    "adam_assist": "2ee4e37833b707f0d3fe4c8507e3b417c8204aea",
+    "adam_core": "468fb1a270dd193bc2e7cb24bd232cfdc6a8ccbe"
+  },
+  "array_count": 53,
+  "captured_from": {
+    "adam_assist": "cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2",
+    "adam_core": "757c09fca86adf9e3d5899952db3d379e09413f6"
+  },
+  "fixture": "assist_legacy_regression_v1.npz",
+  "fixture_sha256": "4bd16346b8847a6fd48339fe813c205b3763535c65ea633618265a150cedd3e8",
+  "normal_test_runtime": "current adam-assist only; no legacy imports, subprocesses, or conditional skips",
+  "scenarios": [
+    "same-epoch propagation",
+    "long-horizon propagation",
+    "same-epoch and multi-epoch covariance propagation",
+    "basic, mixed-observer photometric, and covariance ephemeris",
+    "variant and UTC typed mapping",
+    "orbit and variant collision detection",
+    "OD observation construction and accepted OD/Vallado solutions"
+  ],
+  "schema_version": 1,
+  "spice_kernel_provenance": {
+    "kernels": [
+      {
+        "name": "latest_leapseconds.tls",
+        "sha256": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b",
+        "size_bytes": 5257
+      },
+      {
+        "name": "de440.bsp",
+        "sha256": "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5",
+        "size_bytes": 119799808
+      },
+      {
+        "name": "earth_200101_990827_predict.bpc",
+        "sha256": "10f6bb1ab85d6d30039c552ca0a29049c30f1b45419e06c54d9ff338a7c80e6d",
+        "size_bytes": 15145984
+      },
+      {
+        "name": "earth_620120_240827.bpc",
+        "sha256": "90113d1bd96277ad38f0c7c352f216a8f2ddf2b7815115bbc9f4a06654b28e15",
+        "size_bytes": 11905024
+      },
+      {
+        "name": "earth_latest_high_prec.bpc",
+        "sha256": "66084b27190d555d706e04678a4978324545eaada6aa82894f3be68909db9d68",
+        "size_bytes": 5064704
+      },
+      {
+        "name": "earth_assoc_itrf93.tf",
+        "sha256": "aab7bbc19b8a69bad11988ee1b4812a3963812a03a029c2776863e680719b336",
+        "size_bytes": 7522
+      }
+    ],
+    "naif_eop_high_prec_version": "2026.5.9"
+  }
+}

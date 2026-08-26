@@ -278,3 +278,32 @@ def test_nongrav_covariance_propagates_through_variants():
         f"non-grav spread {nongrav_spread:.3f} km vs fixed-A control "
         f"{control_spread:.3f} km is not discriminating"
     )
+
+
+def test_public_covariance_propagation_preserves_9d_solution() -> None:
+    from adam_core.coordinates.covariances import CoordinateCovariances
+
+    case = CASES["99942 Apophis (2004 MN4)"]
+    start, _ = _load_case("99942 Apophis (2004 MN4)", case["central_mjd"])
+    start = _attach_nongrav(start, case["nongrav"])
+    covariance = np.zeros((9, 9))
+    np.fill_diagonal(covariance[:3, :3], (1e-11) ** 2)
+    np.fill_diagonal(covariance[3:6, 3:6], (1e-13) ** 2)
+    covariance[7, 7] = (5e-13) ** 2
+    start = start.set_column(
+        "coordinates.covariance",
+        CoordinateCovariances.from_matrix(covariance[np.newaxis, ...]),
+    )
+
+    result = ASSISTPropagator().propagate_orbits(
+        start,
+        Timestamp.from_mjd([case["central_mjd"] + 30.0], scale="tdb"),
+        covariance=True,
+        covariance_method="sigma-point",
+        num_samples=19,
+        max_processes=1,
+    )
+
+    assert result.coordinates.covariance.nongrav_block_mask().tolist() == [True]
+    assert np.isfinite(result.coordinates.covariance.to_full_matrix()).all()
+    assert result.non_gravitational_parameters.A2.to_pylist() == [case["nongrav"]["A2"]]

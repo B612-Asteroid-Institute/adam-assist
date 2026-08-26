@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "scope": {
+    "package": "adam_assist",
+    "frozen_updated_upstream_commit": "cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2",
+    "published_compatibility_manifest": "migration/public_surface/adam_assist_0_3_10.json",
+    "rule": "adam-assist-owned public module functions/classes/constants and public ASSISTPropagator methods; overload declarations count once",
+    "provider_boundaries": [
+      "DE440/SB441 kernel files and the canonical libassist/librebound FFI",
+      "adam-core table schemas and explicit OD/IOD backend contracts"
+    ]
+  },
+  "summary": {
+    "symbols": 25,
+    "frozen_updated_upstream_symbols": 14,
+    "missing_upstream_symbols": 0,
+    "latest_extension_symbols": 11,
+    "all_non_plotting_symbols_classified": true
+  },
+  "symbols": [
+    {"id":"adam_assist.perturbers:PERTURBER_DESIGNATIONS","classification":"compatibility_static_data","evidence":"exact exported-value and perturber tests"},
+    {"id":"adam_assist.perturbers:PERTURBER_NAIF_IDS","classification":"compatibility_static_data","evidence":"exact exported-value and perturber tests"},
+    {"id":"adam_assist.perturbers:get_perturber_designations","classification":"thin_data_veneer","evidence":"perturber compatibility tests"},
+    {"id":"adam_assist.perturbers:get_perturber_naif_id","classification":"bounded_python_compatibility_utility","evidence":"scalar/array/null/normalization tests; not an ASSIST numerical work unit"},
+    {"id":"adam_assist.perturbers:get_perturber_naif_ids","classification":"thin_data_veneer","evidence":"perturber compatibility tests"},
+    {"id":"adam_assist.perturbers:is_perturber","classification":"bounded_python_compatibility_utility","evidence":"scalar/array/null/normalization tests; not an ASSIST numerical work unit"},
+    {"id":"adam_assist.perturbers:unique_perturber_ids_from_candidates","classification":"bounded_python_compatibility_utility","evidence":"ordering/dedup/null tests; warning preparation only"},
+    {"id":"adam_assist.propagator:C","classification":"compatibility_static_data","evidence":"published 0.3.10 symbol manifest"},
+    {"id":"adam_assist.propagator:EARTH_RADIUS_KM","classification":"compatibility_static_data","evidence":"published 0.3.10 symbol manifest and collision tests"},
+    {"id":"adam_assist.propagator:uint32_hash","classification":"published_python_compatibility_helper","evidence":"deterministic SHA-256/c_uint32 compatibility tests"},
+    {"id":"adam_assist.propagator:hash_orbit_ids_to_uint32","classification":"published_python_compatibility_helper","evidence":"published helper compatibility tests; no default propagation orchestration"},
+    {"id":"adam_assist.propagator:generate_unique_separator","classification":"published_python_compatibility_helper","evidence":"published random-separator compatibility tests; no default propagation orchestration"},
+    {"id":"adam_assist.propagator:ASSISTPropagator","classification":"rust_owned_public_facade","evidence":"one-crossing Rust implementation, compatibility surface tests, parity/performance artifacts"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.__init__","classification":"rust_owned_public_facade","evidence":"constructor initializes native AssistData; signature/pickle/kernel tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.propagate_orbits","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"gravity/non-gravity, 6D/9D/mixed propagation and three-boundary timing"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.benchmark_last_native","classification":"native_timing_diagnostic","evidence":"Rust std::time::Instant samples; Python/PyO3 conversion excluded"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.generate_ephemeris","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"gravity/non-gravity ephemeris, covariance, light-time, magnitude/phase and Horizons tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.fit_least_squares","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"native OD fit and evaluated-member tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.fit_least_squares_evaluated","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"native evaluated-state/covariance and diagnostics tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.od_fit","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"Rust OD scheduling/orchestration tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.initial_orbit_determination","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"Rust IOD/linkage tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.vallado_least_squares","classification":"rust_owned_public_facade","correctness":"tolerance-based","evidence":"native Vallado least-squares tests"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.detect_collisions","classification":"rust_owned_public_facade","correctness":"bitwise-set-and-tolerance-time","evidence":"collision/impact survivor-set parity, time tolerance, native timing"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.__getstate__","classification":"compatibility_state_veneer","evidence":"published pickle contract"},
+    {"id":"adam_assist.propagator:ASSISTPropagator.__setstate__","classification":"compatibility_state_veneer","evidence":"published pickle contract"}
+  ],
+  "correctness_classification": {
+    "bitwise": "IDs, ordering, set membership, schemas, metadata, warnings, and deterministic compatibility helpers where exactness is contractual",
+    "tolerance-based": "propagated states, ephemerides, deterministic sigma-point covariance, OD/IOD, collision times, and direct Horizons comparisons",
+    "statistical": "Monte Carlo covariance sampling and collapse; different Python and Rust RNG streams are compared through reconstructed moments"
+  }
+}

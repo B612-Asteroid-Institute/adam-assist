@@ -131,6 +131,7 @@ OBJECTS = {
 }
 
 
+@pytest.mark.live
 @pytest.mark.parametrize("object_id", list(OBJECTS.keys()))
 def test_propagate(object_id):
     """
@@ -185,13 +186,12 @@ def test_propagate(object_id):
     )
 
 
-def test_propagate_different_input_times(mocker):
+def test_propagate_different_input_times():
     """
     Ensure that we can pass in vectors with different epochs
     """
 
     prop = ASSISTPropagator()
-    watched_propagate_orbits_inner = mocker.spy(prop, "_propagate_orbits_inner")
     orbits = Orbits.from_kwargs(
         orbit_id=["1", "2", "3", "4"],
         object_id=["1", "2", "3", "4"],
@@ -212,10 +212,8 @@ def test_propagate_different_input_times(mocker):
         orbits, Timestamp.from_mjd([60005, 60006], scale="tdb")
     )
 
-    assert (
-        watched_propagate_orbits_inner.call_count == 2
-    ), "Inner function should be called once for each unique input epoch"
-
+    # Epoch grouping is now Rust-owned and intentionally has no private Python
+    # hook to spy on. Verify the stable public cross-product contract instead.
     assert len(propagated_orbits.coordinates.time.unique()) == 2
     assert (
         len(propagated_orbits) == 8
@@ -233,9 +231,10 @@ def test_back_to_back_propagations():
     orbits = Orbits.from_parquet(BACK_TO_BACK_ORBIT_FILE_PATH)
 
     time = Timestamp.from_mjd([60000], scale="tdb")
-    prop.propagate_orbits(orbits, time, max_processes=1)
+    first_prop = prop.propagate_orbits(orbits, time, max_processes=1)
+    assert len(first_prop) == len(orbits)
 
-    # Propagator has to be pickleable, which uses __getstate__ and __setstate__
-    # This doesn't work if _last_simulation is in the state
+    # The native handle is process-local; constructor state must recreate it.
     first_dict = prop.__getstate__()
-    ASSISTPropagator(**first_dict)
+    second_prop = ASSISTPropagator(**first_dict)
+    assert second_prop.__getstate__() == first_dict
