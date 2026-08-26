@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1786465852680,
+  "lastUpdate": 1787757531285,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -783,6 +783,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.12775347468918324",
             "extra": "mean: 24.070245862600018 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "akoumjian@users.noreply.github.com",
+            "name": "Alec Koumjian",
+            "username": "akoumjian"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4009c154da52b06b9f24724027c6a78e17ec8c7c",
+          "message": "Merge pull request #38 from B612-Asteroid-Institute/release/pypi-0.4.0rc6-recovery\n\nRecover immutable-tag PyPI publication",
+          "timestamp": "2026-08-26T11:00:36-04:00",
+          "tree_id": "6297642518b4d8a286a73c9b0a2ebf6fa086aca3",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/4009c154da52b06b9f24724027c6a78e17ec8c7c"
+        },
+        "date": 1787757530879,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.4677470369971056,
+            "unit": "iter/sec",
+            "range": "stddev: 0.010294534688382262",
+            "extra": "mean: 2.137907717000007 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 38.17829476420749,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0007673447936629735",
+            "extra": "mean: 26.192893270275373 msec\nrounds: 37"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 1.1467658682383053,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0013999432884832623",
+            "extra": "mean: 872.0175823999966 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 1.1451076311293817,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0018517765593515174",
+            "extra": "mean: 873.2803561999958 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 1.147380865139694,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0006199693321274306",
+            "extra": "mean: 871.5501803999928 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 3.463488526001475,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000396463376258769",
+            "extra": "mean: 288.72623439999643 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 3.4569040657460572,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0009984284326070632",
+            "extra": "mean: 289.2761792000101 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.04700887322935491,
+            "unit": "iter/sec",
+            "range": "stddev: 0.007970784813450095",
+            "extra": "mean: 21.272579649400008 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.04695864750101384,
+            "unit": "iter/sec",
+            "range": "stddev: 0.02119912659097764",
+            "extra": "mean: 21.295332238399965 sec\nrounds: 5"
           }
         ]
       }
