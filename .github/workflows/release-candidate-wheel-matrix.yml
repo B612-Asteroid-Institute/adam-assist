@@ -10,7 +10,7 @@ on:
       adam_core_ref:
         description: Exact adam-core source revision to test
         required: true
-        default: 61cb2779b49ab2a641975942e3ce82d99b461ece
+        default: ae4a6f1d7ba937d41b86d3ddce343524737d9708
 
 permissions:
   contents: read
@@ -20,10 +20,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_REF: ${{ inputs.adam_core_ref || '61cb2779b49ab2a641975942e3ce82d99b461ece' }}
+  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'ae4a6f1d7ba937d41b86d3ddce343524737d9708' }}
   PIP_ONLY_BINARY: ":all:"
-  ADAM_CORE_PREVIEW_VERSION: "0.5.6rc5"
-  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc6"
+  ADAM_CORE_PREVIEW_VERSION: "0.5.6rc6"
+  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc7"
 
 jobs:
   artifact-acceptance:
@@ -154,7 +154,7 @@ jobs:
                       for value in metadata.get_all("Requires-Dist", [])
                   }
                   expected_requirements = {
-                      "adam-core==0.5.6rc5",
+                      "adam-core==0.5.6rc6",
                       "naif-de440==2020.12.21.1",
                       "jpl-small-bodies-de441-n16==2021.3.31.1",
                   }

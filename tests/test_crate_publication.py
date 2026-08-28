@@ -8,7 +8,7 @@ import pytest
 
 from migration.scripts import publish_crate_archive
 
-VERSION = "0.4.0-rc.6"
+VERSION = "0.4.0-rc.7"
 
 
 def _package() -> dict:
@@ -19,10 +19,7 @@ def _package() -> dict:
         "publish": None,
         "dependencies": [
             {"name": name, "req": requirement}
-            for name, requirement in (
-                publish_crate_archive.CORE_REQUIREMENTS
-                | publish_crate_archive.MSRV_REQUIREMENTS
-            ).items()
+            for name, requirement in publish_crate_archive.CORE_REQUIREMENTS.items()
         ],
     }
 

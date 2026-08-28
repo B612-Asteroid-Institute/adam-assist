@@ -7,11 +7,14 @@ Updated 2026-08-12 against frozen updated-upstream
 older `adam_assist_0_3_10.json` remains the immutable published-wheel
 compatibility authority; it is not the latest-upstream inventory.
 
-The current surface preserves every useful frozen-upstream name and adds the
-Rust-owned OD/IOD and native-timing methods. Public propagation, sampled
-6D/9D covariance, ephemeris generation, collisions/impacts, OD, and IOD each
-enter the native implementation once. Python retains signatures, quivr/Arrow
-wrapping, static perturber data, published helper names, warnings, and errors.
+The current surface preserves every useful frozen-upstream name and adds native
+timing plus fused backend capabilities used by adam-core's public OD/IOD
+workflows. Orbit determination remains owned and exposed by adam-core; the
+methods on ``ASSISTPropagator`` are one-crossing provider hooks, not a separate
+adam-assist OD product. Public propagation, sampled 6D/9D covariance,
+ephemeris generation, and collisions/impacts each enter the native
+implementation once. Python retains signatures, quivr/Arrow wrapping, static
+perturber data, published helper names, warnings, and errors.
 
 Correctness evidence is classified explicitly:
 

@@ -38,8 +38,8 @@ Rust-only consumers can use the same backend from crates.io without Python:
 
 ```toml
 [dependencies]
-adam_core = "=0.1.0-rc.4"
-adam_assist = "=0.4.0-rc.6"
+adam_core = "=0.1.0-rc.5"
+adam_assist = "=0.4.0-rc.7"
 ```
 
 ```rust,no_run
@@ -162,15 +162,18 @@ Run the complete current-only suite with:
 pdm run benchmark-current
 ```
 
-It reuses the existing propagation, nongrav, ephemeris/covariance, collision,
-and orbit-determination workload builders. Results include current public
-Python timings, genuine Rust-owned `std::time::Instant` timings where
+It reuses the existing propagation, nongrav, ephemeris/covariance, and
+collision workload builders, plus five provider-capability checks used by
+adam-core's public OD workflows. Orbit determination remains an adam-core
+product rather than a separate adam-assist surface. Results include current
+public Python timings, genuine Rust-owned `std::time::Instant` timings where
 available, public/native overhead, and exact workload shapes. It does not
 require a frozen Python environment or baseline timing cache, and all ASSIST
 workloads use `max_processes=1`. Use `--quick` for a smoke run or select, for
 example, `--domains nongrav ephemeris covariance --lanes tiny small`. Release
-CI runs the complete 35-workload grid with native timing required. After wheel
-acceptance, release candidates also run all 54 live JPL Horizons propagation and
+CI runs 30 ASSIST product workloads plus the five Core-OD backend-capability
+checks, all with native timing required. After wheel acceptance, release
+candidates also run all 54 live JPL Horizons propagation and
 ephemeris accuracy cases.
 
 The deterministic test suite uses reviewed, hash-pinned frozen outputs for all

@@ -37,31 +37,47 @@ def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
         source = workflow.read_text()
         if "dtolnay/rust-toolchain@" not in source:
             continue
-        assert "dtolnay/rust-toolchain@stable" not in source, workflow.name
+        if workflow.name == "rust-crate-release-candidate.yml":
+            assert "dtolnay/rust-toolchain@stable" in source
+        else:
+            assert "dtolnay/rust-toolchain@stable" not in source, workflow.name
         assert "dtolnay/rust-toolchain@1.87.0" in source, workflow.name
         assert "components: rustfmt, clippy" in source, workflow.name
 
 
 def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     candidate = RUST_CANDIDATE_WORKFLOW.read_text()
-    assert 'RUST_PREVIEW_VERSION: "0.4.0-rc.6"' in candidate
-    assert '"release-candidate/adam-assist-0.4.0rc6"' in candidate
+    assert 'RUST_PREVIEW_VERSION: "0.4.0-rc.7"' in candidate
+    assert '"release-candidate/adam-assist-0.4.0rc7"' in candidate
     assert "cargo package --manifest-path" in candidate
     assert "--locked" in candidate
     assert 'RUSTDOCFLAGS="-D warnings -D missing-docs"' in candidate
     assert "adam-assist-rust-crate-publication-set" in candidate
     assert "publish_crate_archive.py" in candidate
-    assert 'adam_core = "=0.1.0-rc.4"' in candidate
+    assert 'adam_core = "=0.1.0-rc.5"' in candidate
+    assert "Latest-stable Rust compatibility (non-authoritative)" in candidate
+    assert "dtolnay/rust-toolchain@stable" in candidate
+    assert (
+        'cargo check --manifest-path "$manifest" --locked --all-features' in candidate
+    )
+    assert (
+        'cargo test --manifest-path "$manifest" --locked --features python' in candidate
+    )
+    assert (
+        'cargo test --manifest-path "$manifest" --locked --lib --no-default-features'
+        in candidate
+    )
+    assert 'test ! -e "$consumer/Cargo.lock"' in candidate
     assert "AssistPropagator::from_default_kernels" in candidate
     assert "cargo publish" not in candidate
 
     publisher = RUST_PUBLISH_WORKFLOW.read_text()
     assert "candidate_run_id:" in publisher
-    assert 'test "$GITHUB_REF" = "refs/tags/v0.4.0rc6"' in publisher
+    assert 'test "$GITHUB_REF" = "refs/tags/v0.4.0rc7"' in publisher
     assert "adam-assist-rust-crate-publication-set" in publisher
-    assert "bootstrap-token" in publisher
     assert "trusted-publishing" in publisher
-    assert "CRATES_IO_BOOTSTRAP_TOKEN" in publisher
+    assert "bootstrap-token" not in publisher
+    assert "CRATES_IO_BOOTSTRAP_TOKEN" not in publisher
     assert "rust-lang/crates-io-auth-action@v1" in publisher
     assert "publish_crate_archive.py" in publisher
     assert "--execute" in publisher
@@ -78,7 +94,7 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "recovery_from_main:" in python_publisher
     assert "dry_run:" in python_publisher
     assert "refs/heads/main" in python_publisher
-    assert "refs/heads/release/pypi-0.4.0rc6-recovery" in python_publisher
+    assert "refs/heads/release/pypi-0.4.0rc7-recovery" in python_publisher
     assert "if: inputs.dry_run == false" in python_publisher
     assert "ref: v${{ inputs.expected_version }}" in python_publisher
     assert "EXPECTED_SHA: ${{ inputs.release_sha }}" in python_publisher
@@ -94,10 +110,11 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     inspector = "python adam-core/migration/scripts/check_wheel_artifacts.py"
 
     assert workflow.index(writer) < workflow.index(builder) < workflow.index(inspector)
-    assert "61cb2779b49ab2a641975942e3ce82d99b461ece" in workflow
-    assert "release-candidate/adam-core-0.5.6rc5" not in workflow
-    assert 'ADAM_CORE_PREVIEW_VERSION: "0.5.6rc5"' in workflow
-    assert 'ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc6"' in workflow
+    assert "ae4a6f1d7ba937d41b86d3ddce343524737d9708" in workflow
+    assert "61cb2779b49ab2a641975942e3ce82d99b461ece" not in workflow
+    assert "release-candidate/adam-core-0.5.6rc6" not in workflow
+    assert 'ADAM_CORE_PREVIEW_VERSION: "0.5.6rc6"' in workflow
+    assert 'ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc7"' in workflow
     assert "full-current-benchmark:" in workflow
     full_job_header = workflow.split("  full-current-benchmark:", maxsplit=1)[1].split(
         "    steps:", maxsplit=1
