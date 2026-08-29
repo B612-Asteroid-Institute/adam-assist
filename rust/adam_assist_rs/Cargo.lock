@@ -4,15 +4,11 @@ version = 4
 
 [[package]]
 name = "adam_assist"
-version = "0.4.0-rc.6"
+version = "0.4.0-rc.7"
 dependencies = [
  "adam_core_rs_coords",
  "adam_core_rs_kernel_data",
  "adam_core_rs_spice",
- "icu_locale_core",
- "icu_normalizer",
- "icu_properties",
- "icu_provider",
  "libassist-sys",
  "librebound-sys",
  "ndarray",
@@ -26,15 +22,15 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_autodiff"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58bdeb5489611032d0bea768654468c8fa33bdac89bf5d3681020557df5c03e3"
+checksum = "1d7e219c701806ef97d9cb88c7fe612f3da59828594b75728e1faf929673f193"
 
 [[package]]
 name = "adam_core_rs_coords"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2c95317eed4d97108cfe675fe233d2b5fde5441a75c274473929276fbe7d885"
+checksum = "78ba173aff87be2c784f7ce3f278033365b19d8b3b8acecbd932fedbe604d8d7"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -52,10 +48,14 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_kernel_data"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1008aab594fc7aa0257860505ecad4a7e3d15dde70e0fc3aad22011c7a2a026c"
+checksum = "54b9fc8b9838fb0bddcbdc0829b914baafa0e4dc766b63f756677f7024f42995"
 dependencies = [
+ "icu_locale_core",
+ "icu_normalizer",
+ "icu_properties",
+ "icu_provider",
  "sha2",
  "ureq",
  "zip",
@@ -63,15 +63,15 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_orbit_determination"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c111d0f894ab910108983ab8ba2da6ede4507a0bb0cd9ab14754bbafa1f8413"
+checksum = "656f7b78e1005bed894bb9f57a3919f9b08fee646be50e65334ecb87a23525b2"
 
 [[package]]
 name = "adam_core_rs_spice"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db5dcaa9964924f86963d4c08753cec3ff718c16d26c85c11ef7eb9b5f5afcd4"
+checksum = "402b99a8a2b53d38c8d54fa077ea96c90ba87125c0d9ca7e776b01dd497edcc8"
 dependencies = [
  "adam_core_rs_coords",
  "faer",

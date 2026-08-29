@@ -5,14 +5,14 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:6b90c7ba919d8e70e3a49aa2206fcc8a3b626a52dcf900234bb578b136e8c0ec"
+content_hash = "sha256:1cbcbda1bfb2bb8fdc49034e8e6fa8848cf884587a0fad71594cc593a8ae0b92"
 
 [[metadata.targets]]
 requires_python = ">=3.11,<3.14"
 
 [[package]]
 name = "adam-core"
-version = "0.5.6rc5"
+version = "0.5.6rc6"
 requires_python = "<3.14,>=3.11"
 summary = "Core libraries for the ADAM platform"
 groups = ["default"]
@@ -32,18 +32,18 @@ dependencies = [
     "scipy",
 ]
 files = [
-    {file = "adam_core-0.5.6rc5-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:0bf30d31a9ea3f7000fcba7e5f9c8cb66319a3cdff05ce3de0a1f2e4f9deefc6"},
-    {file = "adam_core-0.5.6rc5-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:47a5585e28c1f76d6360268acce7f4544c1e5be57529dc6efbdcf14cf3bd195a"},
-    {file = "adam_core-0.5.6rc5-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:1433709e941a5f19de3c0046f30790e5aa7d229168c5509c13e625bcb378e2d7"},
-    {file = "adam_core-0.5.6rc5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7d03abc3dd3335c8368fa778d8e51e0543b33a169b2431b9a3998153c4882bbc"},
-    {file = "adam_core-0.5.6rc5-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:1edd2c4efa28e341d17d134a0f5ace9d1049d0adb77c7ecb85c60bcfe9bc761e"},
-    {file = "adam_core-0.5.6rc5-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:0d5c35735f7de88a1bbfa9fb844a7646448315835303d0ed4f78bc238dced96d"},
-    {file = "adam_core-0.5.6rc5-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:82586a3606d836d3549ba920c2dffd342e867776fad3e92cb7c800127166a20c"},
-    {file = "adam_core-0.5.6rc5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0277a7dfd34fca7f15ff10ff89a845ca4457417568df2894e07dcaf36fbbfb7c"},
-    {file = "adam_core-0.5.6rc5-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:f82234207c17a9532af5c59087b75767b1988811df25b2a8e26918bc5ae3f3cd"},
-    {file = "adam_core-0.5.6rc5-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:c8cc95b58515edf1cf38ef82b5c9b2b6c54d82645c47a8edac0a04362d8cca33"},
-    {file = "adam_core-0.5.6rc5-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:aad44d55a58e524f6e7d08d8a0fd8b2e03d245c2d63a7cba1a033fc6186b7cc6"},
-    {file = "adam_core-0.5.6rc5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a3b82552b5615238bf8dbb618cdbc97a32836ee7e2537738934062c813f6dade"},
+    {file = "adam_core-0.5.6rc6-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:8a5c3f8cd546a4be78b0fb348874971b9cbc0927036ab07de5097619ebb416fc"},
+    {file = "adam_core-0.5.6rc6-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ef8e105575cfe90c1431349f8433369b059f993454cd5ab765f2f14a3c6327c3"},
+    {file = "adam_core-0.5.6rc6-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9dcccb5b3c331965f867394927c2497ef735eb8669300d4508ea6ee5a6b684b1"},
+    {file = "adam_core-0.5.6rc6-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f40e8447ff945bd042e10a9af85ad51638492ae73c57a99c0a3a911bc470057c"},
+    {file = "adam_core-0.5.6rc6-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:a84195d9bc56acfae422ce921936ea7ddccf9beb328abd6d6b6e4b05902eb284"},
+    {file = "adam_core-0.5.6rc6-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9407c0cec8012c965f1fdfb72313c5ed59398c375c6b568288c3f1a5aef0daa8"},
+    {file = "adam_core-0.5.6rc6-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:33470e8793e6ae9eedb480ce1e32e44c5ff96b8971e222b8e6821a98c9129813"},
+    {file = "adam_core-0.5.6rc6-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7424c2ace9c02751d9e5c3ac962bc6b03db60b206c67625e5e0fbee5c7de3c31"},
+    {file = "adam_core-0.5.6rc6-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:3321196b86e634496c96cf3d32d2efa89cc8c6d1a965c19294d14119baf870ac"},
+    {file = "adam_core-0.5.6rc6-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:6ebd7254f614ddf176ac8e958729a3a592d3eacbd67e1aec9cdceacfa49a60bd"},
+    {file = "adam_core-0.5.6rc6-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8cd7d3f5d0a3a0c99750855e74badcf3e42b099cc5dabd533608595011bf4cd8"},
+    {file = "adam_core-0.5.6rc6-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a6cec2176c2a0c6d9b955570b074b10413ae89c454d2e2b162cae38e5c55d45c"},
 ]
 
 [[package]]
@@ -1643,7 +1643,7 @@ version = "2026.3"
 requires_python = ">=2"
 summary = "Provider of IANA time zone data"
 groups = ["default"]
-marker = "sys_platform == \"win32\" or sys_platform == \"emscripten\""
+marker = "sys_platform == \"emscripten\" or sys_platform == \"win32\""
 files = [
     {file = "tzdata-2026.3-py2.py3-none-any.whl", hash = "sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931"},
     {file = "tzdata-2026.3.tar.gz", hash = "sha256:4a1518b8993086a7982523e071643f3c0e5f213e75b21318e78bcabfff9d1415"},

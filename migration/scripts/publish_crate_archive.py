@@ -23,15 +23,9 @@ from typing import Any
 
 CRATE_NAME = "adam_assist"
 CORE_REQUIREMENTS = {
-    "adam_core_rs_coords": "=0.1.0-rc.4",
-    "adam_core_rs_kernel_data": "=0.1.0-rc.4",
-    "adam_core_rs_spice": "=0.1.0-rc.4",
-}
-MSRV_REQUIREMENTS = {
-    "icu_locale_core": "=2.2.0",
-    "icu_normalizer": "=2.2.0",
-    "icu_properties": "=2.2.0",
-    "icu_provider": "=2.2.0",
+    "adam_core_rs_coords": "=0.1.0-rc.5",
+    "adam_core_rs_kernel_data": "=0.1.0-rc.5",
+    "adam_core_rs_spice": "=0.1.0-rc.5",
 }
 
 
@@ -157,7 +151,7 @@ def validate_package(package: dict[str, Any], expected_version: str) -> None:
         dependency["name"]: dependency["req"]
         for dependency in package["dependencies"]
     }
-    for name, expected in (CORE_REQUIREMENTS | MSRV_REQUIREMENTS).items():
+    for name, expected in CORE_REQUIREMENTS.items():
         actual = requirements.get(name)
         if actual != expected:
             raise ValueError(f"{CRATE_NAME}->{name} must use {expected}, got {actual}")

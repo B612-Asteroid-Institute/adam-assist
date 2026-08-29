@@ -14,12 +14,12 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release-candidate version
         required: true
-        default: 0.4.0rc6
+        default: 0.4.0rc7
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core release candidate
         required: true
-        default: 0.5.6rc5
+        default: 0.5.6rc6
         type: string
       expected_rust_crate_sha256:
         description: Exact published adam_assist crate checksum
@@ -77,7 +77,7 @@ jobs:
               test "$RECOVERY_FROM_MAIN" = "true"
               test "$DRY_RUN" = "false"
               ;;
-            refs/heads/release/pypi-0.4.0rc6-recovery)
+            refs/heads/release/pypi-0.4.0rc7-recovery)
               test "$RECOVERY_FROM_MAIN" = "false"
               test "$DRY_RUN" = "true"
               ;;
@@ -110,18 +110,18 @@ jobs:
           cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
           package = cargo["package"]
           cargo_version = package["version"]
-          if cargo_version != "0.4.0-rc.6" or str(assist) != "0.4.0rc6":
+          if cargo_version != "0.4.0-rc.7" or str(assist) != "0.4.0rc7":
               raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
           if package["name"] != "adam_assist" or package["rust-version"] != "1.87":
               raise SystemExit(f"unexpected public Rust package metadata: {package}")
           if package.get("publish", True) is not True:
               raise SystemExit("adam_assist Rust crate is not publishable")
           for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
-              if cargo["dependencies"].get(name) != "=0.1.0-rc.4":
-                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.4")
+              if cargo["dependencies"].get(name) != "=0.1.0-rc.5":
+                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.5")
           kernel_data = cargo["dependencies"].get("adam_core_rs_kernel_data")
           expected_kernel_data = {
-              "version": "=0.1.0-rc.4",
+              "version": "=0.1.0-rc.5",
               "default-features": False,
               "optional": True,
           }
@@ -143,19 +143,19 @@ jobs:
               "https://index.crates.io/ad/am/adam_assist",
               headers={
                   "User-Agent": (
-                      "adam-assist-release-check/0.4.0rc6 "
+                      "adam-assist-release-check/0.4.0rc7 "
                       "(+https://github.com/B612-Asteroid-Institute/adam-assist)"
                   )
               },
           )
           with urllib.request.urlopen(request) as response:
               entries = [json.loads(line) for line in response if line.strip()]
-          matches = [entry for entry in entries if entry["vers"] == "0.4.0-rc.6"]
+          matches = [entry for entry in entries if entry["vers"] == "0.4.0-rc.7"]
           if len(matches) != 1:
               raise SystemExit(f"expected one public Rust crate entry, found {len(matches)}")
           entry = matches[0]
           if entry["yanked"]:
-              raise SystemExit("adam_assist 0.4.0-rc.6 is yanked")
+              raise SystemExit("adam_assist 0.4.0-rc.7 is yanked")
           if entry["cksum"] != os.environ["EXPECTED_CHECKSUM"]:
               raise SystemExit(f"unexpected adam_assist checksum: {entry['cksum']}")
           if entry.get("rust_version") != "1.87":

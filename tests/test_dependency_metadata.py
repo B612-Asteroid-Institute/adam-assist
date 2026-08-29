@@ -47,7 +47,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     manifest = _cargo_manifest()
     package = manifest["package"]
     assert package["name"] == "adam_assist"
-    assert package["version"] == "0.4.0-rc.6"
+    assert package["version"] == "0.4.0-rc.7"
     assert package["rust-version"] == "1.87"
     assert package.get("publish", True) is True
     assert package["license"] == "GPL-3.0"
@@ -68,7 +68,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
     assert dependencies["sha2"] == {"version": "0.10", "optional": True}
     kernel_dependency = {
-        "version": "=0.1.0-rc.4",
+        "version": "=0.1.0-rc.5",
         "default-features": False,
     }
     assert dependencies["adam_core_rs_kernel_data"] == {
@@ -78,16 +78,12 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == (
         kernel_dependency
     )
-    for name in (
+    assert {
         "icu_locale_core",
         "icu_normalizer",
         "icu_properties",
         "icu_provider",
-    ):
-        assert dependencies[name] == {
-            "version": "=2.2.0",
-            "default-features": False,
-        }
+    }.isdisjoint(dependencies)
 
 
 def test_dev_lint_tool_is_pinned() -> None:
@@ -99,7 +95,7 @@ def test_dev_lint_tool_is_pinned() -> None:
 def test_preview_dependencies_are_exact_public_releases() -> None:
     dependencies = _project_dependencies()
     assert dependencies == [
-        "adam-core==0.5.6rc5",
+        "adam-core==0.5.6rc6",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
     ]
@@ -117,15 +113,15 @@ def test_preview_dependencies_are_exact_public_releases() -> None:
         assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.4"
-    assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.4"
+    assert dependencies["adam_core_rs_coords"] == "=0.1.0-rc.5"
+    assert dependencies["adam_core_rs_spice"] == "=0.1.0-rc.5"
     assert not (ROOT / "rust" / "vendor").exists()
 
 
 def test_python_lock_matches_preview_and_kernel_authorities() -> None:
     packages = _pdm_lock_packages()
     expected = {
-        "adam-core": "0.5.6rc5",
+        "adam-core": "0.5.6rc6",
         "naif-de440": "2020.12.21.1",
         "jpl-small-bodies-de441-n16": "2021.3.31.1",
         "naif-leapseconds": "2025.4.22",
@@ -139,7 +135,7 @@ def test_python_lock_matches_preview_and_kernel_authorities() -> None:
 
 def test_lock_matches_exact_published_core_crates() -> None:
     packages = _cargo_lock_packages()
-    assert packages["adam_assist"]["version"] == "0.4.0-rc.6"
+    assert packages["adam_assist"]["version"] == "0.4.0-rc.7"
     for name in (
         "adam_core_rs_autodiff",
         "adam_core_rs_coords",
@@ -147,7 +143,7 @@ def test_lock_matches_exact_published_core_crates() -> None:
         "adam_core_rs_orbit_determination",
         "adam_core_rs_spice",
     ):
-        assert packages[name]["version"] == "0.1.0-rc.4"
+        assert packages[name]["version"] == "0.1.0-rc.5"
         assert packages[name]["source"] == (
             "registry+https://github.com/rust-lang/crates.io-index"
         )
@@ -173,11 +169,11 @@ def test_python_preview_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.4.0-rc.6"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc6"
+    assert cargo_version == "0.4.0-rc.7"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0rc7"
 
 
-def test_current_benchmark_ci_is_the_complete_35_workload_grid() -> None:
+def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         command = tomllib.load(pyproject_file)["tool"]["pdm"]["scripts"][
             "benchmark-current-ci"
@@ -212,11 +208,11 @@ def test_current_benchmark_ci_is_the_complete_35_workload_grid() -> None:
                 ephemeris_count,
                 covariance_count,
                 collision_count,
-                od_count,
             )
         )
-        == 35
+        == 30
     )
+    assert od_count == 5
 
 
 def test_rust_public_semantics_fixture_uses_the_final_legacy_authority() -> None:

@@ -158,6 +158,18 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
     assert len(symbols) == summary["symbols"]
     assert len({symbol["id"] for symbol in symbols}) == len(symbols)
     assert all(symbol["classification"] for symbol in symbols)
+    core_od_hooks = {
+        "ASSISTPropagator.fit_least_squares",
+        "ASSISTPropagator.fit_least_squares_evaluated",
+        "ASSISTPropagator.od_fit",
+        "ASSISTPropagator.initial_orbit_determination",
+        "ASSISTPropagator.vallado_least_squares",
+    }
+    assert {
+        symbol["id"].split(":", maxsplit=1)[1]
+        for symbol in symbols
+        if symbol["classification"] == "core_owned_fused_od_backend_capability"
+    } == core_od_hooks
     assert set(CURRENT_MANIFEST["correctness_classification"]) == {
         "bitwise",
         "tolerance-based",
@@ -166,4 +178,4 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
 
 
 def test_rc_version_module_is_preserved() -> None:
-    assert __version__ == "0.4.0rc6"
+    assert __version__ == "0.4.0rc7"
