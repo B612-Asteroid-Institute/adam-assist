@@ -9,6 +9,7 @@ protocol without repackaging.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import struct
@@ -22,11 +23,15 @@ from pathlib import Path
 from typing import Any
 
 CRATE_NAME = "adam_assist"
-CORE_REQUIREMENTS = {
-    "adam_core_rs_coords": "=0.1.0-rc.5",
-    "adam_core_rs_kernel_data": "=0.1.0-rc.5",
-    "adam_core_rs_spice": "=0.1.0-rc.5",
-}
+CORE_DEPENDENCIES = (
+    "adam_core_rs_coords",
+    "adam_core_rs_kernel_data",
+    "adam_core_rs_spice",
+)
+
+
+def core_requirements(version: str) -> dict[str, str]:
+    return {name: f"={version}" for name in CORE_DEPENDENCIES}
 
 
 def cargo_package(manifest_path: Path) -> dict[str, Any]:
@@ -135,23 +140,33 @@ def archive_identity(path: Path) -> tuple[str, str]:
     return name, version
 
 
-def validate_package(package: dict[str, Any], expected_version: str) -> None:
+def validate_package(
+    package: dict[str, Any],
+    expected_version: str,
+    expected_core_version: str,
+    channel: str,
+) -> None:
     if package["version"] != expected_version:
         raise ValueError(
             f"{CRATE_NAME} version {package['version']} != {expected_version}"
         )
-    if "-" not in expected_version:
-        raise ValueError(f"only prerelease versions may be published: {expected_version}")
+    if channel not in {"preview", "stable"}:
+        raise ValueError(f"unsupported release channel: {channel}")
+    is_prerelease = "-" in expected_version
+    core_is_prerelease = "-" in expected_core_version
+    if channel == "preview" and (not is_prerelease or not core_is_prerelease):
+        raise ValueError("preview package and Core versions must be prereleases")
+    if channel == "stable" and (is_prerelease or core_is_prerelease):
+        raise ValueError("stable package and Core versions must not be prereleases")
     if package["rust_version"] != "1.87":
         raise ValueError(f"unexpected MSRV {package['rust_version']}")
     if package.get("publish") == []:
         raise ValueError(f"{CRATE_NAME} is marked publish=false")
 
     requirements = {
-        dependency["name"]: dependency["req"]
-        for dependency in package["dependencies"]
+        dependency["name"]: dependency["req"] for dependency in package["dependencies"]
     }
-    for name, expected in CORE_REQUIREMENTS.items():
+    for name, expected in core_requirements(expected_core_version).items():
         actual = requirements.get(name)
         if actual != expected:
             raise ValueError(f"{CRATE_NAME}->{name} must use {expected}, got {actual}")
@@ -166,6 +181,52 @@ def request_json(request: urllib.request.Request, timeout: float = 60.0) -> Any:
         raise RuntimeError(
             f"registry request failed ({error.code}): {detail}"
         ) from error
+
+
+def crates_io_index_path(name: str) -> str:
+    normalized = name.lower()
+    if len(normalized) == 1:
+        return f"1/{normalized}"
+    if len(normalized) == 2:
+        return f"2/{normalized}"
+    if len(normalized) == 3:
+        return f"3/{normalized[0]}/{normalized}"
+    return f"{normalized[:2]}/{normalized[2:4]}/{normalized}"
+
+
+def published_crate_entry(index: str, name: str, version: str) -> dict[str, Any] | None:
+    request = urllib.request.Request(
+        f"{index.rstrip('/')}/{crates_io_index_path(name)}",
+        headers={
+            "Accept": "text/plain",
+            "User-Agent": "adam-assist-release-automation/1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            entries = [json.loads(line) for line in response if line.strip()]
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        detail = error.read().decode(errors="replace")
+        raise RuntimeError(
+            f"registry index request failed ({error.code}): {detail}"
+        ) from error
+    matches = [entry for entry in entries if entry.get("vers") == version]
+    if len(matches) > 1:
+        raise ValueError(f"multiple registry entries for {name} {version}")
+    return matches[0] if matches else None
+
+
+def validate_existing_archive(
+    entry: dict[str, Any], name: str, version: str, digest: str
+) -> None:
+    if entry.get("cksum") != digest:
+        raise ValueError(
+            f"published {name} {version} checksum {entry.get('cksum')} != {digest}"
+        )
+    if entry.get("yanked", False):
+        raise ValueError(f"published {name} {version} is yanked")
 
 
 def wait_for_version(api: str, name: str, version: str) -> None:
@@ -192,14 +253,22 @@ def main() -> None:
     )
     parser.add_argument("--archives", type=Path, required=True)
     parser.add_argument("--expected-version", required=True)
+    parser.add_argument("--expected-core-version", required=True)
+    parser.add_argument("--channel", choices=("preview", "stable"), default="preview")
     parser.add_argument("--registry-api", default="https://crates.io")
+    parser.add_argument("--registry-index", default="https://index.crates.io")
     parser.add_argument("--token-env", default="CARGO_REGISTRY_TOKEN")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
 
     manifest_path = args.manifest_path.resolve()
     package = cargo_package(manifest_path)
-    validate_package(package, args.expected_version)
+    validate_package(
+        package,
+        args.expected_version,
+        args.expected_core_version,
+        args.channel,
+    )
     archive_path = args.archives / f"{CRATE_NAME}-{args.expected_version}.crate"
     archive_name, archive_version = archive_identity(archive_path)
     if (archive_name, archive_version) != (CRATE_NAME, args.expected_version):
@@ -209,10 +278,19 @@ def main() -> None:
         )
 
     archive = archive_path.read_bytes()
+    digest = hashlib.sha256(archive).hexdigest()
     body = publish_body(publish_metadata(package), archive)
     print(f"prepared {archive_path.name}: archive={len(archive)} body={len(body)}")
     if not args.execute:
         print("dry run only; pass --execute to publish")
+        return
+
+    entry = published_crate_entry(
+        args.registry_index, CRATE_NAME, args.expected_version
+    )
+    if entry is not None:
+        validate_existing_archive(entry, CRATE_NAME, args.expected_version, digest)
+        print(f"already published exact archive {archive_path.name}; skipping")
         return
 
     token = os.environ.get(args.token_env)

@@ -1,4 +1,4 @@
-name: Publish tested adam-assist preview wheels
+name: Publish tested adam-assist wheels
 
 on:
   workflow_dispatch:
@@ -12,15 +12,33 @@ on:
         required: true
         type: string
       expected_version:
-        description: Exact adam-assist PEP 440 release-candidate version
+        description: Exact adam-assist PEP 440 release version
         required: true
         default: 0.4.0rc7
         type: string
+      expected_rust_version:
+        description: Exact matching adam_assist Cargo version
+        required: true
+        default: 0.4.0-rc.7
+        type: string
       expected_adam_core_version:
-        description: Exact already-published adam-core release candidate
+        description: Exact already-published adam-core Python release
         required: true
         default: 0.5.6rc6
         type: string
+      expected_adam_core_rust_version:
+        description: Exact already-published adam-core Rust release
+        required: true
+        default: 0.1.0-rc.5
+        type: string
+      release_channel:
+        description: Registry release channel
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - stable
       expected_rust_crate_sha256:
         description: Exact published adam_assist crate checksum
         required: true
@@ -43,11 +61,10 @@ on:
 permissions:
   contents: read
   actions: read
-  id-token: write
 
 jobs:
   collect-tested-artifacts:
-    name: Collect and verify already-tested preview wheels
+    name: Collect and verify already-tested wheels
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -56,6 +73,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
       - name: Install wheel filename parser
         run: |
           python -m pip install --only-binary=:all: packaging
@@ -77,7 +97,7 @@ jobs:
               test "$RECOVERY_FROM_MAIN" = "true"
               test "$DRY_RUN" = "false"
               ;;
-            refs/heads/release/pypi-0.4.0rc7-recovery)
+            refs/heads/release/*)
               test "$RECOVERY_FROM_MAIN" = "false"
               test "$DRY_RUN" = "true"
               ;;
@@ -89,78 +109,15 @@ jobs:
           else
             test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
           fi
-      - name: Verify source prerelease and exact adam-core dependency
-        env:
-          EXPECTED_VERSION: ${{ inputs.expected_version }}
-          EXPECTED_CORE_VERSION: ${{ inputs.expected_adam_core_version }}
+      - name: Verify source versions, exact Core pins, and public Rust prerequisite
         run: |
-          python - <<'PY'
-          import os, tomllib
-          from pathlib import Path
-          from packaging.version import Version
-
-          assist = Version(os.environ["EXPECTED_VERSION"])
-          core = Version(os.environ["EXPECTED_CORE_VERSION"])
-          if assist.pre is None or assist.pre[0] != "rc" or core.pre is None or core.pre[0] != "rc":
-              raise SystemExit(f"only release candidates are accepted: {assist=} {core=}")
-          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
-          expected = f"adam-core=={core}"
-          if expected not in pyproject["project"]["dependencies"]:
-              raise SystemExit(f"missing exact preview dependency {expected}")
-          cargo = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
-          package = cargo["package"]
-          cargo_version = package["version"]
-          if cargo_version != "0.4.0-rc.7" or str(assist) != "0.4.0rc7":
-              raise SystemExit(f"source version mismatch: {cargo_version=} {assist=}")
-          if package["name"] != "adam_assist" or package["rust-version"] != "1.87":
-              raise SystemExit(f"unexpected public Rust package metadata: {package}")
-          if package.get("publish", True) is not True:
-              raise SystemExit("adam_assist Rust crate is not publishable")
-          for name in ("adam_core_rs_coords", "adam_core_rs_spice"):
-              if cargo["dependencies"].get(name) != "=0.1.0-rc.5":
-                  raise SystemExit(f"{name} is not exact-pinned to public 0.1.0-rc.5")
-          kernel_data = cargo["dependencies"].get("adam_core_rs_kernel_data")
-          expected_kernel_data = {
-              "version": "=0.1.0-rc.5",
-              "default-features": False,
-              "optional": True,
-          }
-          if kernel_data != expected_kernel_data:
-              raise SystemExit("adam_core_rs_kernel_data is not exact-pinned")
-          if Path("rust/vendor").exists():
-              raise SystemExit("temporary vendored core crates must be absent")
-          PY
-      - name: Require the matching public Rust crate
-        env:
-          EXPECTED_CHECKSUM: ${{ inputs.expected_rust_crate_sha256 }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import urllib.request
-
-          request = urllib.request.Request(
-              "https://index.crates.io/ad/am/adam_assist",
-              headers={
-                  "User-Agent": (
-                      "adam-assist-release-check/0.4.0rc7 "
-                      "(+https://github.com/B612-Asteroid-Institute/adam-assist)"
-                  )
-              },
-          )
-          with urllib.request.urlopen(request) as response:
-              entries = [json.loads(line) for line in response if line.strip()]
-          matches = [entry for entry in entries if entry["vers"] == "0.4.0-rc.7"]
-          if len(matches) != 1:
-              raise SystemExit(f"expected one public Rust crate entry, found {len(matches)}")
-          entry = matches[0]
-          if entry["yanked"]:
-              raise SystemExit("adam_assist 0.4.0-rc.7 is yanked")
-          if entry["cksum"] != os.environ["EXPECTED_CHECKSUM"]:
-              raise SystemExit(f"unexpected adam_assist checksum: {entry['cksum']}")
-          if entry.get("rust_version") != "1.87":
-              raise SystemExit(f"unexpected adam_assist MSRV: {entry.get('rust_version')}")
-          PY
+          python migration/scripts/verify_release.py \
+            --python-version "${{ inputs.expected_version }}" \
+            --rust-version "${{ inputs.expected_rust_version }}" \
+            --core-python-version "${{ inputs.expected_adam_core_version }}" \
+            --core-rust-version "${{ inputs.expected_adam_core_rust_version }}" \
+            --channel "${{ inputs.release_channel }}" \
+            --rust-checksum "${{ inputs.expected_rust_crate_sha256 }}"
       - name: Verify acceptance provenance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -295,13 +252,60 @@ jobs:
     if: inputs.dry_run == false
     needs: collect-tested-artifacts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     environment:
-      name: pypi-preview
+      name: ${{ inputs.release_channel == 'stable' && 'pypi' || 'pypi-preview' }}
       url: https://pypi.org/p/adam-assist
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.expected_version }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
       - uses: actions/download-artifact@v4
         with:
           name: adam-assist-${{ inputs.expected_version }}-tested-publication-set
-          path: dist
-      - run: rm dist/SHA256SUMS
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          path: accepted-dist
+      - name: Prepare only missing checksum-verified files
+        id: publication-state
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          rm -rf upload-dist
+          python migration/scripts/prepare_pypi_upload.py \
+            --dist accepted-dist \
+            --project adam-assist \
+            --version "$EXPECTED_VERSION" \
+            --expected-count 12 \
+            --upload-dir upload-dist \
+            --output pypi-before.json
+          echo "missing_count=$(find upload-dist -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')" \
+            >> "$GITHUB_OUTPUT"
+      - name: Upload only missing accepted wheels
+        if: steps.publication-state.outputs.missing_count != '0'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: upload-dist/
+      - name: Verify the complete public release matches accepted bytes
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          python migration/scripts/prepare_pypi_upload.py \
+            --dist accepted-dist \
+            --project adam-assist \
+            --version "$EXPECTED_VERSION" \
+            --expected-count 12 \
+            --require-complete \
+            --output pypi-after.json
+      - name: Upload public-registry comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adam-assist-${{ inputs.expected_version }}-pypi-state
+          path: pypi-*.json
+          if-no-files-found: error

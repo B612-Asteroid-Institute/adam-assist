@@ -61,3 +61,18 @@ Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into
 adam-assist once; adam-core generic algorithms and ASSIST orchestration then
 compose Rust-to-Rust inside that extension.
+
+## Stable-release preparation
+
+The target stable line is Python/Rust `adam-assist 0.4.0`, exact-pinned to
+Python and public Rust `adam-core 0.5.7`. Stable source and the frozen PDM/Cargo
+locks are finalized only after the Core crates and wheels are public, so normal
+resolution never relies on temporary path patches or index overrides.
+
+Release scripts distinguish preview and stable channels. Stable publication
+targets protected production environments named `crates-io` and `pypi`; the
+matching GitHub environments and registry trusted publishers must be configured
+before dispatch. Both publishers inspect existing registry state first and can
+resume a partial upload only when already-public files are unyanked and
+checksum-identical to the accepted artifacts. Tags, environment changes, and
+registry uploads remain separate human approval boundaries.

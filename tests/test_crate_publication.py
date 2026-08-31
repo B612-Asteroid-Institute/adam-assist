@@ -9,17 +9,22 @@ import pytest
 from migration.scripts import publish_crate_archive
 
 VERSION = "0.4.0-rc.7"
+CORE_VERSION = "0.1.0-rc.5"
 
 
-def _package() -> dict:
+def _package(
+    version: str = VERSION, core_version: str = CORE_VERSION
+) -> dict[str, object]:
     return {
         "name": "adam_assist",
-        "version": VERSION,
+        "version": version,
         "rust_version": "1.87",
         "publish": None,
         "dependencies": [
             {"name": name, "req": requirement}
-            for name, requirement in publish_crate_archive.CORE_REQUIREMENTS.items()
+            for name, requirement in publish_crate_archive.core_requirements(
+                core_version
+            ).items()
         ],
     }
 
@@ -50,15 +55,47 @@ def test_publish_body_preserves_metadata_and_exact_archive_bytes() -> None:
     assert body[metadata_end + 4 :] == archive
 
 
-def test_package_validation_requires_msrv_prerelease_and_core_pins() -> None:
-    publish_crate_archive.validate_package(_package(), VERSION)
+def test_package_validation_requires_msrv_channel_and_core_pins() -> None:
+    publish_crate_archive.validate_package(_package(), VERSION, CORE_VERSION, "preview")
+    publish_crate_archive.validate_package(
+        _package("0.4.0", "0.5.7"), "0.4.0", "0.5.7", "stable"
+    )
+
+    with pytest.raises(ValueError, match="stable package"):
+        publish_crate_archive.validate_package(
+            _package(), VERSION, CORE_VERSION, "stable"
+        )
 
     unpinned = _package()
-    unpinned["dependencies"][0]["req"] = "0.1"
+    dependencies = unpinned["dependencies"]
+    assert isinstance(dependencies, list)
+    dependencies[0]["req"] = "0.1"
     with pytest.raises(ValueError, match="must use"):
-        publish_crate_archive.validate_package(unpinned, VERSION)
+        publish_crate_archive.validate_package(
+            unpinned, VERSION, CORE_VERSION, "preview"
+        )
 
     unpublished = _package()
     unpublished["publish"] = []
     with pytest.raises(ValueError, match="publish=false"):
-        publish_crate_archive.validate_package(unpublished, VERSION)
+        publish_crate_archive.validate_package(
+            unpublished, VERSION, CORE_VERSION, "preview"
+        )
+
+
+def test_existing_archive_must_be_exact_and_unyanked() -> None:
+    entry = {"cksum": "abc", "yanked": False}
+    publish_crate_archive.validate_existing_archive(
+        entry, "adam_assist", VERSION, "abc"
+    )
+    with pytest.raises(ValueError, match="checksum"):
+        publish_crate_archive.validate_existing_archive(
+            entry, "adam_assist", VERSION, "def"
+        )
+    with pytest.raises(ValueError, match="yanked"):
+        publish_crate_archive.validate_existing_archive(
+            {"cksum": "abc", "yanked": True},
+            "adam_assist",
+            VERSION,
+            "abc",
+        )

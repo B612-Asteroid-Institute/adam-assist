@@ -48,13 +48,18 @@ def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
 def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     candidate = RUST_CANDIDATE_WORKFLOW.read_text()
     assert 'RUST_PREVIEW_VERSION: "0.4.0-rc.7"' in candidate
+    assert 'CORE_RUST_VERSION: "0.1.0-rc.5"' in candidate
+    assert "RELEASE_CHANNEL: preview" in candidate
     assert '"release-candidate/adam-assist-0.4.0rc7"' in candidate
+    assert '"release/adam-assist-*"' in candidate
     assert "cargo package --manifest-path" in candidate
     assert "--locked" in candidate
     assert 'RUSTDOCFLAGS="-D warnings -D missing-docs"' in candidate
     assert "adam-assist-rust-crate-publication-set" in candidate
     assert "publish_crate_archive.py" in candidate
-    assert 'adam_core = "=0.1.0-rc.5"' in candidate
+    assert '--expected-core-version "$CORE_RUST_VERSION"' in candidate
+    assert '--channel "$RELEASE_CHANNEL"' in candidate
+    assert 'adam_core = "=$CORE_RUST_VERSION"' in candidate
     assert "Latest-stable Rust compatibility (non-authoritative)" in candidate
     assert "dtolnay/rust-toolchain@stable" in candidate
     assert (
@@ -73,7 +78,15 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
 
     publisher = RUST_PUBLISH_WORKFLOW.read_text()
     assert "candidate_run_id:" in publisher
-    assert 'test "$GITHUB_REF" = "refs/tags/v0.4.0rc7"' in publisher
+    assert "expected_core_version:" in publisher
+    assert "release_channel:" in publisher
+    assert "expected_python_version:" in publisher
+    assert (
+        'test "$GITHUB_REF" = "refs/tags/v${{ inputs.expected_python_version }}"'
+        in publisher
+    )
+    assert "cargo_version_to_pep440" in publisher
+    assert "inputs.release_channel == 'stable' && 'crates-io'" in publisher
     assert "adam-assist-rust-crate-publication-set" in publisher
     assert "trusted-publishing" in publisher
     assert "bootstrap-token" not in publisher
@@ -84,21 +97,25 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "cargo publish" not in publisher
 
     python_publisher = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
-    assert "Require the matching public Rust crate" in python_publisher
-    assert "https://index.crates.io/ad/am/adam_assist" in python_publisher
+    assert "public Rust prerequisite" in python_publisher
+    assert "migration/scripts/verify_release.py" in python_publisher
     assert "api/v1/crates/adam_assist" not in python_publisher
-    assert 'entry["yanked"]' in python_publisher
-    assert 'entry["cksum"]' in python_publisher
-    assert 'entry.get("rust_version") != "1.87"' in python_publisher
+    assert "expected_rust_version:" in python_publisher
+    assert "expected_adam_core_rust_version:" in python_publisher
+    assert "release_channel:" in python_publisher
     assert "release_sha:" in python_publisher
     assert "recovery_from_main:" in python_publisher
     assert "dry_run:" in python_publisher
     assert "refs/heads/main" in python_publisher
-    assert "refs/heads/release/pypi-0.4.0rc7-recovery" in python_publisher
+    assert "refs/heads/release/*" in python_publisher
     assert "if: inputs.dry_run == false" in python_publisher
     assert "ref: v${{ inputs.expected_version }}" in python_publisher
     assert "EXPECTED_SHA: ${{ inputs.release_sha }}" in python_publisher
     assert "unconditional_requirements != expected_requirements" in python_publisher
+    assert "prepare_pypi_upload.py" in python_publisher
+    assert "packages-dir: upload-dist/" in python_publisher
+    assert "skip-existing" not in python_publisher
+    assert "inputs.release_channel == 'stable' && 'pypi'" in python_publisher
     assert "testpypi" not in python_publisher.lower()
     assert "to pypi" in python_publisher
 
@@ -110,9 +127,10 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     inspector = "python adam-core/migration/scripts/check_wheel_artifacts.py"
 
     assert workflow.index(writer) < workflow.index(builder) < workflow.index(inspector)
-    assert "ae4a6f1d7ba937d41b86d3ddce343524737d9708" in workflow
-    assert "61cb2779b49ab2a641975942e3ce82d99b461ece" not in workflow
-    assert "release-candidate/adam-core-0.5.6rc6" not in workflow
+    assert "adam_core_ref:" in workflow
+    assert "Exact compatible adam-core source revision" in workflow
+    assert "ADAM_CORE_REF: ${{ inputs.adam_core_ref }}" in workflow
+    assert "ae4a6f1d7ba937d41b86d3ddce343524737d9708" not in workflow
     assert 'ADAM_CORE_PREVIEW_VERSION: "0.5.6rc6"' in workflow
     assert 'ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc7"' in workflow
     assert "full-current-benchmark:" in workflow

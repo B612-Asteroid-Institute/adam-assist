@@ -8,9 +8,27 @@ on:
         required: true
         type: string
       expected_version:
-        description: Exact Cargo prerelease version
+        description: Exact Cargo release version
         required: true
         default: 0.4.0-rc.7
+        type: string
+      expected_core_version:
+        description: Exact public adam-core Rust version
+        required: true
+        default: 0.1.0-rc.5
+        type: string
+      release_channel:
+        description: Registry release channel
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - stable
+      expected_python_version:
+        description: Exact matching PEP 440 version used by the immutable Git tag
+        required: true
+        default: 0.4.0rc7
         type: string
       authentication:
         description: crates.io OIDC trusted publishing (bootstrap token is no longer used)
@@ -32,34 +50,37 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: crates-io-preview
+    environment: ${{ inputs.release_channel == 'stable' && 'crates-io' || 'crates-io-preview' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
-      - name: Verify the exact RC tag and irreversible-action confirmation
+      - name: Verify the exact release tag and irreversible-action confirmation
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = "refs/tags/v0.4.0rc7"
+          test "$GITHUB_REF" = "refs/tags/v${{ inputs.expected_python_version }}"
           test "$CONFIRMATION" = "publish adam_assist $EXPECTED_VERSION from $EXPECTED_SHA to crates.io"
-      - name: Verify crate identity and MSRV
+      - name: Verify crate identity, Python tag version, and MSRV
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_PYTHON_VERSION: ${{ inputs.expected_python_version }}
         run: |
           python - <<'PY'
           import os
           import tomllib
           from pathlib import Path
+          from migration.scripts.write_maturin_version import cargo_version_to_pep440
 
           manifest = tomllib.loads(Path("rust/adam_assist_rs/Cargo.toml").read_text())
           package = manifest["package"]
           assert package["name"] == "adam_assist"
           assert package["version"] == os.environ["EXPECTED_VERSION"]
+          assert cargo_version_to_pep440(package["version"]) == os.environ["EXPECTED_PYTHON_VERSION"]
           assert package["rust-version"] == "1.87"
           assert package.get("publish", True) is True
           PY
@@ -92,7 +113,9 @@ jobs:
           test "$(find accepted-crate -maxdepth 1 -name '*.crate' | wc -l | tr -d ' ')" = 1
           python migration/scripts/publish_crate_archive.py \
             --archives accepted-crate \
-            --expected-version "${{ inputs.expected_version }}"
+            --expected-version "${{ inputs.expected_version }}" \
+            --expected-core-version "${{ inputs.expected_core_version }}" \
+            --channel "${{ inputs.release_channel }}"
       - name: Acquire a crates.io trusted-publishing token
         id: auth
         uses: rust-lang/crates-io-auth-action@v1
@@ -103,4 +126,6 @@ jobs:
           python migration/scripts/publish_crate_archive.py \
             --archives accepted-crate \
             --expected-version "${{ inputs.expected_version }}" \
+            --expected-core-version "${{ inputs.expected_core_version }}" \
+            --channel "${{ inputs.release_channel }}" \
             --execute

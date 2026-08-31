@@ -1,16 +1,12 @@
 name: Release candidate wheel matrix
 
 on:
-  push:
-    branches: ["rust-migration-*"]
-  pull_request:
-    branches: [main, "v*"]
   workflow_dispatch:
     inputs:
       adam_core_ref:
-        description: Exact adam-core source revision to test
+        description: Exact compatible adam-core source revision to test
         required: true
-        default: ae4a6f1d7ba937d41b86d3ddce343524737d9708
+        type: string
 
 permissions:
   contents: read
@@ -20,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_REF: ${{ inputs.adam_core_ref || 'ae4a6f1d7ba937d41b86d3ddce343524737d9708' }}
+  ADAM_CORE_REF: ${{ inputs.adam_core_ref }}
   PIP_ONLY_BINARY: ":all:"
   ADAM_CORE_PREVIEW_VERSION: "0.5.6rc6"
   ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc7"
