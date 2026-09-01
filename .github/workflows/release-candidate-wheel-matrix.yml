@@ -18,8 +18,8 @@ concurrency:
 env:
   ADAM_CORE_REF: ${{ inputs.adam_core_ref }}
   PIP_ONLY_BINARY: ":all:"
-  ADAM_CORE_PREVIEW_VERSION: "0.5.6rc6"
-  ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc7"
+  ADAM_CORE_RELEASE_VERSION: "0.5.7"
+  ADAM_ASSIST_RELEASE_VERSION: "0.4.0"
 
 jobs:
   artifact-acceptance:
@@ -131,8 +131,8 @@ jobs:
           if len(core) != 1 or len(assist) != 1:
               raise SystemExit(f"expected one wheel per package; got {core=} {assist=}")
           expected = {
-              "adam_core": os.environ["ADAM_CORE_PREVIEW_VERSION"],
-              "adam_assist": os.environ["ADAM_ASSIST_PREVIEW_VERSION"],
+              "adam_core": os.environ["ADAM_CORE_RELEASE_VERSION"],
+              "adam_assist": os.environ["ADAM_ASSIST_RELEASE_VERSION"],
           }
           for package, paths in (("adam_core", core), ("adam_assist", assist)):
               with zipfile.ZipFile(paths[0]) as archive:
@@ -142,7 +142,7 @@ jobs:
                   metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
               if metadata["Version"] != expected[package]:
                   raise SystemExit(
-                      f"{package} preview version mismatch: {metadata['Version']} != {expected[package]}"
+                      f"{package} release version mismatch: {metadata['Version']} != {expected[package]}"
                   )
               if package == "adam_assist":
                   requirements = {
@@ -150,7 +150,7 @@ jobs:
                       for value in metadata.get_all("Requires-Dist", [])
                   }
                   expected_requirements = {
-                      "adam-core==0.5.6rc6",
+                      "adam-core==0.5.7",
                       "naif-de440==2020.12.21.1",
                       "jpl-small-bodies-de441-n16==2021.3.31.1",
                   }

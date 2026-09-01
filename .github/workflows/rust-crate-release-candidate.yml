@@ -19,9 +19,9 @@ permissions:
   contents: read
 
 env:
-  RUST_PREVIEW_VERSION: "0.4.0-rc.7"
-  CORE_RUST_VERSION: "0.1.0-rc.5"
-  RELEASE_CHANNEL: preview
+  RUST_RELEASE_VERSION: "0.4.0"
+  CORE_RUST_VERSION: "0.5.7"
+  RELEASE_CHANNEL: stable
 
 jobs:
   package-and-test:
@@ -48,19 +48,19 @@ jobs:
           rm -rf rust/adam_assist_rs/target/package crate-dist
           mkdir -p crate-dist
           cargo package --manifest-path "$manifest" --locked
-          cp rust/adam_assist_rs/target/package/adam_assist-${RUST_PREVIEW_VERSION}.crate crate-dist/
+          cp rust/adam_assist_rs/target/package/adam_assist-${RUST_RELEASE_VERSION}.crate crate-dist/
           test "$(find crate-dist -maxdepth 1 -name '*.crate' | wc -l | tr -d ' ')" = 1
           (cd crate-dist && sha256sum *.crate | tee SHA256SUMS)
           python migration/scripts/publish_crate_archive.py \
             --manifest-path "$manifest" \
             --archives crate-dist \
-            --expected-version "$RUST_PREVIEW_VERSION" \
+            --expected-version "$RUST_RELEASE_VERSION" \
             --expected-core-version "$CORE_RUST_VERSION" \
             --channel "$RELEASE_CHANNEL"
       - name: Check a pure-Rust consumer against the packaged source
         run: |
           set -euo pipefail
-          package="$GITHUB_WORKSPACE/rust/adam_assist_rs/target/package/adam_assist-${RUST_PREVIEW_VERSION}"
+          package="$GITHUB_WORKSPACE/rust/adam_assist_rs/target/package/adam_assist-${RUST_RELEASE_VERSION}"
           mkdir -p /tmp/adam-assist-consumer/src
           cat > /tmp/adam-assist-consumer/Cargo.toml <<EOF
           [package]

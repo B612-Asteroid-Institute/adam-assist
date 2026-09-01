@@ -47,9 +47,9 @@ def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
 
 def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     candidate = RUST_CANDIDATE_WORKFLOW.read_text()
-    assert 'RUST_PREVIEW_VERSION: "0.4.0-rc.7"' in candidate
-    assert 'CORE_RUST_VERSION: "0.1.0-rc.5"' in candidate
-    assert "RELEASE_CHANNEL: preview" in candidate
+    assert 'RUST_RELEASE_VERSION: "0.4.0"' in candidate
+    assert 'CORE_RUST_VERSION: "0.5.7"' in candidate
+    assert "RELEASE_CHANNEL: stable" in candidate
     assert '"release-candidate/adam-assist-0.4.0rc7"' in candidate
     assert '"release/adam-assist-*"' in candidate
     assert "cargo package --manifest-path" in candidate
@@ -131,8 +131,8 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     assert "Exact compatible adam-core source revision" in workflow
     assert "ADAM_CORE_REF: ${{ inputs.adam_core_ref }}" in workflow
     assert "ae4a6f1d7ba937d41b86d3ddce343524737d9708" not in workflow
-    assert 'ADAM_CORE_PREVIEW_VERSION: "0.5.6rc6"' in workflow
-    assert 'ADAM_ASSIST_PREVIEW_VERSION: "0.4.0rc7"' in workflow
+    assert 'ADAM_CORE_RELEASE_VERSION: "0.5.7"' in workflow
+    assert 'ADAM_ASSIST_RELEASE_VERSION: "0.4.0"' in workflow
     assert "full-current-benchmark:" in workflow
     full_job_header = workflow.split("  full-current-benchmark:", maxsplit=1)[1].split(
         "    steps:", maxsplit=1

@@ -21,10 +21,10 @@ Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
 - `adam-core` owns permissive generic contracts and cross-package integration.
 
 The temporary identified snapshots under `rust/vendor` were removed after the
-adam-core Rust crates were published. The `0.4.0-rc.7` Rust crate exact-pins
+adam-core Rust crates were published. The stable `0.4.0` Rust crate exact-pins
 public `adam_core_rs_coords`, `adam_core_rs_spice`, and optional default
-`adam_core_rs_kernel_data` dependencies to `=0.1.0-rc.5`; its Python metadata
-exact-pins `adam-core==0.5.6rc6`.
+`adam_core_rs_kernel_data` dependencies to `=0.5.7`; its Python metadata
+exact-pins `adam-core==0.5.7`.
 
 ## Parity
 
@@ -65,9 +65,11 @@ compose Rust-to-Rust inside that extension.
 ## Stable-release preparation
 
 The target stable line is Python/Rust `adam-assist 0.4.0`, exact-pinned to
-Python and public Rust `adam-core 0.5.7`. Stable source and the frozen PDM/Cargo
-locks are finalized only after the Core crates and wheels are public, so normal
-resolution never relies on temporary path patches or index overrides.
+Python and public Rust `adam-core 0.5.7`. A preliminary stable manifest commit can pair wheel validation with the accepted
+Core wheels after the Core crates are public. Its Cargo lock resolves only public
+Core crates; the frozen PDM lock remains on the released RC until Core wheels are
+public. The final stable commit then refreshes that PDM lock normally, without
+temporary path patches or index overrides.
 
 Release scripts distinguish preview and stable channels. Stable publication
 targets protected production environments named `crates-io` and `pypi`; the

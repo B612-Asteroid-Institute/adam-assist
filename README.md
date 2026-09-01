@@ -38,8 +38,8 @@ Rust-only consumers can use the same backend from crates.io without Python:
 
 ```toml
 [dependencies]
-adam_core = "=0.1.0-rc.5"
-adam_assist = "=0.4.0-rc.7"
+adam_core = "=0.5.7"
+adam_assist = "=0.4.0"
 ```
 
 ```rust,no_run

@@ -10,17 +10,17 @@ on:
       expected_version:
         description: Exact Cargo release version
         required: true
-        default: 0.4.0-rc.7
+        default: 0.4.0
         type: string
       expected_core_version:
         description: Exact public adam-core Rust version
         required: true
-        default: 0.1.0-rc.5
+        default: 0.5.7
         type: string
       release_channel:
         description: Registry release channel
         required: true
-        default: preview
+        default: stable
         type: choice
         options:
           - preview
@@ -28,7 +28,7 @@ on:
       expected_python_version:
         description: Exact matching PEP 440 version used by the immutable Git tag
         required: true
-        default: 0.4.0rc7
+        default: 0.4.0
         type: string
       authentication:
         description: crates.io OIDC trusted publishing (bootstrap token is no longer used)

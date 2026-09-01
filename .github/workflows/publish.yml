@@ -14,27 +14,27 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release version
         required: true
-        default: 0.4.0rc7
+        default: 0.4.0
         type: string
       expected_rust_version:
         description: Exact matching adam_assist Cargo version
         required: true
-        default: 0.4.0-rc.7
+        default: 0.4.0
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core Python release
         required: true
-        default: 0.5.6rc6
+        default: 0.5.7
         type: string
       expected_adam_core_rust_version:
         description: Exact already-published adam-core Rust release
         required: true
-        default: 0.1.0-rc.5
+        default: 0.5.7
         type: string
       release_channel:
         description: Registry release channel
         required: true
-        default: preview
+        default: stable
         type: choice
         options:
           - preview
