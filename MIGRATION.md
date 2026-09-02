@@ -65,11 +65,11 @@ compose Rust-to-Rust inside that extension.
 ## Stable-release preparation
 
 The target stable line is Python/Rust `adam-assist 0.4.0`, exact-pinned to
-Python and public Rust `adam-core 0.5.7`. A preliminary stable manifest commit can pair wheel validation with the accepted
-Core wheels after the Core crates are public. Its Cargo lock resolves only public
-Core crates; the frozen PDM lock remains on the released RC until Core wheels are
-public. The final stable commit then refreshes that PDM lock normally, without
-temporary path patches or index overrides.
+Python and public Rust `adam-core 0.5.7`. The preliminary stable manifest commit
+paired wheel validation with accepted Core wheels after the Core crates were
+public. After Core wheels became public, the final stable commit refreshed the
+frozen PDM lock normally. Both Cargo and PDM locks therefore resolve public Core
+`0.5.7` artifacts without temporary path patches or index overrides.
 
 Release scripts distinguish preview and stable channels. Stable publication
 targets protected production environments named `crates-io` and `pypi`; the

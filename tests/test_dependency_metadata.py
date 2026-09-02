@@ -118,10 +118,10 @@ def test_stable_dependencies_are_exact_public_releases() -> None:
     assert not (ROOT / "rust" / "vendor").exists()
 
 
-def test_preliminary_python_lock_remains_on_rc_until_core_python_is_public() -> None:
+def test_python_lock_matches_stable_core_and_kernel_authorities() -> None:
     packages = _pdm_lock_packages()
     expected = {
-        "adam-core": "0.5.6rc6",
+        "adam-core": "0.5.7",
         "naif-de440": "2020.12.21.1",
         "jpl-small-bodies-de441-n16": "2021.3.31.1",
         "naif-leapseconds": "2025.4.22",
