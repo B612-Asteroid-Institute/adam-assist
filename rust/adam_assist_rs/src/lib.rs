@@ -36,8 +36,8 @@ pub use assist_error::{AssistError, AssistResult};
 pub mod assist_propagation;
 pub use assist_propagation::AssistData;
 use assist_propagation::{
-    apply_nongrav_scalars, assist_propagate, assist_propagate_orbits_same_epoch, nongrav_model_key,
-    NonGravParams, Orbit as AssistOrbit,
+    assist_propagate, assist_propagate_orbits_same_epoch, configure_test_particle_forces,
+    nongrav_model_key, NonGravParams, Orbit as AssistOrbit,
 };
 
 #[cfg(feature = "python")]
@@ -603,29 +603,11 @@ fn build_collision_sim(
         sim.set_dt(dt);
     }
     let mut asim = AssistSim::new(sim, &data.ephem)?;
-    let has_non_gravitational_forces = non_gravitational_parameters.iter().any(Option::is_some);
-    let forces = if has_non_gravitational_forces {
-        ffi::ASSIST_FORCES_DEFAULT | ffi::ASSIST_FORCE_NON_GRAVITATIONAL
-    } else {
-        ffi::ASSIST_FORCES_DEFAULT
-    };
-    asim.set_forces(forces);
     for state in states_bary_eq {
         asim.sim_mut()
             .add_test_particle(state[0], state[1], state[2], state[3], state[4], state[5]);
     }
-    if let Some(model) = non_gravitational_parameters.iter().flatten().next() {
-        apply_nongrav_scalars(&mut asim, model);
-        let mut particle_parameters = vec![0.0; 3 * states_bary_eq.len()];
-        for (row, parameters) in non_gravitational_parameters.iter().enumerate() {
-            if let Some(parameters) = parameters {
-                particle_parameters[3 * row] = parameters.a1;
-                particle_parameters[3 * row + 1] = parameters.a2;
-                particle_parameters[3 * row + 2] = parameters.a3;
-            }
-        }
-        asim.set_particle_params(particle_parameters);
-    }
+    configure_test_particle_forces(&mut asim, non_gravitational_parameters)?;
     Ok(asim)
 }
 
@@ -812,7 +794,12 @@ fn state_only_failure_block(
     }
 }
 
-fn assist_non_gravitational_parameters(
+/// Convert one adam-core non-gravitational row to validated ASSIST parameters.
+///
+/// Null A coefficients are zero. A row with all-zero A1/A2/A3 is gravity-only.
+/// Marsden constants must be either complete or absent; absent constants select
+/// ASSIST's asteroid `(1 au / r)^2` convention.
+pub fn assist_non_gravitational_parameters(
     row: Option<NonGravitationalParametersRow>,
     orbit_id: &str,
 ) -> PropagationResultValue<Option<NonGravParams>> {
@@ -1900,6 +1887,71 @@ mod tests {
         assert_eq!(config.min_dt, Some(1.0e-9));
         assert_eq!(config.adaptive_mode, Some(Ias15AdaptiveMode::Global));
         assert_eq!(config.epsilon, Some(1.0e-6));
+    }
+
+    #[test]
+    fn public_nongrav_parser_preserves_supported_force_laws() {
+        let inverse_square = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: Some(-2.0e-10),
+                aln: None,
+                nk: None,
+                nm: None,
+                nn: None,
+                r0: None,
+            }),
+            "inverse-square",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(inverse_square.a1, 1.0e-9);
+        assert_eq!(inverse_square.a2, 0.0);
+        assert_eq!(inverse_square.a3, -2.0e-10);
+        assert_eq!(inverse_square.alpha, None);
+
+        let comet = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(3.0e-9),
+                a2: Some(4.0e-10),
+                a3: None,
+                aln: Some(0.111_262_042_6),
+                nk: Some(4.614_2),
+                nm: Some(2.15),
+                nn: Some(5.093),
+                r0: Some(2.808),
+            }),
+            "comet",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(comet.alpha, Some(0.111_262_042_6));
+        assert_eq!(comet.nk, Some(4.614_2));
+        assert_eq!(comet.nm, Some(2.15));
+        assert_eq!(comet.nn, Some(5.093));
+        assert_eq!(comet.r0, Some(2.808));
+    }
+
+    #[test]
+    fn public_nongrav_parser_rejects_partial_force_laws() {
+        let error = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: None,
+                aln: Some(1.0),
+                nk: None,
+                nm: None,
+                nn: None,
+                r0: None,
+            }),
+            "partial",
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Partially-specified Marsden g(r) constants"));
     }
 
     #[test]
