@@ -11,6 +11,7 @@ on:
     paths:
       - "rust/**"
       - "migration/scripts/publish_crate_archive.py"
+      - "migration/scripts/verify_registry_locks.py"
       - ".github/workflows/rust-crate-*.yml"
       - ".github/workflows/publish-rust-crate.yml"
   workflow_dispatch:
@@ -19,15 +20,34 @@ permissions:
   contents: read
 
 env:
-  RUST_RELEASE_VERSION: "0.4.0"
-  CORE_RUST_VERSION: "0.5.7"
+  RUST_RELEASE_VERSION: "0.4.1"
+  CORE_RUST_VERSION: "0.5.8"
   RELEASE_CHANNEL: stable
+  ADAM_CORE_REF: "cba63f412b6cd5a59f4bd20a1da8bd8504d857e1"
 
 jobs:
   package-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout exact prepublication adam-core source pair
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_REF }}
+          path: .ci/adam-core
+      - name: Patch unpublished Core crates to the exact source pair
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch.crates-io]
+          adam_core = { path = ".ci/adam-core/rust/adam_core" }
+          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
+          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
+          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
+          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
+          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
+          EOF
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
@@ -104,6 +124,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout exact prepublication adam-core source pair
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_REF }}
+          path: .ci/adam-core
+      - name: Patch unpublished Core crates to the exact source pair
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch.crates-io]
+          adam_core = { path = ".ci/adam-core/rust/adam_core" }
+          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
+          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
+          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
+          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
+          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
+          EOF
       - uses: dtolnay/rust-toolchain@stable
       - name: Check and test supported feature configurations
         run: |

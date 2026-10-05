@@ -178,4 +178,4 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
 
 
 def test_stable_version_module_is_preserved() -> None:
-    assert __version__ == "0.4.0"
+    assert __version__ == "0.4.1"

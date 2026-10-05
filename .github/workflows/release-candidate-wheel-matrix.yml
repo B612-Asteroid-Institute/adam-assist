@@ -18,8 +18,8 @@ concurrency:
 env:
   ADAM_CORE_REF: ${{ inputs.adam_core_ref }}
   PIP_ONLY_BINARY: ":all:"
-  ADAM_CORE_RELEASE_VERSION: "0.5.7"
-  ADAM_ASSIST_RELEASE_VERSION: "0.4.0"
+  ADAM_CORE_RELEASE_VERSION: "0.5.8"
+  ADAM_ASSIST_RELEASE_VERSION: "0.4.1"
 
 jobs:
   artifact-acceptance:
@@ -46,6 +46,18 @@ jobs:
           ref: ${{ env.ADAM_CORE_REF }}
           path: adam-core
           fetch-depth: 0
+      - name: Patch unpublished Core crates to the exact source pair
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch.crates-io]
+          adam_core = { path = "adam-core/rust/adam_core" }
+          adam_core_rs_autodiff = { path = "adam-core/rust/adam_core_rs_autodiff" }
+          adam_core_rs_coords = { path = "adam-core/rust/adam_core_rs_coords" }
+          adam_core_rs_kernel_data = { path = "adam-core/rust/adam_core_rs_kernel_data" }
+          adam_core_rs_orbit_determination = { path = "adam-core/rust/adam_core_rs_orbit_determination" }
+          adam_core_rs_spice = { path = "adam-core/rust/adam_core_rs_spice" }
+          EOF
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -63,7 +75,6 @@ jobs:
               raise SystemExit(f"runner architecture mismatch: {actual} != {expected}")
           PY
       - name: Write adam-core runtime version
-        if: matrix.platform.family == 'manylinux'
         run: python adam-core/migration/scripts/write_maturin_version.py
       - name: Build adam-core manylinux wheel
         if: matrix.platform.family == 'manylinux'
@@ -83,24 +94,26 @@ jobs:
           manylinux: "2_17"
           working-directory: .
           args: --release -i python${{ matrix.python-version }} --out wheelhouse
-      - name: Accept prebuilt manylinux wheels
-        if: matrix.platform.family == 'manylinux'
+      - name: Build adam-core native wheel
+        if: matrix.platform.family == 'native'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          working-directory: adam-core
+          args: --release -i python${{ matrix.python-version }} --out ../wheelhouse
+      - name: Build adam-assist native wheel
+        if: matrix.platform.family == 'native'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          working-directory: .
+          args: --release -i python${{ matrix.python-version }} --out wheelhouse
+      - name: Accept exact prebuilt source-pair wheels
         shell: bash
         run: |
           set -euo pipefail
           python adam-core/migration/scripts/run_clean_room_artifact_acceptance.py \
             --prebuilt-wheelhouse "$GITHUB_WORKSPACE/wheelhouse" \
-            --adam-core-repo "$GITHUB_WORKSPACE/adam-core" --adam-core-ref HEAD \
-            --adam-assist-repo "$GITHUB_WORKSPACE" --adam-assist-ref HEAD \
-            --workspace "$RUNNER_TEMP/acceptance" \
-            --report "$RUNNER_TEMP/acceptance-report.json" \
-            --python "$(command -v python)"
-      - name: Build and accept native-platform wheels
-        if: matrix.platform.family == 'native'
-        shell: bash
-        run: |
-          set -euo pipefail
-          python adam-core/migration/scripts/run_clean_room_artifact_acceptance.py \
             --adam-core-repo "$GITHUB_WORKSPACE/adam-core" --adam-core-ref HEAD \
             --adam-assist-repo "$GITHUB_WORKSPACE" --adam-assist-ref HEAD \
             --workspace "$RUNNER_TEMP/acceptance" \
@@ -150,7 +163,7 @@ jobs:
                       for value in metadata.get_all("Requires-Dist", [])
                   }
                   expected_requirements = {
-                      "adam-core==0.5.7",
+                      "adam-core==0.5.8",
                       "naif-de440==2020.12.21.1",
                       "jpl-small-bodies-de441-n16==2021.3.31.1",
                   }
@@ -191,6 +204,18 @@ jobs:
           repository: B612-Asteroid-Institute/adam_core
           ref: ${{ env.ADAM_CORE_REF }}
           path: adam-core
+      - name: Patch unpublished Core crates to the exact source pair
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch.crates-io]
+          adam_core = { path = "adam-core/rust/adam_core" }
+          adam_core_rs_autodiff = { path = "adam-core/rust/adam_core_rs_autodiff" }
+          adam_core_rs_coords = { path = "adam-core/rust/adam_core_rs_coords" }
+          adam_core_rs_kernel_data = { path = "adam-core/rust/adam_core_rs_kernel_data" }
+          adam_core_rs_orbit_determination = { path = "adam-core/rust/adam_core_rs_orbit_determination" }
+          adam_core_rs_spice = { path = "adam-core/rust/adam_core_rs_spice" }
+          EOF
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

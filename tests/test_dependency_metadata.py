@@ -47,7 +47,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     manifest = _cargo_manifest()
     package = manifest["package"]
     assert package["name"] == "adam_assist"
-    assert package["version"] == "0.4.0"
+    assert package["version"] == "0.4.1"
     assert package["rust-version"] == "1.87"
     assert package.get("publish", True) is True
     assert package["license"] == "GPL-3.0"
@@ -68,7 +68,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
     assert dependencies["sha2"] == {"version": "0.10", "optional": True}
     kernel_dependency = {
-        "version": "=0.5.7",
+        "version": "=0.5.8",
         "default-features": False,
     }
     assert dependencies["adam_core_rs_kernel_data"] == {
@@ -95,7 +95,7 @@ def test_dev_lint_tool_is_pinned() -> None:
 def test_stable_dependencies_are_exact_public_releases() -> None:
     dependencies = _project_dependencies()
     assert dependencies == [
-        "adam-core==0.5.7",
+        "adam-core==0.5.8",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
     ]
@@ -113,15 +113,15 @@ def test_stable_dependencies_are_exact_public_releases() -> None:
         assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == "=0.5.7"
-    assert dependencies["adam_core_rs_spice"] == "=0.5.7"
+    assert dependencies["adam_core_rs_coords"] == "=0.5.8"
+    assert dependencies["adam_core_rs_spice"] == "=0.5.8"
     assert not (ROOT / "rust" / "vendor").exists()
 
 
-def test_python_lock_matches_stable_core_and_kernel_authorities() -> None:
+def test_python_lock_uses_immutable_prepublication_core_source() -> None:
     packages = _pdm_lock_packages()
     expected = {
-        "adam-core": "0.5.7",
+        "adam-core": "0.5.8",
         "naif-de440": "2020.12.21.1",
         "jpl-small-bodies-de441-n16": "2021.3.31.1",
         "naif-leapseconds": "2025.4.22",
@@ -131,11 +131,16 @@ def test_python_lock_matches_stable_core_and_kernel_authorities() -> None:
         "naif-earth-itrf93": "2007.4.3.1",
     }
     assert {name: packages[name]["version"] for name in expected} == expected
+    core = packages["adam-core"]
+    expected_ref = "cba63f412b6cd5a59f4bd20a1da8bd8504d857e1"
+    assert core["git"] == "https://github.com/B612-Asteroid-Institute/adam_core.git"
+    assert core["ref"] == expected_ref
+    assert core["revision"] == expected_ref
 
 
-def test_lock_matches_exact_published_core_crates() -> None:
+def test_cargo_lock_matches_exact_prepublication_core_source_pair() -> None:
     packages = _cargo_lock_packages()
-    assert packages["adam_assist"]["version"] == "0.4.0"
+    assert packages["adam_assist"]["version"] == "0.4.1"
     for name in (
         "adam_core_rs_autodiff",
         "adam_core_rs_coords",
@@ -143,10 +148,9 @@ def test_lock_matches_exact_published_core_crates() -> None:
         "adam_core_rs_orbit_determination",
         "adam_core_rs_spice",
     ):
-        assert packages[name]["version"] == "0.5.7"
-        assert packages[name]["source"] == (
-            "registry+https://github.com/rust-lang/crates.io-index"
-        )
+        assert packages[name]["version"] == "0.5.8"
+        assert "source" not in packages[name]
+        assert "checksum" not in packages[name]
     for name in (
         "icu_locale_core",
         "icu_normalizer",
@@ -169,8 +173,8 @@ def test_python_stable_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.4.0"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.0"
+    assert cargo_version == "0.4.1"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.1"
 
 
 def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> None:

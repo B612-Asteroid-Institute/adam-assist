@@ -62,9 +62,9 @@ public propagation, ephemeris, covariance, or collision operation crosses into
 adam-assist once; adam-core generic algorithms and ASSIST orchestration then
 compose Rust-to-Rust inside that extension.
 
-## Stable-release preparation
+## Stable 0.4.0 release provenance
 
-The target stable line is Python/Rust `adam-assist 0.4.0`, exact-pinned to
+The first stable line was Python/Rust `adam-assist 0.4.0`, exact-pinned to
 Python and public Rust `adam-core 0.5.7`. The preliminary stable manifest commit
 paired wheel validation with accepted Core wheels after the Core crates were
 public. After Core wheels became public, the final stable commit refreshed the
@@ -78,3 +78,20 @@ before dispatch. Both publishers inspect existing registry state first and can
 resume a partial upload only when already-public files are unyanked and
 checksum-identical to the accepted artifacts. Tags, environment changes, and
 registry uploads remain separate human approval boundaries.
+
+## Stable 0.4.1 source-pair preparation
+
+The packaging-only `adam-assist 0.4.1` successor exact-pins Python and public
+Rust `adam-core 0.5.8`; it does not change science or public-API behavior. The
+prepublication source-pair candidate uses immutable Core commit
+`cba63f412b6cd5a59f4bd20a1da8bd8504d857e1` for local and hosted validation.
+The wheel and crate metadata continue to contain only stable exact version
+requirements, never a Git or path dependency.
+
+Core 0.5.8 is not public while this preliminary candidate is prepared. Its PDM
+lock therefore records the immutable Core source commit, and its Cargo lock
+records the exact locally patched Core 0.5.8 package identities. Neither lock is
+the final registry lock. After all Core 0.5.8 crates and wheels are public, both
+locks must be regenerated normally from crates.io and PyPI, the source patches
+must be absent, and full package-based acceptance must pass before any
+adam-assist tag or publication is requested.

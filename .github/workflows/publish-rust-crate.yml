@@ -10,12 +10,12 @@ on:
       expected_version:
         description: Exact Cargo release version
         required: true
-        default: 0.4.0
+        default: 0.4.1
         type: string
       expected_core_version:
         description: Exact public adam-core Rust version
         required: true
-        default: 0.5.7
+        default: 0.5.8
         type: string
       release_channel:
         description: Registry release channel
@@ -28,7 +28,7 @@ on:
       expected_python_version:
         description: Exact matching PEP 440 version used by the immutable Git tag
         required: true
-        default: 0.4.0
+        default: 0.4.1
         type: string
       authentication:
         description: crates.io OIDC trusted publishing (bootstrap token is no longer used)
@@ -84,6 +84,11 @@ jobs:
           assert package["rust-version"] == "1.87"
           assert package.get("publish", True) is True
           PY
+      - name: Reject provisional source-pair Cargo locks
+        run: |
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "${{ inputs.expected_core_version }}" \
+            --rust-lock
       - name: Verify candidate-run provenance and success
         env:
           GH_TOKEN: ${{ github.token }}
