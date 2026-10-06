@@ -21,10 +21,10 @@ Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
 - `adam-core` owns permissive generic contracts and cross-package integration.
 
 The temporary identified snapshots under `rust/vendor` were removed after the
-adam-core Rust crates were published. The `0.4.0-rc.7` Rust crate exact-pins
+adam-core Rust crates were published. The stable `0.4.0` Rust crate exact-pins
 public `adam_core_rs_coords`, `adam_core_rs_spice`, and optional default
-`adam_core_rs_kernel_data` dependencies to `=0.1.0-rc.5`; its Python metadata
-exact-pins `adam-core==0.5.6rc6`.
+`adam_core_rs_kernel_data` dependencies to `=0.5.7`; its Python metadata
+exact-pins `adam-core==0.5.7`.
 
 ## Parity
 
@@ -61,3 +61,44 @@ Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into
 adam-assist once; adam-core generic algorithms and ASSIST orchestration then
 compose Rust-to-Rust inside that extension.
+
+## Stable 0.4.0 release provenance
+
+The first stable line was Python/Rust `adam-assist 0.4.0`, exact-pinned to
+Python and public Rust `adam-core 0.5.7`. The preliminary stable manifest commit
+paired wheel validation with accepted Core wheels after the Core crates were
+public. After Core wheels became public, the final stable commit refreshed the
+frozen PDM lock normally. Both Cargo and PDM locks therefore resolve public Core
+`0.5.7` artifacts without temporary path patches or index overrides.
+
+Release scripts distinguish preview and stable channels. Stable publication
+targets protected production environments named `crates-io` and `pypi`; the
+matching GitHub environments and registry trusted publishers must be configured
+before dispatch. Both publishers inspect existing registry state first and can
+resume a partial upload only when already-public files are unyanked and
+checksum-identical to the accepted artifacts. Tags, environment changes, and
+registry uploads remain separate human approval boundaries.
+
+## Stable 0.4.1 Core 0.5 compatibility
+
+The packaging-only `adam-assist 0.4.1` successor declares Python
+`adam-core>=0.5.7,<0.6` and Rust `adam_core* >=0.5.7, <0.6.0`. Core `0.5.7`
+is the tested lower bound, Core `0.5.8` is the current reproducible lock
+selection, and future compatible `0.5.x` releases are intentionally accepted.
+Breaking Python, Arrow/schema, or Rust contracts require a Core `0.6` release.
+There is no adam-assist science or public-API behavior change.
+
+Both PDM and Cargo locks resolve Core `0.5.8` exclusively from the public PyPI
+and crates.io registries, including wheel hashes and crate checksums. Release
+CI builds each adam-assist wheel once from those registry-only locks. Every
+platform/Python lane pairs those bytes with the matching public Core `0.5.8`
+wheel in Core's immutable clean-room driver, which verifies installed-artifact
+provenance, forward/backward and same-epoch propagation, observer ephemeris,
+and offline embedded-kernel policy. CI then tests the identical ASSIST wheel
+bytes with public Python Core `0.5.7` and `0.5.8`. Pure-Rust consumers likewise
+compile the one packaged crate against both exact public Core lines and reject
+a graph containing duplicate or mixed Core crate versions.
+
+Publication automation verifies the registry-only locks and rejects Git/path
+sources or provisional patches. Passing final artifact acceptance does not
+authorize a tag or registry upload; those remain separate approval boundaries.

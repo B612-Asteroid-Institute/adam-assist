@@ -4,15 +4,15 @@
 [metadata]
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
-lock_version = "4.5.0"
-content_hash = "sha256:1cbcbda1bfb2bb8fdc49034e8e6fa8848cf884587a0fad71594cc593a8ae0b92"
+lock_version = "4.5.1"
+content_hash = "sha256:0725aba76ac1f788606e618c6b926fb426462d2e4019f9e78bb666659f1ef753"
 
 [[metadata.targets]]
 requires_python = ">=3.11,<3.14"
 
 [[package]]
 name = "adam-core"
-version = "0.5.6rc6"
+version = "0.5.8"
 requires_python = "<3.14,>=3.11"
 summary = "Core libraries for the ADAM platform"
 groups = ["default"]
@@ -32,18 +32,18 @@ dependencies = [
     "scipy",
 ]
 files = [
-    {file = "adam_core-0.5.6rc6-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:8a5c3f8cd546a4be78b0fb348874971b9cbc0927036ab07de5097619ebb416fc"},
-    {file = "adam_core-0.5.6rc6-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:ef8e105575cfe90c1431349f8433369b059f993454cd5ab765f2f14a3c6327c3"},
-    {file = "adam_core-0.5.6rc6-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9dcccb5b3c331965f867394927c2497ef735eb8669300d4508ea6ee5a6b684b1"},
-    {file = "adam_core-0.5.6rc6-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f40e8447ff945bd042e10a9af85ad51638492ae73c57a99c0a3a911bc470057c"},
-    {file = "adam_core-0.5.6rc6-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:a84195d9bc56acfae422ce921936ea7ddccf9beb328abd6d6b6e4b05902eb284"},
-    {file = "adam_core-0.5.6rc6-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9407c0cec8012c965f1fdfb72313c5ed59398c375c6b568288c3f1a5aef0daa8"},
-    {file = "adam_core-0.5.6rc6-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:33470e8793e6ae9eedb480ce1e32e44c5ff96b8971e222b8e6821a98c9129813"},
-    {file = "adam_core-0.5.6rc6-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7424c2ace9c02751d9e5c3ac962bc6b03db60b206c67625e5e0fbee5c7de3c31"},
-    {file = "adam_core-0.5.6rc6-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:3321196b86e634496c96cf3d32d2efa89cc8c6d1a965c19294d14119baf870ac"},
-    {file = "adam_core-0.5.6rc6-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:6ebd7254f614ddf176ac8e958729a3a592d3eacbd67e1aec9cdceacfa49a60bd"},
-    {file = "adam_core-0.5.6rc6-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8cd7d3f5d0a3a0c99750855e74badcf3e42b099cc5dabd533608595011bf4cd8"},
-    {file = "adam_core-0.5.6rc6-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a6cec2176c2a0c6d9b955570b074b10413ae89c454d2e2b162cae38e5c55d45c"},
+    {file = "adam_core-0.5.8-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:a8b28e8e94a248eb2b17d27e463228f667f87ed41947c0ab70b15182d2bc4aea"},
+    {file = "adam_core-0.5.8-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:9cac2e832a1de7d4d86e66981ddc0cf8ea1f8296969b4189a85111c84b7accf4"},
+    {file = "adam_core-0.5.8-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ce85947096a49de264dfad034aaf712bc6cdad3bcf31fac42ab085c69e5040f2"},
+    {file = "adam_core-0.5.8-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3bb59acddc42a486ca056a87f27bf9881b0b494013b2b1f5b3ff241139e865bb"},
+    {file = "adam_core-0.5.8-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:47d76bc11e3ac5c4b1d96586ea75a4afcd1d26d6f23f327d7c7cfaaa7faa0878"},
+    {file = "adam_core-0.5.8-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e0c0e95d40813b5125bee1e31d1085d74693fd336f5fc17344fec4d3e9275859"},
+    {file = "adam_core-0.5.8-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:becf3787fd9b4dbf3a0db718d33cd89e8e7d2820efbbb535eaa722d0596e4af2"},
+    {file = "adam_core-0.5.8-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9335e6628ab4eee4fc7f43799f60d6ff0686ea2f2544bdd457e9a163b87289f4"},
+    {file = "adam_core-0.5.8-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:03a115991182f746ed621de68cd0e54e32522dd0e9c6730bac1af4826673f1f4"},
+    {file = "adam_core-0.5.8-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:010234b056e8de90abcbffa37f8391aaaa8cbd2966ee0be28b43b1e943f38f59"},
+    {file = "adam_core-0.5.8-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d3183301e0ce748a3d60958bafbb209708c73c5d51f16d6e97b77f4679bc3e72"},
+    {file = "adam_core-0.5.8-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5e9dbe692d1c6ea64fccbee71af12096b42325ed4c2e7de17dd96a2efa96860f"},
 ]
 
 [[package]]
