@@ -8,7 +8,9 @@
   the complete `0.5.x` line in both Python and Rust package metadata.
 - Finalized PDM and Cargo locks on public registry artifacts for
   `adam-core 0.5.8`, including wheel hashes and crate checksums.
-- Updated release acceptance to build ASSIST once and test the identical wheel
+- Updated all 12 wheel lanes to run the once-built ASSIST wheel and matching
+  public Core `0.5.8` wheel through pinned clean-room propagation, ephemeris,
+  offline-kernel, and provenance checks, then test the identical ASSIST wheel
   and crate artifacts with public Core `0.5.7` and `0.5.8`.
 
 ### Compatibility

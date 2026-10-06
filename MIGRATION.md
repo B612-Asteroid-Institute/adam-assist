@@ -90,11 +90,14 @@ There is no adam-assist science or public-API behavior change.
 
 Both PDM and Cargo locks resolve Core `0.5.8` exclusively from the public PyPI
 and crates.io registries, including wheel hashes and crate checksums. Release
-CI builds each adam-assist wheel once from those registry-only locks, then tests
-the identical wheel bytes with public Python Core `0.5.7` and `0.5.8` across
-the complete platform/Python matrix. Pure-Rust consumers likewise compile the
-one packaged crate against both exact public Core lines and reject a graph
-containing duplicate or mixed Core crate versions.
+CI builds each adam-assist wheel once from those registry-only locks. Every
+platform/Python lane pairs those bytes with the matching public Core `0.5.8`
+wheel in Core's immutable clean-room driver, which verifies installed-artifact
+provenance, forward/backward and same-epoch propagation, observer ephemeris,
+and offline embedded-kernel policy. CI then tests the identical ASSIST wheel
+bytes with public Python Core `0.5.7` and `0.5.8`. Pure-Rust consumers likewise
+compile the one packaged crate against both exact public Core lines and reject
+a graph containing duplicate or mixed Core crate versions.
 
 Publication automation verifies the registry-only locks and rejects Git/path
 sources or provisional patches. Passing final artifact acceptance does not

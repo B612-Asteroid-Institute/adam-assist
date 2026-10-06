@@ -14,6 +14,7 @@ env:
   PIP_ONLY_BINARY: ":all:"
   MATURIN_PEP517_ARGS: "--locked"
   ADAM_CORE_RELEASE_VERSION: "0.5.8"
+  ADAM_CORE_ACCEPTANCE_REF: "fff90ff458e383beacad1db79cda0484b05baffc"
   ADAM_ASSIST_RELEASE_VERSION: "0.4.1"
 
 jobs:
@@ -34,6 +35,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Checkout immutable public adam-core acceptance tooling
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_ACCEPTANCE_REF }}
+          path: adam-core-acceptance
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -49,6 +57,35 @@ jobs:
           actual = f"{platform.system()}-{platform.machine()}"
           if actual != expected:
               raise SystemExit(f"runner architecture mismatch: {actual} != {expected}")
+          PY
+      - name: Verify immutable public Core acceptance tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C adam-core-acceptance rev-parse HEAD)" = "$ADAM_CORE_ACCEPTANCE_REF"
+          test "$(git -C adam-core-acceptance rev-parse 'v0.5.8^{commit}')" = "$ADAM_CORE_ACCEPTANCE_REF"
+          test -z "$(git -C adam-core-acceptance status --porcelain)"
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          root = Path("adam-core-acceptance/migration/scripts")
+          expected = {
+              "run_clean_room_artifact_acceptance.py": (
+                  "464859e82bd9aea975f1209b040a97299230dd37bf370ab0132beefcbc29435f"
+              ),
+              "clean_room_artifact_smoke.py": (
+                  "bb2df3751929b4e0391e8300d7e51eb5815f1b0b3c012b8a070052b362b24b77"
+              ),
+          }
+          for name, expected_sha256 in expected.items():
+              path = root / name
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected_sha256:
+                  raise SystemExit(
+                      f"immutable Core acceptance script mismatch: {name} "
+                      f"{actual} != {expected_sha256}"
+                  )
           PY
       - name: Verify registry-only release locks
         run: |
@@ -73,7 +110,48 @@ jobs:
           command: build
           working-directory: .
           args: --release --locked -i python${{ matrix.python-version }} --out wheelhouse
-      - name: Verify wheel metadata and platform tag
+      - name: Prepare exact registry wheelhouse for clean-room acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/acceptance-prebuilt-wheelhouse"
+          rm -rf "$wheelhouse"
+          mkdir -p "$wheelhouse"
+          cp wheelhouse/adam_assist-*.whl "$wheelhouse/"
+          python -m pip download --no-cache-dir \
+            --index-url https://pypi.org/simple \
+            --only-binary=:all: --no-deps \
+            --dest "$wheelhouse" "adam-core==$ADAM_CORE_RELEASE_VERSION"
+          test "$(find "$wheelhouse" -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 1
+          test "$(find "$wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' | wc -l | tr -d ' ')" = 1
+      - name: Run exact registry-wheel clean-room acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The pinned smoke covers forward/backward/same-epoch propagation,
+          # observer ephemeris through embedded Core SPICE, offline kernel-cache
+          # policy, and installed-wheel provenance. The Core checkout supplies
+          # only immutable tooling and provenance roots; --prebuilt-wheelhouse
+          # prevents either package from being built or source-paired here.
+          python adam-core-acceptance/migration/scripts/run_clean_room_artifact_acceptance.py \
+            --prebuilt-wheelhouse "$RUNNER_TEMP/acceptance-prebuilt-wheelhouse" \
+            --adam-core-repo "$GITHUB_WORKSPACE/adam-core-acceptance" \
+            --adam-core-ref "$ADAM_CORE_ACCEPTANCE_REF" \
+            --adam-assist-repo "$GITHUB_WORKSPACE" \
+            --adam-assist-ref HEAD \
+            --workspace "$RUNNER_TEMP/acceptance" \
+            --report "$RUNNER_TEMP/acceptance-report.json" \
+            --python "$(command -v python)"
+      - name: Inspect public adam-core wheel contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          inspection="$RUNNER_TEMP/core-wheel-inspection"
+          rm -rf "$inspection"
+          mkdir -p "$inspection"
+          cp "$RUNNER_TEMP"/acceptance/wheelhouse/adam_core-*.whl "$inspection/"
+          python adam-core-acceptance/migration/scripts/check_wheel_artifacts.py "$inspection"
+      - name: Verify clean-room artifact identities and platform tags
         shell: bash
         run: |
           python - <<'PY'
@@ -83,75 +161,99 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          wheels = list(Path("wheelhouse").glob("adam_assist-*.whl"))
-          if len(wheels) != 1:
-              raise SystemExit(f"expected one adam-assist wheel, got {wheels}")
-          wheel = wheels[0]
-          with zipfile.ZipFile(wheel) as archive:
-              names = archive.namelist()
-              metadata_paths = [
-                  name for name in names if name.endswith(".dist-info/METADATA")
-              ]
-              if len(metadata_paths) != 1:
-                  raise SystemExit(f"{wheel.name}: unexpected METADATA files")
-              metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
-              if "adam_assist/version.py" not in names:
-                  raise SystemExit(f"{wheel.name}: missing adam_assist/version.py")
-              namespace = {}
-              exec(archive.read("adam_assist/version.py"), namespace)
-              if namespace.get("__version__") != os.environ["ADAM_ASSIST_RELEASE_VERSION"]:
-                  raise SystemExit(f"{wheel.name}: bad runtime version")
-              if not any(
-                  name.startswith("adam_assist/_native")
-                  and name.endswith((".so", ".pyd", ".dylib"))
-                  for name in names
-              ):
-                  raise SystemExit(f"{wheel.name}: missing native extension")
-              packaged_tests = [
-                  name
-                  for name in names
-                  if name.startswith("adam_assist/")
-                  and ("/tests/" in name or Path(name).name.startswith("test_"))
-              ]
-              if packaged_tests:
-                  raise SystemExit(f"{wheel.name}: packaged tests {packaged_tests[:1]}")
-          if metadata["Version"] != os.environ["ADAM_ASSIST_RELEASE_VERSION"]:
-              raise SystemExit(
-                  f"adam-assist release version mismatch: {metadata['Version']}"
-              )
-          requirements = {
-              value.replace(" ", "").lower()
-              for value in metadata.get_all("Requires-Dist", [])
+          wheelhouse = Path(os.environ["RUNNER_TEMP"]) / "acceptance" / "wheelhouse"
+          core = list(wheelhouse.glob("adam_core-*.whl"))
+          assist = list(wheelhouse.glob("adam_assist-*.whl"))
+          if len(core) != 1 or len(assist) != 1:
+              raise SystemExit(f"expected one wheel per package; got {core=} {assist=}")
+          expected = {
+              "adam_core": os.environ["ADAM_CORE_RELEASE_VERSION"],
+              "adam_assist": os.environ["ADAM_ASSIST_RELEASE_VERSION"],
           }
-          expected_requirements = {
-              "adam-core>=0.5.7,<0.6",
-              "naif-de440==2020.12.21.1",
-              "jpl-small-bodies-de441-n16==2021.3.31.1",
-          }
-          if not expected_requirements <= requirements:
-              raise SystemExit(
-                  "adam-assist release dependencies missing: "
-                  f"{sorted(expected_requirements - requirements)}"
-              )
+          for package, paths in (("adam_core", core), ("adam_assist", assist)):
+              wheel = paths[0]
+              with zipfile.ZipFile(wheel) as archive:
+                  names = archive.namelist()
+                  metadata_paths = [
+                      name for name in names if name.endswith(".dist-info/METADATA")
+                  ]
+                  if len(metadata_paths) != 1:
+                      raise SystemExit(f"{wheel.name}: unexpected METADATA files")
+                  metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
+                  native_prefix = (
+                      "adam_core/_rust_native"
+                      if package == "adam_core"
+                      else "adam_assist/_native"
+                  )
+                  if not any(
+                      name.startswith(native_prefix)
+                      and name.endswith((".so", ".pyd", ".dylib"))
+                      for name in names
+                  ):
+                      raise SystemExit(f"{wheel.name}: missing native extension")
+                  if package == "adam_assist":
+                      if "adam_assist/version.py" not in names:
+                          raise SystemExit(f"{wheel.name}: missing version.py")
+                      namespace = {}
+                      exec(archive.read("adam_assist/version.py"), namespace)
+                      if namespace.get("__version__") != expected[package]:
+                          raise SystemExit(f"{wheel.name}: bad runtime version")
+                      packaged_tests = [
+                          name
+                          for name in names
+                          if name.startswith("adam_assist/")
+                          and (
+                              "/tests/" in name
+                              or Path(name).name.startswith("test_")
+                          )
+                      ]
+                      if packaged_tests:
+                          raise SystemExit(
+                              f"{wheel.name}: packaged tests {packaged_tests[:1]}"
+                          )
+              if metadata["Version"] != expected[package]:
+                  raise SystemExit(
+                      f"{package} release version mismatch: "
+                      f"{metadata['Version']} != {expected[package]}"
+                  )
+              if package == "adam_assist":
+                  requirements = {
+                      value.replace(" ", "").lower()
+                      for value in metadata.get_all("Requires-Dist", [])
+                  }
+                  expected_requirements = {
+                      "adam-core>=0.5.7,<0.6",
+                      "naif-de440==2020.12.21.1",
+                      "jpl-small-bodies-de441-n16==2021.3.31.1",
+                  }
+                  if not expected_requirements <= requirements:
+                      raise SystemExit(
+                          "adam-assist release dependencies missing: "
+                          f"{sorted(expected_requirements - requirements)}"
+                      )
           pattern = "*${{ matrix.platform.wheel_tag }}.whl"
-          if not fnmatch.fnmatch(wheel.name, pattern):
-              raise SystemExit(f"wheel tag mismatch: {wheel.name} != {pattern}")
+          invalid = [
+              path.name
+              for path in core + assist
+              if not fnmatch.fnmatch(path.name, pattern)
+          ]
+          if invalid:
+              raise SystemExit(f"wheel tag mismatch for {pattern}: {invalid}")
           PY
       - name: Test the same adam-assist wheel with public Core 0.5.7 and 0.5.8
         shell: bash
         run: |
           set -euo pipefail
           lower_wheelhouse="$RUNNER_TEMP/core-0.5.7-wheel"
-          current_wheelhouse="$RUNNER_TEMP/core-0.5.8-wheel"
-          mkdir -p "$lower_wheelhouse" "$current_wheelhouse"
-          python -m pip download --only-binary=:all: --no-deps \
+          rm -rf "$lower_wheelhouse"
+          mkdir -p "$lower_wheelhouse"
+          python -m pip download --no-cache-dir \
+            --index-url https://pypi.org/simple \
+            --only-binary=:all: --no-deps \
             --dest "$lower_wheelhouse" "adam-core==0.5.7"
-          python -m pip download --only-binary=:all: --no-deps \
-            --dest "$current_wheelhouse" \
-            "adam-core==$ADAM_CORE_RELEASE_VERSION"
-          assist_wheel="$(find "$GITHUB_WORKSPACE/wheelhouse" -maxdepth 1 -name 'adam_assist-*.whl' -print -quit)"
+          assist_wheel="$(find "$RUNNER_TEMP/acceptance/wheelhouse" -maxdepth 1 -name 'adam_assist-*.whl' -print -quit)"
           lower_core_wheel="$(find "$lower_wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' -print -quit)"
-          current_core_wheel="$(find "$current_wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' -print -quit)"
+          current_core_wheel="$(find "$RUNNER_TEMP/acceptance/wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' -print -quit)"
           test -n "$assist_wheel"
           test -n "$lower_core_wheel"
           test -n "$current_core_wheel"
@@ -169,7 +271,10 @@ jobs:
         with:
           name: wheel-acceptance-${{ matrix.platform.name }}-py${{ matrix.python-version }}
           path: |
-            wheelhouse/*.whl
+            ${{ runner.temp }}/acceptance-report.json
+            ${{ runner.temp }}/acceptance/invocation/smoke-report.json
+            ${{ runner.temp }}/acceptance/wheelhouse/*.whl
+            ${{ runner.temp }}/acceptance/logs/*.log
             ${{ runner.temp }}/core-compatibility/*.json
             ${{ runner.temp }}/core-compatibility-summary.json
           if-no-files-found: error

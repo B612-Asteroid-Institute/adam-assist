@@ -144,14 +144,55 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "to pypi" in python_publisher
 
 
-def test_release_matrix_builds_assist_once_against_public_core() -> None:
+def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> None:
     workflow = RELEASE_WORKFLOW.read_text()
+
+    # The final candidate remains registry-only. The Core checkout is pinned
+    # acceptance tooling, never an unpublished Python/Rust source pair.
     assert "adam_core_ref" not in workflow
     assert "ADAM_CORE_REF" not in workflow
     assert "cba63f" not in workflow
-    assert "Checkout adam-core" not in workflow
+    assert "Checkout adam-core candidate" not in workflow
+    assert "Checkout exact adam-core candidate" not in workflow
+    assert "Patch unpublished Core crates" not in workflow
     assert "[patch.crates-io]" not in workflow
+    assert ".cargo/config.toml" not in workflow
+    assert ".ci/adam-core" not in workflow
+    assert "Write adam-core runtime version" not in workflow
+    assert "python -m build" not in workflow
     assert "Build adam-core" not in workflow
+    assert "Build adam-core manylinux wheel" not in workflow
+    assert "Build adam-core native wheel" not in workflow
+    assert "python -m pip install ./adam-core" not in workflow
+
+    # All twelve platform/Python lanes use immutable tooling from the public
+    # v0.5.8 Core release commit, including the exact reviewed smoke script.
+    assert 'python-version: ["3.11", "3.12", "3.13"]' in workflow
+    for platform in (
+        "manylinux-x86_64",
+        "manylinux-aarch64",
+        "macos-arm64",
+        "macos-x86_64",
+    ):
+        assert f"name: {platform}" in workflow
+    assert (
+        'ADAM_CORE_ACCEPTANCE_REF: "fff90ff458e383beacad1db79cda0484b05baffc"'
+        in workflow
+    )
+    assert "Checkout immutable public adam-core acceptance tooling" in workflow
+    assert "repository: B612-Asteroid-Institute/adam_core" in workflow
+    assert "ref: ${{ env.ADAM_CORE_ACCEPTANCE_REF }}" in workflow
+    assert "path: adam-core-acceptance" in workflow
+    assert "rev-parse 'v0.5.8^{commit}'" in workflow
+    assert (
+        "464859e82bd9aea975f1209b040a97299230dd37bf370ab0132beefcbc29435f" in workflow
+    )
+    assert (
+        "bb2df3751929b4e0391e8300d7e51eb5815f1b0b3c012b8a070052b362b24b77" in workflow
+    )
+    assert workflow.count("run_clean_room_artifact_acceptance.py") == 2
+    assert workflow.count("clean_room_artifact_smoke.py") == 1
+
     assert 'ADAM_CORE_RELEASE_VERSION: "0.5.8"' in workflow
     assert 'ADAM_ASSIST_RELEASE_VERSION: "0.4.1"' in workflow
     assert "Verify registry-only release locks" in workflow
@@ -160,14 +201,51 @@ def test_release_matrix_builds_assist_once_against_public_core() -> None:
     assert "Build adam-assist manylinux wheel once" in workflow
     assert "Build adam-assist native wheel once" in workflow
     assert workflow.count("args: --release --locked") == 2
+
+    # The only runtime inputs are the once-built ASSIST wheel and the exact
+    # public PyPI Core wheel. The Core driver must consume, not rebuild, them.
+    assert "Prepare exact registry wheelhouse for clean-room acceptance" in workflow
+    assert "acceptance-prebuilt-wheelhouse" in workflow
+    assert "cp wheelhouse/adam_assist-*.whl" in workflow
+    assert "--index-url https://pypi.org/simple" in workflow
+    assert "--only-binary=:all: --no-deps" in workflow
+    assert '"adam-core==$ADAM_CORE_RELEASE_VERSION"' in workflow
+    assert "Run exact registry-wheel clean-room acceptance" in workflow
+    assert (
+        "python adam-core-acceptance/migration/scripts/"
+        "run_clean_room_artifact_acceptance.py" in workflow
+    )
+    assert (
+        '--prebuilt-wheelhouse "$RUNNER_TEMP/acceptance-prebuilt-wheelhouse"'
+        in workflow
+    )
+    assert '--adam-core-repo "$GITHUB_WORKSPACE/adam-core-acceptance"' in workflow
+    assert '--adam-core-ref "$ADAM_CORE_ACCEPTANCE_REF"' in workflow
+    assert '--adam-assist-repo "$GITHUB_WORKSPACE"' in workflow
+    assert "--adam-assist-ref HEAD" in workflow
+    assert "forward/backward/same-epoch propagation" in workflow
+    assert "observer ephemeris through embedded Core SPICE" in workflow
+    assert "offline kernel-cache" in workflow
+    assert "installed-wheel provenance" in workflow
+    assert "Inspect public adam-core wheel contents" in workflow
+    assert "check_wheel_artifacts.py" in workflow
+    assert "Verify clean-room artifact identities and platform tags" in workflow
+    assert "acceptance-report.json" in workflow
+    assert "acceptance/invocation/smoke-report.json" in workflow
+    assert "acceptance/wheelhouse/*.whl" in workflow
+    assert "acceptance/logs/*.log" in workflow
+
+    # Backward compatibility reuses those exact accepted ASSIST/Core 0.5.8
+    # bytes, then swaps only the independently downloaded public Core 0.5.7.
     assert (
         "Test the same adam-assist wheel with public Core 0.5.7 and 0.5.8" in workflow
     )
     assert "run_core_compatibility_matrix.py" in workflow
     assert '"adam-core==0.5.7"' in workflow
-    assert '"adam-core==$ADAM_CORE_RELEASE_VERSION"' in workflow
     assert '"adam-core>=0.5.7,<0.6"' in workflow
+    assert 'find "$RUNNER_TEMP/acceptance/wheelhouse"' in workflow
     assert "core-compatibility-summary.json" in workflow
+
     assert "full-current-benchmark:" in workflow
     full_job_header = workflow.split("  full-current-benchmark:", maxsplit=1)[1].split(
         "    steps:", maxsplit=1
