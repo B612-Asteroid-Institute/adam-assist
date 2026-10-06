@@ -20,10 +20,10 @@ extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
 # Active Light-Time Beam/BVH integration pin. Keep every adam-core crate on
-# the same exact reviewed commit while the upstream assessment PR evolves.
-adam_core_rs_coords = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "1e270c6537786c86efcce0879db486f09e85d1a6" }
-adam_core_rs_spice = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "1e270c6537786c86efcce0879db486f09e85d1a6" }
-adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "1e270c6537786c86efcce0879db486f09e85d1a6", default-features = false, optional = true }
+# the same exact commit while the upstream assessment PR evolves.
+adam_core_rs_coords = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "2c01aa91ea5b90f9ae9b1c226e7a88cf935a86f3" }
+adam_core_rs_spice = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "2c01aa91ea5b90f9ae9b1c226e7a88cf935a86f3" }
+adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "2c01aa91ea5b90f9ae9b1c226e7a88cf935a86f3", default-features = false, optional = true }
 # Canonical ASSIST/REBOUND FFI and RAII layers. All domain orchestration lives
 # in this crate; exact versions are the reviewed mainline sys-crate releases.
 libassist-sys = "=1.2.1"
@@ -36,7 +36,7 @@ rayon = "1.11"
 sha2 = { version = "0.10", optional = true }
 
 [dev-dependencies]
-adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "1e270c6537786c86efcce0879db486f09e85d1a6", default-features = false }
+adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core.git", rev = "2c01aa91ea5b90f9ae9b1c226e7a88cf935a86f3", default-features = false }
 serde_json = "1"
 
 [lib]

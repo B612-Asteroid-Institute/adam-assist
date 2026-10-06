@@ -797,35 +797,35 @@ fn state_only_failure_block(
 
 /// Convert one adam-core-assessed non-gravitational row to ASSIST parameters.
 ///
-/// Adam-core owns coefficient activity and Marsden-law semantics. This adapter
-/// retains only backend mapping and request-specific error presentation.
+/// Adam-core owns A-coefficient and Marsden-law semantics. This adapter retains
+/// only backend mapping and request-specific error presentation.
 pub fn assist_non_gravitational_parameters(
     row: Option<NonGravitationalParametersRow>,
     orbit_id: &str,
 ) -> PropagationResultValue<Option<NonGravParams>> {
     let assessment = assess_non_gravitational_parameters(row);
-    let Some(nominal_active) = assessment.nominal_active else {
+    let Some(nominal_a_coefficients_nonzero) = assessment.nominal_a_coefficients_nonzero else {
         return Err(PropagationError::InvalidRequest(format!(
             "Non-finite non-gravitational A1/A2/A3 values for orbit {orbit_id}."
         )));
     };
-    if !nominal_active {
+    if !nominal_a_coefficients_nonzero {
         return Ok(None);
     }
 
-    let [a1, a2, a3] = assessment.effective_acceleration;
-    match assessment.law_encoding {
+    let [a1, a2, a3] = assessment.a_coefficients_with_null_as_zero;
+    match assessment.marsden_law_encoding {
         MarsdenLawEncoding::InverseSquare => Ok(Some(NonGravParams::new(a1, a2, a3))),
         MarsdenLawEncoding::Partial => Err(PropagationError::InvalidRequest(format!(
             "Partially-specified Marsden g(r) constants for orbit {orbit_id}: set all of (ALN, NK, NM, NN, R0) or none (null selects the asteroid (1 au / r)^2 convention)."
         ))),
-        MarsdenLawEncoding::Complete if !assessment.law_values_valid => {
+        MarsdenLawEncoding::Complete if !assessment.marsden_law_values_valid => {
             Err(PropagationError::InvalidRequest(format!(
                 "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
             )))
         }
         MarsdenLawEncoding::Complete => {
-            let row = row.expect("active assessed parameters have a source row");
+            let row = row.expect("nonzero assessed A coefficients have a source row");
             Ok(Some(NonGravParams {
                 a1,
                 a2,
@@ -1954,8 +1954,8 @@ mod tests {
     }
 
     #[test]
-    fn public_nongrav_parser_preserves_inactive_and_invalid_assessments() {
-        let inactive_partial = assist_non_gravitational_parameters(
+    fn public_nongrav_parser_preserves_zero_coefficients_and_invalid_assessments() {
+        let zero_coefficients_partial = assist_non_gravitational_parameters(
             Some(NonGravitationalParametersRow {
                 a1: Some(0.0),
                 a2: Some(0.0),
@@ -1966,10 +1966,10 @@ mod tests {
                 nn: None,
                 r0: None,
             }),
-            "inactive-partial",
+            "zero-coefficients-partial",
         )
         .unwrap();
-        assert!(inactive_partial.is_none());
+        assert!(zero_coefficients_partial.is_none());
 
         let nonfinite = assist_non_gravitational_parameters(
             Some(NonGravitationalParametersRow {
