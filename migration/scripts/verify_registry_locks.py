@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reject provisional source-pair locks at registry publication boundaries."""
+"""Verify that release locks select checksum-pinned public Core artifacts."""
 
 from __future__ import annotations
 
@@ -37,15 +37,24 @@ def verify_python_lock(repo: Path, core_version: str) -> None:
     prefix = f"adam_core-{core_version}-"
     if any(not str(item.get("file", "")).startswith(prefix) for item in files):
         raise ValueError("pdm.lock adam-core files do not match the release version")
+    if any(not str(item.get("hash", "")).startswith("sha256:") for item in files):
+        raise ValueError("pdm.lock adam-core registry hashes are missing")
 
 
 def verify_rust_lock(repo: Path, core_version: str) -> None:
     lock_path = repo / "rust" / "adam_assist_rs" / "Cargo.lock"
     with lock_path.open("rb") as stream:
         lock = tomllib.load(stream)
-    packages = {package["name"]: package for package in lock["package"]}
+    packages: dict[str, list[dict[str, object]]] = {}
+    for package in lock["package"]:
+        packages.setdefault(str(package["name"]), []).append(package)
     for name in sorted(CORE_RUST_PACKAGES):
-        package = packages[name]
+        matches = packages.get(name, [])
+        if len(matches) != 1:
+            raise ValueError(
+                f"Cargo.lock must contain one {name}, found {len(matches)}"
+            )
+        package = matches[0]
         if package.get("version") != core_version:
             raise ValueError(
                 f"Cargo.lock {name} {package.get('version')} != {core_version}"

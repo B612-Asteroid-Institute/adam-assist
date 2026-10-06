@@ -4,6 +4,7 @@ import pytest
 
 from migration.scripts.run_core_compatibility_matrix import compare_reports
 from migration.scripts.verify_rust_core_line import (
+    CRATES_IO_SOURCE,
     REQUIRED_CORE_PACKAGES,
     verify_core_line,
 )
@@ -25,7 +26,7 @@ def _report(core_version: str, value: float = 1.0) -> dict:
 def _metadata(version: str) -> dict:
     return {
         "packages": [
-            {"name": name, "version": version}
+            {"name": name, "version": version, "source": CRATES_IO_SOURCE}
             for name in sorted(REQUIRED_CORE_PACKAGES)
         ]
     }
@@ -55,9 +56,16 @@ def test_rust_core_line_accepts_one_version_and_rejects_mixed_graph() -> None:
     assert set(selected) == REQUIRED_CORE_PACKAGES
     mixed = _metadata("0.5.8")
     mixed["packages"][0]["version"] = "0.5.7"
-    with pytest.raises(ValueError, match="mixes Core lines"):
+    with pytest.raises(ValueError, match="public Core line"):
         verify_core_line(mixed, "0.5.8")
     duplicate = _metadata("0.5.8")
     duplicate["packages"].append({"name": "adam_core_rs_coords", "version": "0.5.7"})
-    with pytest.raises(ValueError, match="mixes Core lines"):
+    with pytest.raises(ValueError, match="public Core line"):
         verify_core_line(duplicate, "0.5.8")
+
+
+def test_rust_core_line_rejects_non_registry_source() -> None:
+    metadata = _metadata("0.5.8")
+    metadata["packages"][0]["source"] = None
+    with pytest.raises(ValueError, match="public Core line"):
+        verify_core_line(metadata, "0.5.8")

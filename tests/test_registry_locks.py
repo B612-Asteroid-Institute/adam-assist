@@ -13,7 +13,7 @@ from migration.scripts.verify_registry_locks import (
 
 
 def _write_locks(repo: Path) -> None:
-    (repo / "rust" / "adam_assist_rs").mkdir(parents=True)
+    (repo / "rust" / "adam_assist_rs").mkdir(parents=True, exist_ok=True)
     (repo / "pdm.lock").write_text("""[[package]]
 name = "adam-core"
 version = "0.5.8"
@@ -34,7 +34,7 @@ def test_registry_locks_accept_exact_public_core(tmp_path: Path) -> None:
     verify_rust_lock(tmp_path, "0.5.8")
 
 
-def test_registry_locks_reject_prepublication_sources(tmp_path: Path) -> None:
+def test_registry_locks_reject_provisional_sources(tmp_path: Path) -> None:
     _write_locks(tmp_path)
     pdm_lock = tmp_path / "pdm.lock"
     pdm_lock.write_text(pdm_lock.read_text() + 'git = "https://example.invalid/core"\n')
@@ -46,4 +46,26 @@ def test_registry_locks_reject_prepublication_sources(tmp_path: Path) -> None:
         cargo_lock.read_text().replace(f'source = "{CRATES_IO_SOURCE}"\n', "", 1)
     )
     with pytest.raises(ValueError, match="registry-only"):
+        verify_rust_lock(tmp_path, "0.5.8")
+
+
+def test_registry_locks_reject_missing_hashes_and_duplicate_core(
+    tmp_path: Path,
+) -> None:
+    _write_locks(tmp_path)
+    pdm_lock = tmp_path / "pdm.lock"
+    pdm_lock.write_text(pdm_lock.read_text().replace("sha256:abc", ""))
+    with pytest.raises(ValueError, match="hashes are missing"):
+        verify_python_lock(tmp_path, "0.5.8")
+
+    _write_locks(tmp_path)
+    cargo_lock = tmp_path / "rust" / "adam_assist_rs" / "Cargo.lock"
+    duplicate = f"""[[package]]
+name = "adam_core_rs_coords"
+version = "0.5.8"
+source = "{CRATES_IO_SOURCE}"
+checksum = "def"
+"""
+    cargo_lock.write_text(cargo_lock.read_text() + duplicate)
+    with pytest.raises(ValueError, match="must contain one adam_core_rs_coords"):
         verify_rust_lock(tmp_path, "0.5.8")

@@ -23,10 +23,14 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_autodiff"
 version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83cf80194317920acc4c814670f23e1e95baa97797d63fad6ed942700675e854"
 
 [[package]]
 name = "adam_core_rs_coords"
 version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3556510738c5ee91bd7eef98e42d033c58c6d97adec6d2308193fa3a74865951"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -45,6 +49,8 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_kernel_data"
 version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc15489c3b0f72902872bc3816ce1a85496c466ed8f347a4e52ab69526b45b85"
 dependencies = [
  "icu_locale_core",
  "icu_normalizer",
@@ -58,10 +64,14 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_orbit_determination"
 version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61438383af910eab31ee4cfd08290295a48769a07ebd285f4587448afd7422ed"
 
 [[package]]
 name = "adam_core_rs_spice"
 version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47508e0de7bcfb7efc9d37dc90cf9ae7286729274a53f5902b06135d5b4086d4"
 dependencies = [
  "adam_core_rs_coords",
  "faer",
@@ -2933,7 +2943,3 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
-
-[[patch.unused]]
-name = "adam_core"
-version = "0.5.8"

@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_REF: "cba63f412b6cd5a59f4bd20a1da8bd8504d857e1"
+  MATURIN_PEP517_ARGS: "--locked"
 
 jobs:
   lint:
@@ -27,24 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Checkout exact prepublication adam-core source pair
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
-      - name: Patch unpublished Core crates to the exact source pair
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          adam_core = { path = ".ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
+      - name: Verify registry-only Core locks
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
@@ -74,31 +58,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Checkout exact prepublication adam-core source pair
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
-      - name: Patch unpublished Core crates to the exact source pair
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          adam_core = { path = ".ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
+      - name: Verify registry-only Core locks
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
-      # Core 0.5.8 is not public yet. This preliminary source-pair CI uses
-      # immutable cba63f41 path patches; the final 0.4.1 commit must remove them
-      # and regenerate registry-only locks after Core publication.
       - name: Set up PDM
         uses: pdm-project/setup-pdm@v4
         with:
@@ -120,24 +85,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Checkout exact prepublication adam-core source pair
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
-      - name: Patch unpublished Core crates to the exact source pair
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          adam_core = { path = ".ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
+      - name: Verify registry-only Core locks
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
@@ -184,24 +133,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Checkout exact prepublication adam-core source pair
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
-      - name: Patch unpublished Core crates to the exact source pair
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          adam_core = { path = ".ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
+      - name: Verify registry-only Core locks
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)

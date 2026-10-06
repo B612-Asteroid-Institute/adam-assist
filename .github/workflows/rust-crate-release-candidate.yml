@@ -24,34 +24,17 @@ env:
   RUST_RELEASE_VERSION: "0.4.1"
   CORE_RUST_VERSION: "0.5.8"
   RELEASE_CHANNEL: stable
-  ADAM_CORE_REF: "cba63f412b6cd5a59f4bd20a1da8bd8504d857e1"
 
 jobs:
   package-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout exact prepublication adam-core source pair
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
-      - name: Patch unpublished Core crates to the exact source pair
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          adam_core = { path = ".ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
+      - name: Verify registry-only Core lock
+        run: python migration/scripts/verify_registry_locks.py --core-version "$CORE_RUST_VERSION" --rust-lock
       - name: Test the public Rust surface at the MSRV
         run: |
           set -euo pipefail
@@ -95,13 +78,6 @@ jobs:
         core-version: ["0.5.7", "0.5.8"]
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout exact current adam-core source
-        if: matrix.core-version == '0.5.8'
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
@@ -110,7 +86,7 @@ jobs:
         with:
           name: adam-assist-rust-crate-publication-set
           path: accepted-crate
-      - name: Compile one coherent exact Core line
+      - name: Compile one coherent exact public Core line
         env:
           CORE_VERSION: ${{ matrix.core-version }}
         run: |
@@ -148,18 +124,6 @@ jobs:
               let _ = std::mem::size_of::<adam_core::coords::CoordinateBatch>();
           }
           EOF
-          if [ "$CORE_VERSION" = "0.5.8" ]; then
-            mkdir -p "$consumer/.cargo"
-            cat > "$consumer/.cargo/config.toml" <<EOF
-          [patch.crates-io]
-          adam_core = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
-          fi
           (
             cd "$consumer"
             cargo check
@@ -180,24 +144,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout exact prepublication adam-core source pair
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_REF }}
-          path: .ci/adam-core
-      - name: Patch unpublished Core crates to the exact source pair
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch.crates-io]
-          adam_core = { path = ".ci/adam-core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = ".ci/adam-core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = ".ci/adam-core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = ".ci/adam-core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = ".ci/adam-core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = ".ci/adam-core/rust/adam_core_rs_spice" }
-          EOF
       - uses: dtolnay/rust-toolchain@stable
       - name: Check and test supported feature configurations
         run: |

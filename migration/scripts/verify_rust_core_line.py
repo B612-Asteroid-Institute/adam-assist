@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 REQUIRED_CORE_PACKAGES = {
     "adam_core",
     "adam_core_rs_autodiff",
@@ -28,13 +29,19 @@ def verify_core_line(metadata: dict[str, Any], expected_version: str) -> dict[st
     if missing:
         raise ValueError(f"Cargo graph is missing Core packages: {sorted(missing)}")
     unexpected = {
-        name: [package["version"] for package in packages]
+        name: [
+            {"version": package["version"], "source": package.get("source")}
+            for package in packages
+        ]
         for name, packages in core_packages.items()
-        if len(packages) != 1 or packages[0]["version"] != expected_version
+        if len(packages) != 1
+        or packages[0]["version"] != expected_version
+        or packages[0].get("source") != CRATES_IO_SOURCE
     }
     if unexpected:
         raise ValueError(
-            f"Cargo graph mixes Core lines; expected {expected_version}, got {unexpected}"
+            "Cargo graph is not one public Core line; "
+            f"expected {expected_version}, got {unexpected}"
         )
     return {name: packages[0]["version"] for name, packages in core_packages.items()}
 

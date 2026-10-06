@@ -118,7 +118,7 @@ def test_stable_dependencies_declare_core_05_compatibility() -> None:
     assert not (ROOT / "rust" / "vendor").exists()
 
 
-def test_python_lock_uses_immutable_prepublication_core_source() -> None:
+def test_python_lock_uses_public_core_registry_artifacts() -> None:
     packages = _pdm_lock_packages()
     expected = {
         "adam-core": "0.5.8",
@@ -132,15 +132,19 @@ def test_python_lock_uses_immutable_prepublication_core_source() -> None:
     }
     assert {name: packages[name]["version"] for name in expected} == expected
     core = packages["adam-core"]
-    expected_ref = "cba63f412b6cd5a59f4bd20a1da8bd8504d857e1"
-    assert core["git"] == "https://github.com/B612-Asteroid-Institute/adam_core.git"
-    assert core["ref"] == expected_ref
-    assert core["revision"] == expected_ref
+    assert {"git", "path", "url"}.isdisjoint(core)
+    files = core["files"]
+    assert len(files) == 12
+    assert all(item["file"].startswith("adam_core-0.5.8-") for item in files)
+    assert all(item["hash"].startswith("sha256:") for item in files)
 
 
-def test_cargo_lock_matches_exact_prepublication_core_source_pair() -> None:
-    packages = _cargo_lock_packages()
+def test_cargo_lock_uses_public_core_registry_artifacts() -> None:
+    with (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").open("rb") as lock_file:
+        lock = tomllib.load(lock_file)
+    packages = {package["name"]: package for package in lock["package"]}
     assert packages["adam_assist"]["version"] == "0.4.1"
+    source = "registry+https://github.com/rust-lang/crates.io-index"
     for name in (
         "adam_core_rs_autodiff",
         "adam_core_rs_coords",
@@ -149,8 +153,14 @@ def test_cargo_lock_matches_exact_prepublication_core_source_pair() -> None:
         "adam_core_rs_spice",
     ):
         assert packages[name]["version"] == "0.5.8"
-        assert "source" not in packages[name]
-        assert "checksum" not in packages[name]
+        assert packages[name]["source"] == source
+        assert packages[name]["checksum"]
+    unused = lock.get("patch", {}).get("unused", [])
+    assert not [
+        package
+        for package in unused
+        if str(package.get("name", "")).startswith("adam_core")
+    ]
     for name in (
         "icu_locale_core",
         "icu_normalizer",

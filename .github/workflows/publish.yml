@@ -109,7 +109,7 @@ jobs:
           else
             test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
           fi
-      - name: Verify source versions, exact Core pins, and public Rust prerequisite
+      - name: Verify source versions, Core range, and public Rust prerequisite
         run: |
           python migration/scripts/verify_release.py \
             --python-version "${{ inputs.expected_version }}" \
@@ -118,7 +118,7 @@ jobs:
             --core-rust-version "${{ inputs.expected_adam_core_rust_version }}" \
             --channel "${{ inputs.release_channel }}" \
             --rust-checksum "${{ inputs.expected_rust_crate_sha256 }}"
-      - name: Reject provisional source-pair locks
+      - name: Verify registry-only Core locks
         run: |
           python migration/scripts/verify_registry_locks.py \
             --core-version "${{ inputs.expected_adam_core_version }}" \

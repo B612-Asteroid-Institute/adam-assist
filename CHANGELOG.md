@@ -1,14 +1,15 @@
 # Changelog
 
-## [0.4.1] - Unreleased
+## [0.4.1] - 2026-10-06
 
 ### Changed
 
 - Declared compatibility with stable `adam-core` releases from `0.5.7` through
   the complete `0.5.x` line in both Python and Rust package metadata.
-- Updated release-candidate and publication workflow defaults for the paired
-  stable `adam-assist 0.4.1` line while keeping candidate locks resolved to
-  immutable `adam-core 0.5.8` sources.
+- Finalized PDM and Cargo locks on public registry artifacts for
+  `adam-core 0.5.8`, including wheel hashes and crate checksums.
+- Updated release acceptance to build ASSIST once and test the identical wheel
+  and crate artifacts with public Core `0.5.7` and `0.5.8`.
 
 ### Compatibility
 

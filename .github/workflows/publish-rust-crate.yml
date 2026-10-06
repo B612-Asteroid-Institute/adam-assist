@@ -84,7 +84,7 @@ jobs:
           assert package["rust-version"] == "1.87"
           assert package.get("publish", True) is True
           PY
-      - name: Reject provisional source-pair Cargo locks
+      - name: Verify registry-only Core Cargo lock
         run: |
           python migration/scripts/verify_registry_locks.py \
             --core-version "${{ inputs.expected_core_version }}" \
