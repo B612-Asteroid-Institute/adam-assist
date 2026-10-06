@@ -54,7 +54,7 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "RELEASE_CHANNEL: stable" in candidate
     assert 'ADAM_CORE_REF: "cba63f412b6cd5a59f4bd20a1da8bd8504d857e1"' in candidate
     assert candidate.count("Checkout exact prepublication adam-core source pair") == 2
-    assert candidate.count("[patch.crates-io]") == 2
+    assert candidate.count("[patch.crates-io]") == 3
     assert 'adam_core = { path = ".ci/adam-core/rust/adam_core" }' in candidate
     assert '"release-candidate/adam-assist-0.4.0rc7"' in candidate
     assert '"release/adam-assist-*"' in candidate
@@ -66,6 +66,10 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert '--expected-core-version "$CORE_RUST_VERSION"' in candidate
     assert '--channel "$RELEASE_CHANNEL"' in candidate
     assert 'adam_core = "=$CORE_RUST_VERSION"' in candidate
+    assert "core-range-compatibility:" in candidate
+    assert 'core-version: ["0.5.7", "0.5.8"]' in candidate
+    assert "Download the one tested adam-assist crate" in candidate
+    assert "verify_rust_core_line.py" in candidate
     assert "Latest-stable Rust compatibility (non-authoritative)" in candidate
     assert "dtolnay/rust-toolchain@stable" in candidate
     assert (
@@ -120,6 +124,8 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "ref: v${{ inputs.expected_version }}" in python_publisher
     assert "EXPECTED_SHA: ${{ inputs.release_sha }}" in python_publisher
     assert "unconditional_requirements != expected_requirements" in python_publisher
+    assert '"adam-core": "<0.6,>=0.5.7"' in python_publisher
+    assert "selected Core" in python_publisher
     assert "prepare_pypi_upload.py" in python_publisher
     assert "Reject provisional source-pair locks" in python_publisher
     assert "--python-lock --rust-lock" in python_publisher
@@ -148,6 +154,11 @@ def test_release_matrix_generates_and_inspects_core_runtime_version() -> None:
     assert "Build adam-core native wheel" in workflow
     assert "Build adam-assist native wheel" in workflow
     assert "Accept exact prebuilt source-pair wheels" in workflow
+    assert "Test the same adam-assist wheel with Core 0.5.7 and 0.5.8" in workflow
+    assert "run_core_compatibility_matrix.py" in workflow
+    assert '"adam-core==0.5.7"' in workflow
+    assert '"adam-core>=0.5.7,<0.6"' in workflow
+    assert "core-compatibility-summary.json" in workflow
     assert "Build and accept native-platform wheels" not in workflow
     assert "full-current-benchmark:" in workflow
     full_job_header = workflow.split("  full-current-benchmark:", maxsplit=1)[1].split(

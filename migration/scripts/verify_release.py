@@ -13,6 +13,7 @@ try:
         CRATE_NAME,
         cargo_package,
         published_crate_entry,
+        stable_core_version_supported,
         validate_existing_archive,
         validate_package,
     )
@@ -22,10 +23,14 @@ except ImportError:
         CRATE_NAME,
         cargo_package,
         published_crate_entry,
+        stable_core_version_supported,
         validate_existing_archive,
         validate_package,
     )
     from write_maturin_version import cargo_version_to_pep440
+
+
+STABLE_PYTHON_CORE_REQUIREMENT = "adam-core>=0.5.7,<0.6"
 
 
 def is_python_prerelease(version: str) -> bool:
@@ -51,6 +56,11 @@ def verify(
         raise ValueError(
             "stable Python package and Core versions must not be prereleases"
         )
+    if channel == "stable" and not stable_core_version_supported(core_python_version):
+        raise ValueError(
+            "stable Python Core selection must satisfy >=0.5.7,<0.6, got "
+            f"{core_python_version}"
+        )
 
     manifest_path = repo / "rust" / "adam_assist_rs" / "Cargo.toml"
     package = cargo_package(manifest_path)
@@ -62,9 +72,13 @@ def verify(
 
     with (repo / "pyproject.toml").open("rb") as source:
         project = tomllib.load(source)["project"]
-    expected_dependency = f"adam-core=={core_python_version}"
+    expected_dependency = (
+        STABLE_PYTHON_CORE_REQUIREMENT
+        if channel == "stable"
+        else f"adam-core=={core_python_version}"
+    )
     if expected_dependency not in project["dependencies"]:
-        raise ValueError(f"missing exact Core dependency {expected_dependency}")
+        raise ValueError(f"missing Core dependency {expected_dependency}")
     version_source = (repo / "src" / "adam_assist" / "version.py").read_text()
     prefix = "__version__ = "
     if not version_source.startswith(prefix):

@@ -13,7 +13,9 @@ CORE_VERSION = "0.1.0-rc.5"
 
 
 def _package(
-    version: str = VERSION, core_version: str = CORE_VERSION
+    version: str = VERSION,
+    core_version: str = CORE_VERSION,
+    channel: str = "preview",
 ) -> dict[str, object]:
     return {
         "name": "adam_assist",
@@ -23,7 +25,7 @@ def _package(
         "dependencies": [
             {"name": name, "req": requirement}
             for name, requirement in publish_crate_archive.core_requirements(
-                core_version
+                core_version, channel
             ).items()
         ],
     }
@@ -57,9 +59,13 @@ def test_publish_body_preserves_metadata_and_exact_archive_bytes() -> None:
 
 def test_package_validation_requires_msrv_channel_and_core_pins() -> None:
     publish_crate_archive.validate_package(_package(), VERSION, CORE_VERSION, "preview")
-    publish_crate_archive.validate_package(
-        _package("0.4.0", "0.5.7"), "0.4.0", "0.5.7", "stable"
-    )
+    for core_version in ("0.5.7", "0.5.8", "0.5.99"):
+        publish_crate_archive.validate_package(
+            _package("0.4.0", core_version, "stable"),
+            "0.4.0",
+            core_version,
+            "stable",
+        )
 
     with pytest.raises(ValueError, match="stable package"):
         publish_crate_archive.validate_package(
@@ -73,6 +79,21 @@ def test_package_validation_requires_msrv_channel_and_core_pins() -> None:
     with pytest.raises(ValueError, match="must use"):
         publish_crate_archive.validate_package(
             unpinned, VERSION, CORE_VERSION, "preview"
+        )
+
+    stable_exact = _package("0.4.1", "0.5.8", "stable")
+    stable_dependencies = stable_exact["dependencies"]
+    assert isinstance(stable_dependencies, list)
+    stable_dependencies[0]["req"] = "=0.5.8"
+    with pytest.raises(ValueError, match="must use"):
+        publish_crate_archive.validate_package(stable_exact, "0.4.1", "0.5.8", "stable")
+
+    with pytest.raises(ValueError, match=">=0.5.7, <0.6.0"):
+        publish_crate_archive.validate_package(
+            _package("0.4.1", "0.6.0", "stable"),
+            "0.4.1",
+            "0.6.0",
+            "stable",
         )
 
     unpublished = _package()

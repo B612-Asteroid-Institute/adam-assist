@@ -28,10 +28,24 @@ CORE_DEPENDENCIES = (
     "adam_core_rs_kernel_data",
     "adam_core_rs_spice",
 )
+STABLE_CORE_LOWER_BOUND = (0, 5, 7)
+STABLE_CORE_UPPER_BOUND = (0, 6, 0)
+STABLE_CORE_REQUIREMENT = ">=0.5.7, <0.6.0"
 
 
-def core_requirements(version: str) -> dict[str, str]:
-    return {name: f"={version}" for name in CORE_DEPENDENCIES}
+def stable_core_version_supported(version: str) -> bool:
+    try:
+        parsed = tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return False
+    return (
+        len(parsed) == 3 and STABLE_CORE_LOWER_BOUND <= parsed < STABLE_CORE_UPPER_BOUND
+    )
+
+
+def core_requirements(version: str, channel: str) -> dict[str, str]:
+    requirement = STABLE_CORE_REQUIREMENT if channel == "stable" else f"={version}"
+    return {name: requirement for name in CORE_DEPENDENCIES}
 
 
 def cargo_package(manifest_path: Path) -> dict[str, Any]:
@@ -158,6 +172,11 @@ def validate_package(
         raise ValueError("preview package and Core versions must be prereleases")
     if channel == "stable" and (is_prerelease or core_is_prerelease):
         raise ValueError("stable package and Core versions must not be prereleases")
+    if channel == "stable" and not stable_core_version_supported(expected_core_version):
+        raise ValueError(
+            "stable Core selection must satisfy >=0.5.7, <0.6.0, got "
+            f"{expected_core_version}"
+        )
     if package["rust_version"] != "1.87":
         raise ValueError(f"unexpected MSRV {package['rust_version']}")
     if package.get("publish") == []:
@@ -166,7 +185,7 @@ def validate_package(
     requirements = {
         dependency["name"]: dependency["req"] for dependency in package["dependencies"]
     }
-    for name, expected in core_requirements(expected_core_version).items():
+    for name, expected in core_requirements(expected_core_version, channel).items():
         actual = requirements.get(name)
         if actual != expected:
             raise ValueError(f"{CRATE_NAME}->{name} must use {expected}, got {actual}")

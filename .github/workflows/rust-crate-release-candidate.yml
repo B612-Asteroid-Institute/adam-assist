@@ -12,6 +12,7 @@ on:
       - "rust/**"
       - "migration/scripts/publish_crate_archive.py"
       - "migration/scripts/verify_registry_locks.py"
+      - "migration/scripts/verify_rust_core_line.py"
       - ".github/workflows/rust-crate-*.yml"
       - ".github/workflows/publish-rust-crate.yml"
   workflow_dispatch:
@@ -77,14 +78,53 @@ jobs:
             --expected-version "$RUST_RELEASE_VERSION" \
             --expected-core-version "$CORE_RUST_VERSION" \
             --channel "$RELEASE_CHANNEL"
-      - name: Check a pure-Rust consumer against the packaged source
+      - name: Upload the exact crate publication set
+        uses: actions/upload-artifact@v4
+        with:
+          name: adam-assist-rust-crate-publication-set
+          path: crate-dist/
+          if-no-files-found: error
+
+  core-range-compatibility:
+    name: Core ${{ matrix.core-version }} packaged-crate compatibility
+    needs: package-and-test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core-version: ["0.5.7", "0.5.8"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout exact current adam-core source
+        if: matrix.core-version == '0.5.8'
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_REF }}
+          path: .ci/adam-core
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Download the one tested adam-assist crate
+        uses: actions/download-artifact@v4
+        with:
+          name: adam-assist-rust-crate-publication-set
+          path: accepted-crate
+      - name: Compile one coherent exact Core line
+        env:
+          CORE_VERSION: ${{ matrix.core-version }}
         run: |
           set -euo pipefail
-          package="$GITHUB_WORKSPACE/rust/adam_assist_rs/target/package/adam_assist-${RUST_RELEASE_VERSION}"
-          mkdir -p /tmp/adam-assist-consumer/src
-          cat > /tmp/adam-assist-consumer/Cargo.toml <<EOF
+          package_root="$RUNNER_TEMP/adam-assist-package"
+          consumer="$RUNNER_TEMP/adam-assist-consumer"
+          mkdir -p "$package_root" "$consumer/src"
+          tar -xzf accepted-crate/adam_assist-${RUST_RELEASE_VERSION}.crate \
+            -C "$package_root"
+          package="$(find "$package_root" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$package"
+          cat > "$consumer/Cargo.toml" <<EOF
           [package]
-          name = "adam-assist-consumer-smoke"
+          name = "adam-assist-core-range-consumer"
           version = "0.0.0"
           edition = "2021"
 
@@ -93,10 +133,10 @@ jobs:
           kernel-data = ["adam_assist/kernel-data"]
 
           [dependencies]
-          adam_core = "=$CORE_RUST_VERSION"
+          adam_core = "=$CORE_VERSION"
           adam_assist = { path = "$package", default-features = false }
           EOF
-          cat > /tmp/adam-assist-consumer/src/main.rs <<'EOF'
+          cat > "$consumer/src/main.rs" <<'EOF'
           use adam_assist::{AssistPropagator, AssistResult};
 
           fn main() {
@@ -108,16 +148,32 @@ jobs:
               let _ = std::mem::size_of::<adam_core::coords::CoordinateBatch>();
           }
           EOF
-          cargo check --manifest-path /tmp/adam-assist-consumer/Cargo.toml
-          rm /tmp/adam-assist-consumer/Cargo.lock
-          cargo check --manifest-path /tmp/adam-assist-consumer/Cargo.toml \
-            --no-default-features
-      - name: Upload the exact crate publication set
-        uses: actions/upload-artifact@v4
-        with:
-          name: adam-assist-rust-crate-publication-set
-          path: crate-dist/
-          if-no-files-found: error
+          if [ "$CORE_VERSION" = "0.5.8" ]; then
+            mkdir -p "$consumer/.cargo"
+            cat > "$consumer/.cargo/config.toml" <<EOF
+          [patch.crates-io]
+          adam_core = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core" }
+          adam_core_rs_autodiff = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_autodiff" }
+          adam_core_rs_coords = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_coords" }
+          adam_core_rs_kernel_data = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_kernel_data" }
+          adam_core_rs_orbit_determination = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_orbit_determination" }
+          adam_core_rs_spice = { path = "$GITHUB_WORKSPACE/.ci/adam-core/rust/adam_core_rs_spice" }
+          EOF
+          fi
+          (
+            cd "$consumer"
+            cargo check
+            cargo test
+            cargo metadata --format-version 1 > metadata.json
+          )
+          python migration/scripts/verify_rust_core_line.py \
+            --metadata "$consumer/metadata.json" --core-version "$CORE_VERSION"
+          (
+            cd "$consumer"
+            rm Cargo.lock
+            cargo check --no-default-features
+            cargo test --no-default-features
+          )
 
   latest-stable-compatibility:
     name: Latest-stable Rust compatibility (non-authoritative)

@@ -163,7 +163,7 @@ jobs:
                       for value in metadata.get_all("Requires-Dist", [])
                   }
                   expected_requirements = {
-                      "adam-core==0.5.8",
+                      "adam-core>=0.5.7,<0.6",
                       "naif-de440==2020.12.21.1",
                       "jpl-small-bodies-de441-n16==2021.3.31.1",
                   }
@@ -177,6 +177,28 @@ jobs:
           if invalid:
               raise SystemExit(f"wheel tag mismatch for {pattern}: {invalid}")
           PY
+      - name: Test the same adam-assist wheel with Core 0.5.7 and 0.5.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          lower_wheelhouse="$RUNNER_TEMP/lower-core-wheel"
+          mkdir -p "$lower_wheelhouse"
+          python -m pip download --only-binary=:all: --no-deps \
+            --dest "$lower_wheelhouse" "adam-core==0.5.7"
+          assist_wheel="$(find "$GITHUB_WORKSPACE/wheelhouse" -maxdepth 1 -name 'adam_assist-*.whl' -print -quit)"
+          current_core_wheel="$(find "$GITHUB_WORKSPACE/wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' -print -quit)"
+          lower_core_wheel="$(find "$lower_wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' -print -quit)"
+          test -n "$assist_wheel"
+          test -n "$current_core_wheel"
+          test -n "$lower_core_wheel"
+          python migration/scripts/run_core_compatibility_matrix.py \
+            --python "$(command -v python)" \
+            --assist-wheel "$assist_wheel" \
+            --assist-version "$ADAM_ASSIST_RELEASE_VERSION" \
+            --core-wheel "0.5.7=$lower_core_wheel" \
+            --core-wheel "$ADAM_CORE_RELEASE_VERSION=$current_core_wheel" \
+            --workspace "$RUNNER_TEMP/core-compatibility" \
+            --report "$RUNNER_TEMP/core-compatibility-summary.json"
       - name: Upload exact accepted artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -187,6 +209,8 @@ jobs:
             ${{ runner.temp }}/acceptance/invocation/smoke-report.json
             ${{ runner.temp }}/acceptance/wheelhouse/*.whl
             ${{ runner.temp }}/acceptance/logs/*.log
+            ${{ runner.temp }}/core-compatibility/*.json
+            ${{ runner.temp }}/core-compatibility-summary.json
           if-no-files-found: error
 
   full-current-benchmark:

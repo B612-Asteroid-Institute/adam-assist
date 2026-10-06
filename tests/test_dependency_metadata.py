@@ -68,7 +68,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
     assert dependencies["sha2"] == {"version": "0.10", "optional": True}
     kernel_dependency = {
-        "version": "=0.5.8",
+        "version": ">=0.5.7, <0.6.0",
         "default-features": False,
     }
     assert dependencies["adam_core_rs_kernel_data"] == {
@@ -92,10 +92,10 @@ def test_dev_lint_tool_is_pinned() -> None:
     assert "ruff==0.16.4" in pyproject["project"]["optional-dependencies"]["dev"]
 
 
-def test_stable_dependencies_are_exact_public_releases() -> None:
+def test_stable_dependencies_declare_core_05_compatibility() -> None:
     dependencies = _project_dependencies()
     assert dependencies == [
-        "adam-core==0.5.8",
+        "adam-core>=0.5.7,<0.6",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
     ]
@@ -113,8 +113,8 @@ def test_stable_dependencies_are_exact_public_releases() -> None:
         assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == "=0.5.8"
-    assert dependencies["adam_core_rs_spice"] == "=0.5.8"
+    assert dependencies["adam_core_rs_coords"] == ">=0.5.7, <0.6.0"
+    assert dependencies["adam_core_rs_spice"] == ">=0.5.7, <0.6.0"
     assert not (ROOT / "rust" / "vendor").exists()
 
 

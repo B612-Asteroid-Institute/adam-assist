@@ -13,7 +13,7 @@ memory mapping through `libassist-sys`.
 
 ```toml
 [dependencies]
-adam_core = "=0.5.8"
+adam_core = ">=0.5.7, <0.6.0"
 adam_assist = "=0.4.1"
 ```
 
@@ -52,7 +52,7 @@ SB441-n16 paths. Disable the default resolver with
   scientific semantics.
 
 `libassist-sys` and `librebound-sys` provide the versioned FFI and RAII layers.
-The exact `=0.5.8` adam-core crate dependencies provide generic coordinate,
+The `>=0.5.7, <0.6.0` adam-core crate dependencies provide generic coordinate,
 propagation, SPICE, and kernel-data contracts.
 
 ## Optional Python extension

@@ -79,19 +79,28 @@ resume a partial upload only when already-public files are unyanked and
 checksum-identical to the accepted artifacts. Tags, environment changes, and
 registry uploads remain separate human approval boundaries.
 
-## Stable 0.4.1 source-pair preparation
+## Stable 0.4.1 compatibility and source-pair preparation
 
-The packaging-only `adam-assist 0.4.1` successor exact-pins Python and public
-Rust `adam-core 0.5.8`; it does not change science or public-API behavior. The
-prepublication source-pair candidate uses immutable Core commit
-`cba63f412b6cd5a59f4bd20a1da8bd8504d857e1` for local and hosted validation.
-The wheel and crate metadata continue to contain only stable exact version
-requirements, never a Git or path dependency.
+The packaging-only `adam-assist 0.4.1` successor declares Python
+`adam-core>=0.5.7,<0.6` and Rust `adam_core* >=0.5.7, <0.6.0`. Core `0.5.7`
+is the tested lower bound, current Core `0.5.8` is the reproducible candidate
+selection, and future compatible `0.5.x` releases are intentionally accepted.
+Breaking Python, Arrow/schema, or Rust contracts require a Core `0.6` release.
+There is no adam-assist science or public-API behavior change.
+
+The prepublication candidate locks to immutable Core commit
+`cba63f412b6cd5a59f4bd20a1da8bd8504d857e1` for current-source validation.
+The wheel and crate metadata contain only the stable compatibility ranges,
+never a Git or path dependency. Hosted acceptance builds each adam-assist wheel
+once, then tests those identical bytes with Python Core `0.5.7` and `0.5.8`.
+Pure-Rust consumers likewise compile the packaged crate against both exact Core
+lines and reject a graph containing mixed Core crate versions.
 
 Core 0.5.8 is not public while this preliminary candidate is prepared. Its PDM
 lock therefore records the immutable Core source commit, and its Cargo lock
 records the exact locally patched Core 0.5.8 package identities. Neither lock is
 the final registry lock. After all Core 0.5.8 crates and wheels are public, both
-locks must be regenerated normally from crates.io and PyPI, the source patches
-must be absent, and full package-based acceptance must pass before any
-adam-assist tag or publication is requested.
+locks must be regenerated normally from crates.io and PyPI and must select
+public Core `0.5.8`; source patches must be absent and full package-based
+acceptance must pass before any adam-assist tag or publication is requested.
+Publication automation rejects provisional Git/path locks.
