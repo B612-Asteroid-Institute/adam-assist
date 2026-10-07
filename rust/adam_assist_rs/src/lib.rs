@@ -16,8 +16,9 @@ use adam_core_rs_coords::propagation::{
 };
 use adam_core_rs_coords::types::Frame;
 use adam_core_rs_coords::{
-    generate_ephemeris_barycentric, rotate_ecliptic_to_equatorial6, rotate_equatorial_to_ecliptic6,
-    CoordinateBatch, CovarianceBatch, CovarianceUnits, EphemerisOptions, EphemerisResult, Epoch,
+    assess_non_gravitational_parameters, generate_ephemeris_barycentric,
+    rotate_ecliptic_to_equatorial6, rotate_equatorial_to_ecliptic6, CoordinateBatch,
+    CovarianceBatch, CovarianceUnits, EphemerisOptions, EphemerisResult, Epoch, MarsdenLawEncoding,
     NonGravitationalParametersBatch, NonGravitationalParametersRow, ObserverBatch, OrbitBatch,
     OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider, TimeArray, TimeScale,
     TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
@@ -36,8 +37,8 @@ pub use assist_error::{AssistError, AssistResult};
 pub mod assist_propagation;
 pub use assist_propagation::AssistData;
 use assist_propagation::{
-    apply_nongrav_scalars, assist_propagate, assist_propagate_orbits_same_epoch, nongrav_model_key,
-    NonGravParams, Orbit as AssistOrbit,
+    assist_propagate, assist_propagate_orbits_same_epoch, configure_test_particle_forces,
+    nongrav_model_key, NonGravParams, Orbit as AssistOrbit,
 };
 
 #[cfg(feature = "python")]
@@ -603,29 +604,11 @@ fn build_collision_sim(
         sim.set_dt(dt);
     }
     let mut asim = AssistSim::new(sim, &data.ephem)?;
-    let has_non_gravitational_forces = non_gravitational_parameters.iter().any(Option::is_some);
-    let forces = if has_non_gravitational_forces {
-        ffi::ASSIST_FORCES_DEFAULT | ffi::ASSIST_FORCE_NON_GRAVITATIONAL
-    } else {
-        ffi::ASSIST_FORCES_DEFAULT
-    };
-    asim.set_forces(forces);
     for state in states_bary_eq {
         asim.sim_mut()
             .add_test_particle(state[0], state[1], state[2], state[3], state[4], state[5]);
     }
-    if let Some(model) = non_gravitational_parameters.iter().flatten().next() {
-        apply_nongrav_scalars(&mut asim, model);
-        let mut particle_parameters = vec![0.0; 3 * states_bary_eq.len()];
-        for (row, parameters) in non_gravitational_parameters.iter().enumerate() {
-            if let Some(parameters) = parameters {
-                particle_parameters[3 * row] = parameters.a1;
-                particle_parameters[3 * row + 1] = parameters.a2;
-                particle_parameters[3 * row + 2] = parameters.a3;
-            }
-        }
-        asim.set_particle_params(particle_parameters);
-    }
+    configure_test_particle_forces(&mut asim, non_gravitational_parameters)?;
     Ok(asim)
 }
 
@@ -812,49 +795,52 @@ fn state_only_failure_block(
     }
 }
 
-fn assist_non_gravitational_parameters(
+/// Convert one adam-core-assessed non-gravitational row to ASSIST parameters.
+///
+/// Adam-core owns A-coefficient and Marsden-law semantics. This adapter retains
+/// only backend mapping and request-specific error presentation.
+pub fn assist_non_gravitational_parameters(
     row: Option<NonGravitationalParametersRow>,
     orbit_id: &str,
 ) -> PropagationResultValue<Option<NonGravParams>> {
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let a1 = row.a1.unwrap_or(0.0);
-    let a2 = row.a2.unwrap_or(0.0);
-    let a3 = row.a3.unwrap_or(0.0);
-    if ![a1, a2, a3].iter().all(|value| value.is_finite()) {
+    let assessment = assess_non_gravitational_parameters(row);
+    let Some(nominal_a_coefficients_nonzero) = assessment.nominal_a_coefficients_nonzero else {
         return Err(PropagationError::InvalidRequest(format!(
             "Non-finite non-gravitational A1/A2/A3 values for orbit {orbit_id}."
         )));
-    }
-    if a1 == 0.0 && a2 == 0.0 && a3 == 0.0 {
+    };
+    if !nominal_a_coefficients_nonzero {
         return Ok(None);
     }
-    let constants = [row.aln, row.nk, row.nm, row.nn, row.r0];
-    let set_count = constants.iter().filter(|value| value.is_some()).count();
-    if set_count != 0 && set_count != constants.len() {
-        return Err(PropagationError::InvalidRequest(format!(
+
+    let [a1, a2, a3] = assessment.a_coefficients_with_null_as_zero;
+    match assessment.marsden_law_encoding {
+        MarsdenLawEncoding::InverseSquare => Ok(Some(NonGravParams::new(a1, a2, a3))),
+        MarsdenLawEncoding::Partial => Err(PropagationError::InvalidRequest(format!(
             "Partially-specified Marsden g(r) constants for orbit {orbit_id}: set all of (ALN, NK, NM, NN, R0) or none (null selects the asteroid (1 au / r)^2 convention)."
-        )));
-    }
-    if let [Some(aln), Some(nk), Some(nm), Some(nn), Some(r0)] = constants {
-        if ![aln, nk, nm, nn, r0].iter().all(|value| value.is_finite()) || aln <= 0.0 || r0 <= 0.0 {
-            return Err(PropagationError::InvalidRequest(format!(
+        ))),
+        MarsdenLawEncoding::Complete if !assessment.marsden_law_values_valid => {
+            Err(PropagationError::InvalidRequest(format!(
                 "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
-            )));
+            )))
         }
-        return Ok(Some(NonGravParams {
-            a1,
-            a2,
-            a3,
-            alpha: Some(aln),
-            nk: Some(nk),
-            nm: Some(nm),
-            nn: Some(nn),
-            r0: Some(r0),
-        }));
+        MarsdenLawEncoding::Complete => {
+            let row = row.expect("nonzero assessed A coefficients have a source row");
+            Ok(Some(NonGravParams {
+                a1,
+                a2,
+                a3,
+                alpha: row.aln,
+                nk: row.nk,
+                nm: row.nm,
+                nn: row.nn,
+                r0: row.r0,
+            }))
+        }
+        _ => Err(PropagationError::InvalidRequest(format!(
+            "Unsupported adam-core Marsden g(r) encoding for orbit {orbit_id}."
+        ))),
     }
-    Ok(Some(NonGravParams::new(a1, a2, a3)))
 }
 
 /// Mutable per-worker ASSIST propagation state implementing adam-core's
@@ -1900,6 +1886,126 @@ mod tests {
         assert_eq!(config.min_dt, Some(1.0e-9));
         assert_eq!(config.adaptive_mode, Some(Ias15AdaptiveMode::Global));
         assert_eq!(config.epsilon, Some(1.0e-6));
+    }
+
+    #[test]
+    fn public_nongrav_parser_preserves_supported_force_laws() {
+        let inverse_square = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: Some(-2.0e-10),
+                aln: None,
+                nk: None,
+                nm: None,
+                nn: None,
+                r0: None,
+            }),
+            "inverse-square",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(inverse_square.a1, 1.0e-9);
+        assert_eq!(inverse_square.a2, 0.0);
+        assert_eq!(inverse_square.a3, -2.0e-10);
+        assert_eq!(inverse_square.alpha, None);
+
+        let comet = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(3.0e-9),
+                a2: Some(4.0e-10),
+                a3: None,
+                aln: Some(0.111_262_042_6),
+                nk: Some(4.614_2),
+                nm: Some(2.15),
+                nn: Some(5.093),
+                r0: Some(2.808),
+            }),
+            "comet",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(comet.alpha, Some(0.111_262_042_6));
+        assert_eq!(comet.nk, Some(4.614_2));
+        assert_eq!(comet.nm, Some(2.15));
+        assert_eq!(comet.nn, Some(5.093));
+        assert_eq!(comet.r0, Some(2.808));
+    }
+
+    #[test]
+    fn public_nongrav_parser_rejects_partial_force_laws() {
+        let error = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: None,
+                aln: Some(1.0),
+                nk: None,
+                nm: None,
+                nn: None,
+                r0: None,
+            }),
+            "partial",
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Partially-specified Marsden g(r) constants"));
+    }
+
+    #[test]
+    fn public_nongrav_parser_preserves_zero_coefficients_and_invalid_assessments() {
+        let zero_coefficients_partial = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(0.0),
+                a2: Some(0.0),
+                a3: None,
+                aln: Some(1.0),
+                nk: None,
+                nm: None,
+                nn: None,
+                r0: None,
+            }),
+            "zero-coefficients-partial",
+        )
+        .unwrap();
+        assert!(zero_coefficients_partial.is_none());
+
+        let nonfinite = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(f64::NAN),
+                a2: None,
+                a3: None,
+                aln: None,
+                nk: None,
+                nm: None,
+                nn: None,
+                r0: None,
+            }),
+            "nonfinite",
+        )
+        .unwrap_err();
+        assert!(nonfinite
+            .to_string()
+            .contains("Non-finite non-gravitational A1/A2/A3"));
+
+        let invalid_complete = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: None,
+                aln: Some(-1.0),
+                nk: Some(4.0),
+                nm: Some(2.0),
+                nn: Some(5.0),
+                r0: Some(1.0),
+            }),
+            "invalid-complete",
+        )
+        .unwrap_err();
+        assert!(invalid_complete
+            .to_string()
+            .contains("Invalid Marsden g(r) constants"));
     }
 
     #[test]
