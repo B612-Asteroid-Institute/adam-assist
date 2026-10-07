@@ -23,12 +23,12 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_autodiff"
 version = "0.1.0-rc.5"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=ca849886ff4fbb8bffcc01bf8599728a8280b44b#ca849886ff4fbb8bffcc01bf8599728a8280b44b"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=df89b2ac5dcc4dcf2711014505d309fc5796d6a3#df89b2ac5dcc4dcf2711014505d309fc5796d6a3"
 
 [[package]]
 name = "adam_core_rs_coords"
 version = "0.1.0-rc.5"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=ca849886ff4fbb8bffcc01bf8599728a8280b44b#ca849886ff4fbb8bffcc01bf8599728a8280b44b"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=df89b2ac5dcc4dcf2711014505d309fc5796d6a3#df89b2ac5dcc4dcf2711014505d309fc5796d6a3"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -47,7 +47,7 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_kernel_data"
 version = "0.1.0-rc.5"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=ca849886ff4fbb8bffcc01bf8599728a8280b44b#ca849886ff4fbb8bffcc01bf8599728a8280b44b"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=df89b2ac5dcc4dcf2711014505d309fc5796d6a3#df89b2ac5dcc4dcf2711014505d309fc5796d6a3"
 dependencies = [
  "icu_locale_core",
  "icu_normalizer",
@@ -61,12 +61,12 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_orbit_determination"
 version = "0.1.0-rc.5"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=ca849886ff4fbb8bffcc01bf8599728a8280b44b#ca849886ff4fbb8bffcc01bf8599728a8280b44b"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=df89b2ac5dcc4dcf2711014505d309fc5796d6a3#df89b2ac5dcc4dcf2711014505d309fc5796d6a3"
 
 [[package]]
 name = "adam_core_rs_spice"
 version = "0.1.0-rc.5"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=ca849886ff4fbb8bffcc01bf8599728a8280b44b#ca849886ff4fbb8bffcc01bf8599728a8280b44b"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core.git?rev=df89b2ac5dcc4dcf2711014505d309fc5796d6a3#df89b2ac5dcc4dcf2711014505d309fc5796d6a3"
 dependencies = [
  "adam_core_rs_coords",
  "faer",
