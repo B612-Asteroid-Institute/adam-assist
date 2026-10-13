@@ -551,13 +551,11 @@ pub fn assist_propagate_orbits_same_epoch(
     let ephem = &data.ephem;
     let jd_ref = ephem.jd_ref();
     let t0 = mjd_to_assist_time(epoch, jd_ref);
-    let has_nongrav = orbits.iter().any(|orbit| orbit.non_grav.is_some());
 
     let mut sim = Simulation::new()?;
     sim.set_t(t0);
     integrator.apply(&mut sim);
     let mut asim = AssistSim::new(sim, ephem)?;
-    configure_forces(&mut asim, has_nongrav);
 
     for orbit in orbits {
         let bary_eq = ecl_orbit_to_bary_eq(&orbit.state, ephem, t0)?;
@@ -565,18 +563,11 @@ pub fn assist_propagate_orbits_same_epoch(
             bary_eq[0], bary_eq[1], bary_eq[2], bary_eq[3], bary_eq[4], bary_eq[5],
         );
     }
-    if let Some(model) = orbits.iter().find_map(|orbit| orbit.non_grav.as_ref()) {
-        apply_nongrav_scalars(&mut asim, model);
-        let mut particle_parameters = vec![0.0; 3 * orbits.len()];
-        for (row, orbit) in orbits.iter().enumerate() {
-            if let Some(parameters) = orbit.non_grav.as_ref() {
-                particle_parameters[3 * row] = parameters.a1;
-                particle_parameters[3 * row + 1] = parameters.a2;
-                particle_parameters[3 * row + 2] = parameters.a3;
-            }
-        }
-        asim.set_particle_params(particle_parameters);
-    }
+    let non_gravitational_parameters = orbits
+        .iter()
+        .map(|orbit| orbit.non_grav.clone())
+        .collect::<Vec<_>>();
+    configure_test_particle_forces(&mut asim, &non_gravitational_parameters)?;
 
     let mut states_by_particle = vec![Vec::with_capacity(target_epochs.len()); orbits.len()];
     for &target_mjd in target_epochs {
@@ -633,6 +624,64 @@ pub(crate) fn nongrav_model_key(parameters: Option<&NonGravParams>) -> [f64; 5] 
         key[3] = 5.093;
     }
     key
+}
+
+/// Configure force flags and per-particle non-gravitational parameters for a
+/// pre-populated simulation containing only real, massless test particles.
+///
+/// ASSIST stores the Marsden `g(r)` constants once per simulation while
+/// A1/A2/A3 are per particle. Active rows must therefore share one canonical
+/// Marsden model; mixed models fail rather than silently using the first row.
+/// `None` rows retain zero acceleration under the shared model. The parameter
+/// slice must address every particle already present in `asim`, in simulation
+/// order.
+pub fn configure_test_particle_forces(
+    asim: &mut AssistSim,
+    non_gravitational_parameters: &[Option<NonGravParams>],
+) -> Result<()> {
+    let particle_count = asim.sim().n_particles();
+    if non_gravitational_parameters.len() != particle_count {
+        return Err(Error::Other(format!(
+            "test-particle non-gravitational parameter rows ({}) do not match particles ({particle_count})",
+            non_gravitational_parameters.len()
+        )));
+    }
+
+    let model = shared_nongrav_model(non_gravitational_parameters)?;
+    configure_forces(asim, model.is_some());
+    let Some(model) = model else {
+        return Ok(());
+    };
+    apply_nongrav_scalars(asim, model);
+    let mut particle_parameters = vec![0.0; 3 * particle_count];
+    for (row, parameters) in non_gravitational_parameters.iter().enumerate() {
+        if let Some(parameters) = parameters {
+            particle_parameters[3 * row] = parameters.a1;
+            particle_parameters[3 * row + 1] = parameters.a2;
+            particle_parameters[3 * row + 2] = parameters.a3;
+        }
+    }
+    asim.set_particle_params(particle_parameters);
+    Ok(())
+}
+
+fn shared_nongrav_model(
+    non_gravitational_parameters: &[Option<NonGravParams>],
+) -> Result<Option<&NonGravParams>> {
+    let model = non_gravitational_parameters.iter().flatten().next();
+    if let Some(model) = model {
+        let expected = nongrav_model_key(Some(model));
+        if non_gravitational_parameters
+            .iter()
+            .flatten()
+            .any(|parameters| nongrav_model_key(Some(parameters)) != expected)
+        {
+            return Err(Error::Other(
+                "test-particle ASSIST simulation received multiple Marsden models".into(),
+            ));
+        }
+    }
+    Ok(model)
 }
 
 // ─── PropagatorPool: reusable simulation for many-orbit workloads ───────────
@@ -1166,6 +1215,34 @@ mod tests {
             nongrav_model_key(Some(&default)),
             nongrav_model_key(Some(&comet))
         );
+    }
+
+    #[test]
+    fn shared_nongrav_model_accepts_member_specific_coefficients() {
+        let first = NonGravParams::new(1.0e-9, 0.0, 0.0);
+        let second = NonGravParams::new(2.0e-9, -3.0e-10, 4.0e-11);
+        let rows = [Some(first), None, Some(second)];
+        let model = shared_nongrav_model(&rows).unwrap().unwrap();
+        assert_eq!(nongrav_model_key(Some(model)), [1.0, 0.0, 2.0, 5.093, 1.0]);
+    }
+
+    #[test]
+    fn shared_nongrav_model_rejects_mixed_force_laws() {
+        let inverse_square = NonGravParams::new(1.0e-9, 0.0, 0.0);
+        let water_ice = NonGravParams {
+            a1: 1.0e-9,
+            a2: 0.0,
+            a3: 0.0,
+            alpha: Some(0.111_262_042_6),
+            nk: Some(4.614_2),
+            nm: Some(2.15),
+            nn: Some(5.093),
+            r0: Some(2.808),
+        };
+        let error = shared_nongrav_model(&[Some(inverse_square), Some(water_ice)]).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("test-particle ASSIST simulation received multiple Marsden models"));
     }
 
     #[test]
