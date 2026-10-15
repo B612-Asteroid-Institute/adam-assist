@@ -195,6 +195,66 @@ impl Propagator for AssistPropagator {
         }
     }
 
+    fn supports_stm(&self) -> bool {
+        true
+    }
+
+    /// ASSIST's variational equations: the heliocentric ecliptic state at
+    /// each target time with its state-transition matrix (REBOUND's
+    /// first-order variational particles). Targets are integrated in time
+    /// order and returned in the caller's order.
+    fn propagate_stm(
+        &self,
+        state: [f64; 6],
+        epoch_tdb: Epoch,
+        times_tdb: &[Epoch],
+    ) -> PropagationResultValue<Vec<adam_core_rs_coords::propagation::StmRow>> {
+        if !state_is_finite(&state) {
+            return Err(PropagationError::InvalidRequest(
+                "assist-rs STM propagation input state was non-finite".to_string(),
+            ));
+        }
+        let mut order: Vec<usize> = (0..times_tdb.len()).collect();
+        order.sort_by(|&a, &b| times_tdb[a].mjd().total_cmp(&times_tdb[b].mjd()));
+        let sorted: Vec<f64> = order.iter().map(|&i| times_tdb[i].mjd()).collect();
+        let propagated = assist_propagation::assist_propagate_single(
+            &self.data,
+            &AssistOrbit::new(state, epoch_tdb.mjd()),
+            &sorted,
+            true,
+            &self.integrator,
+        )
+        .map_err(|err| PropagationError::Backend(format!("assist-rs STM propagation: {err}")))?;
+        if propagated.len() != sorted.len() {
+            return Err(PropagationError::BackendProtocol(format!(
+                "assist-rs returned {} STM rows for {} target epochs",
+                propagated.len(),
+                sorted.len()
+            )));
+        }
+        let mut rows = vec![
+            adam_core_rs_coords::propagation::StmRow {
+                state: [f64::NAN; 6],
+                stm: [f64::NAN; 36],
+                valid: false,
+            };
+            times_tdb.len()
+        ];
+        for (position, row) in propagated.into_iter().enumerate() {
+            let stm: [f64; 36] = match row.stm {
+                Some(matrix) => std::array::from_fn(|index| matrix[index / 6][index % 6]),
+                None => [f64::NAN; 36],
+            };
+            let valid = state_is_finite(&row.state) && stm.iter().all(|v| v.is_finite());
+            rows[order[position]] = adam_core_rs_coords::propagation::StmRow {
+                state: row.state,
+                stm,
+                valid,
+            };
+        }
+        Ok(rows)
+    }
+
     fn integration_time_scale(&self) -> TimeScale {
         TimeScale::Tdb
     }
