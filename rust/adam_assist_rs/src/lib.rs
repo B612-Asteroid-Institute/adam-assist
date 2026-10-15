@@ -187,6 +187,14 @@ impl AssistPropagator {
 impl Propagator for AssistPropagator {
     type Shard = AssistShard;
 
+    fn backend(&self) -> adam_core_rs_coords::propagation::BackendIdentity {
+        adam_core_rs_coords::propagation::BackendIdentity {
+            name: "adam_assist".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            two_body_dynamics: false,
+        }
+    }
+
     fn integration_time_scale(&self) -> TimeScale {
         TimeScale::Tdb
     }
