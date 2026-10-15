@@ -47,6 +47,16 @@ from naif_de440 import de440
 from ._native import NativeAssistPropagator
 from .version import __version__ as __version__  # noqa: PLC0414
 
+try:  # adam-core with native OD backends (external propagators)
+    from adam_core.propagator.propagator import NativeBackend as _NativeBackend
+except ImportError:  # older adam-core: the callback route
+    _NativeBackend = None
+
+try:  # adam-core with native OD backends (external propagators)
+    from adam_core.propagator.propagator import NativeBackend as _NativeBackend
+except ImportError:  # older adam-core: the callback route
+    _NativeBackend = None
+
 C = c.C
 
 # adam-core's quivr tables are runtime-typed but do not currently publish
@@ -288,6 +298,23 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     ``adam_assist`` step loop through a single Rust crossing, so
     ``detect_collisions``/``calculate_impacts`` work with this propagator.
     """
+
+    #: adam-core runs its orbit-determination stages natively with ASSIST
+    #: dynamics through the external-propagator capsule (no Python call per
+    #: prediction). A subclass overriding propagation is not covered.
+    native_backend = (
+        None
+        if _NativeBackend is None
+        else _NativeBackend(
+            name="adam_assist",
+            version=__version__,
+            work_units=frozenset({"propagator_capsule"}),
+        )
+    )
+
+    def propagator_capsule(self) -> Any:
+        """The ``adam_core.propagator.v1`` capsule of this propagator."""
+        return self._native.propagator_capsule()
 
     def __init__(
         self,

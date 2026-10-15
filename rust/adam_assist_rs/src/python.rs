@@ -6,8 +6,8 @@ use crate::{map_origin_code_to_assist_body, CollisionConditionSpec, CollisionDet
 use adam_core_rs_coords::propagation::{
     fit_orbit_least_squares_barycentric, fit_orbit_least_squares_evaluated_barycentric,
     iod_fit_linkages_barycentric, od_fit_barycentric, vallado_least_squares_barycentric,
-    EvaluatedLeastSquaresFit, IodConfig, IodOutput, ObservationSelectionMethod, OdConfig, OdMethod,
-    OdOutput, ValladoConfig, ValladoResult, ValladoStatus,
+    EvaluatedLeastSquaresFit, IodAcceptance, IodConfig, IodOutput, ObservationSelectionMethod,
+    OdConfig, OdMethod, OdOutput, ValladoConfig, ValladoResult, ValladoStatus, VelocityMethod,
 };
 use adam_core_rs_coords::propagation::{
     CovariancePropagation, EpochPolicy, PropagationOptions, PropagationRequest, PropagationResult,
@@ -30,7 +30,7 @@ use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
 use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyCapsule, PyDict};
 use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
 use std::path::Path;
@@ -197,6 +197,26 @@ impl NativeAssistPropagator {
             spice,
             benchmark: Mutex::new(None),
         })
+    }
+
+    /// This propagator as an adam-core external propagator (capsule
+    /// ``adam_core.propagator.v1``): adam-core's orbit-determination stages
+    /// then run with ASSIST dynamics natively, with no Python call per
+    /// prediction. The capsule owns a clone of the propagator (shared
+    /// ephemeris data).
+    fn propagator_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
+        let name =
+            std::ffi::CString::new(adam_core_rs_coords::propagation::EXTERNAL_PROPAGATOR_CAPSULE)
+                .expect("no NUL");
+        PyCapsule::new_bound(
+            py,
+            adam_core_rs_coords::propagation::OwnedExternalPropagator::new(
+                self.inner.clone(),
+                "adam_assist",
+                env!("CARGO_PKG_VERSION"),
+            ),
+            Some(name),
+        )
     }
 
     /// Time the most recently prepared public ASSIST operation entirely in
@@ -1016,6 +1036,12 @@ impl NativeAssistPropagator {
             light_time,
             mu,
             speed_of_light,
+            // The legacy linkage policy this batch work unit implements
+            // (adam-core routes only acceptance="prefit" here).
+            max_triplets: None,
+            velocity_method: VelocityMethod::Gibbs,
+            acceptance: IodAcceptance::Prefit,
+            ..IodConfig::default()
         };
         let outputs = py
             .allow_threads(|| run_iod_linkages(self, &problem, &linkage_rows, chunk_size, &config))
@@ -1037,7 +1063,7 @@ impl NativeAssistPropagator {
                     return None;
                 }
                 let key = [
-                    output.epoch_mjd.to_bits(),
+                    output.epoch.map_or(f64::NAN, |epoch| epoch.mjd()).to_bits(),
                     output.state[0].to_bits(),
                     output.state[1].to_bits(),
                     output.state[2].to_bits(),
@@ -1052,7 +1078,10 @@ impl NativeAssistPropagator {
 
         let orbit_ids: Vec<String> = accepted.iter().map(|row| row.0.clone()).collect();
         let states: Vec<[f64; 6]> = accepted.iter().map(|row| row.2.state).collect();
-        let epochs: Vec<f64> = accepted.iter().map(|row| row.2.epoch_mjd).collect();
+        let epochs: Vec<f64> = accepted
+            .iter()
+            .map(|row| row.2.epoch.map_or(f64::NAN, |epoch| epoch.mjd()))
+            .collect();
         let arc_lengths: Vec<f64> = accepted.iter().map(|row| row.2.arc_length).collect();
         let num_obs: Vec<usize> = accepted.iter().map(|row| row.2.num_obs).collect();
         let chi2: Vec<f64> = accepted.iter().map(|row| row.2.chi2_total).collect();
