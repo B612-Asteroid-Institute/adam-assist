@@ -95,7 +95,5 @@ def test_registry_locks_reject_zip_zopfli_and_wrong_rawzip(tmp_path: Path) -> No
     cargo_lock.write_text(
         cargo_lock.read_text().replace('version = "0.5.2"', 'version = "0.6.0"')
     )
-    with pytest.raises(
-        ValueError, match="rawzip must be registry-only version 0.5.2"
-    ):
+    with pytest.raises(ValueError, match="rawzip must be registry-only version 0.5.2"):
         verify_rust_lock(tmp_path, "0.6.1")
