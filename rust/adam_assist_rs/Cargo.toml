@@ -48,10 +48,11 @@ crate-type = ["rlib", "cdylib"]
 [workspace]
 resolver = "2"
 
-# LOCAL DEVELOPMENT ONLY (drop before release): build against the adam-core
-# od-obs-uncertainty-rust branch, whose Propagator::backend() and external
-# propagator ABI are not yet released.
+# PRE-RELEASE (drop once adam-core 0.6.0 is published): build against the
+# adam-core od-obs-uncertainty-rust branch (PR 217), whose
+# Propagator::backend(), propagate_stm and external propagator ABI are not
+# yet released.
 [patch.crates-io]
-adam_core_rs_coords = { path = "/Users/kathleenkiker/adam_core_od_rust/rust/adam_core_rs_coords" }
-adam_core_rs_spice = { path = "/Users/kathleenkiker/adam_core_od_rust/rust/adam_core_rs_spice" }
-adam_core_rs_kernel_data = { path = "/Users/kathleenkiker/adam_core_od_rust/rust/adam_core_rs_kernel_data" }
+adam_core_rs_coords = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "e856436c" }
+adam_core_rs_spice = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "e856436c" }
+adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "e856436c" }

@@ -23,14 +23,12 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_autodiff"
 version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83cf80194317920acc4c814670f23e1e95baa97797d63fad6ed942700675e854"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
 
 [[package]]
 name = "adam_core_rs_coords"
 version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3556510738c5ee91bd7eef98e42d033c58c6d97adec6d2308193fa3a74865951"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -49,9 +47,9 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_kernel_data"
 version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc15489c3b0f72902872bc3816ce1a85496c466ed8f347a4e52ab69526b45b85"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
 dependencies = [
+ "flate2",
  "icu_locale_core",
  "icu_normalizer",
  "icu_properties",
@@ -64,14 +62,12 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_orbit_determination"
 version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61438383af910eab31ee4cfd08290295a48769a07ebd285f4587448afd7422ed"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
 
 [[package]]
 name = "adam_core_rs_spice"
 version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47508e0de7bcfb7efc9d37dc90cf9ae7286729274a53f5902b06135d5b4086d4"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
 dependencies = [
  "adam_core_rs_coords",
  "faer",
@@ -2895,7 +2891,6 @@ dependencies = [
  "indexmap",
  "memchr",
  "thiserror 2.0.18",
- "zopfli",
 ]
 
 [[package]]
@@ -2903,18 +2898,6 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zopfli"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
-dependencies = [
- "bumpalo",
- "crc32fast",
- "log",
- "simd-adler32",
-]
 
 [[package]]
 name = "zstd"
