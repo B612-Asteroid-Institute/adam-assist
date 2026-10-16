@@ -251,7 +251,7 @@ def test_rust_public_semantics_fixture_uses_the_final_legacy_authority() -> None
         "adam-assist": "0.3.11.dev12+gcb5bb14",
         "assist": "1.2.3",
         "rebound": "4.6.0",
-        "adam-core": "0.6.0.dev39+g757c09fc",
+        "adam-core": "0.5.7.dev39+g757c09fc",
     }
 
 
