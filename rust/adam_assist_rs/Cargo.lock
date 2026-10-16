@@ -23,12 +23,12 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_autodiff"
 version = "0.5.8"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=93579780#93579780b3a5b770a1bcdb324b4c32aa08dcf964"
 
 [[package]]
 name = "adam_core_rs_coords"
 version = "0.5.8"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=93579780#93579780b3a5b770a1bcdb324b4c32aa08dcf964"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -47,7 +47,7 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_kernel_data"
 version = "0.5.8"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=93579780#93579780b3a5b770a1bcdb324b4c32aa08dcf964"
 dependencies = [
  "flate2",
  "icu_locale_core",
@@ -62,12 +62,12 @@ dependencies = [
 [[package]]
 name = "adam_core_rs_orbit_determination"
 version = "0.5.8"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=93579780#93579780b3a5b770a1bcdb324b4c32aa08dcf964"
 
 [[package]]
 name = "adam_core_rs_spice"
 version = "0.5.8"
-source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=e856436c#e856436c56cd9acd26837d2fab5c72d7ae497b33"
+source = "git+https://github.com/B612-Asteroid-Institute/adam_core?rev=93579780#93579780b3a5b770a1bcdb324b4c32aa08dcf964"
 dependencies = [
  "adam_core_rs_coords",
  "faer",

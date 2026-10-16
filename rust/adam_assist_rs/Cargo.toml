@@ -53,6 +53,6 @@ resolver = "2"
 # Propagator::backend(), propagate_stm and external propagator ABI are not
 # yet released.
 [patch.crates-io]
-adam_core_rs_coords = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "e856436c" }
-adam_core_rs_spice = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "e856436c" }
-adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "e856436c" }
+adam_core_rs_coords = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "93579780" }
+adam_core_rs_spice = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "93579780" }
+adam_core_rs_kernel_data = { git = "https://github.com/B612-Asteroid-Institute/adam_core", rev = "93579780" }
