@@ -28,13 +28,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
         if: ${{ hashFiles('**/pdm.lock') != '' }}
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: '3.12'
           cache: true
           cache-dependency-path: '**/pdm.lock'
@@ -42,6 +43,7 @@ jobs:
         if: ${{ hashFiles('**/pdm.lock') == '' }}
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: '3.12'
       - name: Install dev dependencies
         run: pdm install --frozen-lockfile -G dev
@@ -59,7 +61,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.87.0
         with:
@@ -67,6 +69,7 @@ jobs:
       - name: Set up PDM
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: '3.12'
       - name: Install dev dependencies
         run: pdm install --frozen-lockfile -G dev
@@ -86,13 +89,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
         if: ${{ hashFiles('**/pdm.lock') != '' }}
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: ${{ matrix.python-version }}
           cache: true
           cache-dependency-path: '**/pdm.lock'
@@ -100,6 +104,7 @@ jobs:
         if: ${{ hashFiles('**/pdm.lock') == '' }}
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: ${{ matrix.python-version }}
       - name: Install dev dependencies
         run: pdm install --frozen-lockfile -G dev
@@ -134,13 +139,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.5.8 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
         if: ${{ hashFiles('**/pdm.lock') != '' }}
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: '3.12'
           cache: true
           cache-dependency-path: '**/pdm.lock'
@@ -148,6 +154,7 @@ jobs:
         if: ${{ hashFiles('**/pdm.lock') == '' }}
         uses: pdm-project/setup-pdm@v4
         with:
+          version: '2.29.2'
           python-version: '3.12'
       - name: Install dev dependencies
         run: pdm install --frozen-lockfile -G dev

@@ -28,9 +28,9 @@ CORE_DEPENDENCIES = (
     "adam_core_rs_kernel_data",
     "adam_core_rs_spice",
 )
-STABLE_CORE_LOWER_BOUND = (0, 5, 7)
-STABLE_CORE_UPPER_BOUND = (0, 6, 0)
-STABLE_CORE_REQUIREMENT = ">=0.5.7, <0.6.0"
+STABLE_CORE_LOWER_BOUND = (0, 6, 0)
+STABLE_CORE_UPPER_BOUND = (0, 7, 0)
+STABLE_CORE_REQUIREMENT = "^0.6"
 
 
 def stable_core_version_supported(version: str) -> bool:
@@ -174,7 +174,7 @@ def validate_package(
         raise ValueError("stable package and Core versions must not be prereleases")
     if channel == "stable" and not stable_core_version_supported(expected_core_version):
         raise ValueError(
-            "stable Core selection must satisfy >=0.5.7, <0.6.0, got "
+            "stable Core selection must satisfy >=0.6.0, <0.7.0, got "
             f"{expected_core_version}"
         )
     if package["rust_version"] != "1.87":

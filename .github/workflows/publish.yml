@@ -14,22 +14,22 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release version
         required: true
-        default: 0.4.1
+        default: 0.5.0
         type: string
       expected_rust_version:
         description: Exact matching adam_assist Cargo version
         required: true
-        default: 0.4.1
+        default: 0.5.0
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core Python release
         required: true
-        default: 0.5.8
+        default: 0.6.1
         type: string
       expected_adam_core_rust_version:
         description: Exact already-published adam-core Rust release
         required: true
-        default: 0.5.8
+        default: 0.6.1
         type: string
       release_channel:
         description: Registry release channel
@@ -164,10 +164,10 @@ jobs:
 
           expected_version = Version(os.environ["EXPECTED_VERSION"])
           expected_core = Version(os.environ["EXPECTED_CORE_VERSION"])
-          if expected_core not in Requirement("adam-core>=0.5.7,<0.6").specifier:
+          if expected_core not in Requirement("adam-core>=0.6,<0.7").specifier:
               raise SystemExit(f"selected Core {expected_core} is outside the supported range")
           expected_requirements = {
-              "adam-core": "<0.6,>=0.5.7",
+              "adam-core": "<0.7,>=0.6",
               "naif-de440": "==2020.12.21.1",
               "jpl-small-bodies-de441-n16": "==2021.3.31.1",
           }
