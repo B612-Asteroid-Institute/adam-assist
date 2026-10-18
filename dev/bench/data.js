@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791319777361,
+  "lastUpdate": 1792287728113,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -1044,6 +1044,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.01442254179883075",
             "extra": "mean: 16.827797632599992 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "akoumjian@users.noreply.github.com",
+            "name": "Alec Koumjian",
+            "username": "akoumjian"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "56694817c468a283502d0b3f2bee592e0208f7c4",
+          "message": "Merge pull request #42 from B612-Asteroid-Institute/pairing/adam-assist-0.5.0-core-0.6.0\n\nRelease adam-assist 0.5.0 for Core 0.6",
+          "timestamp": "2026-10-17T21:23:40-04:00",
+          "tree_id": "abc81461bab94e2816b29209b4acab6228d2f6d0",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/56694817c468a283502d0b3f2bee592e0208f7c4"
+        },
+        "date": 1792287727837,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.4744490390078812,
+            "unit": "iter/sec",
+            "range": "stddev: 0.002733781414303412",
+            "extra": "mean: 2.1077079260000118 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 39.3115903678782,
+            "unit": "iter/sec",
+            "range": "stddev: 0.000624467783161774",
+            "extra": "mean: 25.437790500002453 msec\nrounds: 38"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 1.0650888956689206,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00679620454681739",
+            "extra": "mean: 938.8887670000145 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 1.0658752242407799,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0012438941437760205",
+            "extra": "mean: 938.1961201999957 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 1.0593252484566655,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0046481656891957735",
+            "extra": "mean: 943.9971354000136 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 3.1982324244427476,
+            "unit": "iter/sec",
+            "range": "stddev: 0.005113902229864609",
+            "extra": "mean: 312.67271019999043 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 3.2230002414450882,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00024895707945279526",
+            "extra": "mean: 310.2699116000167 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.04372239884349954,
+            "unit": "iter/sec",
+            "range": "stddev: 0.022117134332117375",
+            "extra": "mean: 22.87157215640001 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.04373074975691908,
+            "unit": "iter/sec",
+            "range": "stddev: 0.018616215262226548",
+            "extra": "mean: 22.867204554199986 sec\nrounds: 5"
           }
         ]
       }
