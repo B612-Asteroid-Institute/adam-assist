@@ -38,14 +38,15 @@ Rust-only consumers can use the same backend from crates.io without Python:
 
 ```toml
 [dependencies]
-adam_core = ">=0.5.7, <0.6.0"
-adam_assist = "=0.4.1"
+adam_core = "0.6"
+adam_assist = "=0.5.0"
 ```
 
-`adam-assist 0.4.1` supports the stable Core `0.5` contract from `0.5.7`
-through future compatible `0.5.x` releases. Breaking Core contracts require
-Core `0.6`; release CI tests the same ASSIST wheel/crate with Core `0.5.7` and
-the current `0.5.8` line.
+`adam-assist 0.5.0` supports the stable Core `0.6` contract. Python
+metadata accepts `adam-core>=0.6,<0.7`, while Cargo uses the idiomatic `0.6`
+line. Registry locks select Core `0.6.1`; release CI tests the same ASSIST
+wheel with public Python Core `0.6.0` and `0.6.1`, and validates fresh Rust
+1.87 consumers against the coherent public Core `0.6.1` graph.
 
 ```rust,no_run
 use adam_assist::{AssistPropagator, AssistResult};

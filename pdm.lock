@@ -5,14 +5,14 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.1"
-content_hash = "sha256:0725aba76ac1f788606e618c6b926fb426462d2e4019f9e78bb666659f1ef753"
+content_hash = "sha256:4ef8224a7720864f40e0d5471c7e6f6c3fc2db45a011899fe7b4521377c6d524"
 
 [[metadata.targets]]
 requires_python = ">=3.11,<3.14"
 
 [[package]]
 name = "adam-core"
-version = "0.5.8"
+version = "0.6.1"
 requires_python = "<3.14,>=3.11"
 summary = "Core libraries for the ADAM platform"
 groups = ["default"]
@@ -32,18 +32,18 @@ dependencies = [
     "scipy",
 ]
 files = [
-    {file = "adam_core-0.5.8-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:a8b28e8e94a248eb2b17d27e463228f667f87ed41947c0ab70b15182d2bc4aea"},
-    {file = "adam_core-0.5.8-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:9cac2e832a1de7d4d86e66981ddc0cf8ea1f8296969b4189a85111c84b7accf4"},
-    {file = "adam_core-0.5.8-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ce85947096a49de264dfad034aaf712bc6cdad3bcf31fac42ab085c69e5040f2"},
-    {file = "adam_core-0.5.8-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3bb59acddc42a486ca056a87f27bf9881b0b494013b2b1f5b3ff241139e865bb"},
-    {file = "adam_core-0.5.8-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:47d76bc11e3ac5c4b1d96586ea75a4afcd1d26d6f23f327d7c7cfaaa7faa0878"},
-    {file = "adam_core-0.5.8-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:e0c0e95d40813b5125bee1e31d1085d74693fd336f5fc17344fec4d3e9275859"},
-    {file = "adam_core-0.5.8-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:becf3787fd9b4dbf3a0db718d33cd89e8e7d2820efbbb535eaa722d0596e4af2"},
-    {file = "adam_core-0.5.8-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9335e6628ab4eee4fc7f43799f60d6ff0686ea2f2544bdd457e9a163b87289f4"},
-    {file = "adam_core-0.5.8-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:03a115991182f746ed621de68cd0e54e32522dd0e9c6730bac1af4826673f1f4"},
-    {file = "adam_core-0.5.8-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:010234b056e8de90abcbffa37f8391aaaa8cbd2966ee0be28b43b1e943f38f59"},
-    {file = "adam_core-0.5.8-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d3183301e0ce748a3d60958bafbb209708c73c5d51f16d6e97b77f4679bc3e72"},
-    {file = "adam_core-0.5.8-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:5e9dbe692d1c6ea64fccbee71af12096b42325ed4c2e7de17dd96a2efa96860f"},
+    {file = "adam_core-0.6.1-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:b055e07648122ba246e7bea94a73ae2c7dc8731df0133c07d1e51e0f597ba7ef"},
+    {file = "adam_core-0.6.1-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:cb288fdfd43659be12d31756b6f452c94335f209192d72e83da071bfc0817f4a"},
+    {file = "adam_core-0.6.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:73a0f615bbbce80be62e78b3e3830b395041e764a2d269e1e7061f282b5015b6"},
+    {file = "adam_core-0.6.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1de3e9248d5a94b99bc8c9ffaf2088a35861f82d52c839f8edd8d0cf5dc8b488"},
+    {file = "adam_core-0.6.1-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:b7eabe6d6cd0d8398b8be7cce25dc20c06c7b449827a69ef7268167edcf2d363"},
+    {file = "adam_core-0.6.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:c4a3438a2ff49096c4391b6c1d63822e2aeb674df87490956ff5114388233f6b"},
+    {file = "adam_core-0.6.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:95bc1bd77bffcb2a06ba19c811154fdef508796659f7566a0da1c637be3bc73f"},
+    {file = "adam_core-0.6.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1c3db9b2e57da21f8c47a765f78ad4f858efe0425f4c77d6aa3d0244d2feda18"},
+    {file = "adam_core-0.6.1-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:fadd6f269d702b8ab820c3695d81ac16873eb9e1722c127116cecee06e906f8f"},
+    {file = "adam_core-0.6.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:360c3b92bb97b5335a71f80f8bef8b660c3f7b1d4256f1ea8d0cfd822569ba9b"},
+    {file = "adam_core-0.6.1-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ecf70137503432873e8401c36e58676c2b78e79359ad2d31740038d5d1c9a653"},
+    {file = "adam_core-0.6.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c5e92c0a974236e6056a2e14845c33c4d966036b34ad92cd70a5c9c5053072fa"},
 ]
 
 [[package]]
@@ -1120,7 +1120,7 @@ files = [
 
 [[package]]
 name = "pdm"
-version = "2.28.2"
+version = "2.29.2"
 requires_python = ">=3.10"
 summary = "A modern Python package and dependency manager supporting the latest PEP standards"
 groups = ["dev"]
@@ -1151,8 +1151,8 @@ dependencies = [
     "virtualenv>=20",
 ]
 files = [
-    {file = "pdm-2.28.2-py3-none-any.whl", hash = "sha256:5319fea3d3647b85aab0d702914b2536724b7878d5fb6ae68045c1ac40136f54"},
-    {file = "pdm-2.28.2.tar.gz", hash = "sha256:dc31c1d11c2e90564207181f87ca3d6fc16ee6584d703c0a9e0c03ba287a925a"},
+    {file = "pdm-2.29.2-py3-none-any.whl", hash = "sha256:b17dcc9b55b94694d63afc56053afb7d580e963bb038c753df2cd18fda71182d"},
+    {file = "pdm-2.29.2.tar.gz", hash = "sha256:bad9705e9482e7d877a53380ff25273b01e9c1d313ee6ce7b215a6562a9d8bdd"},
 ]
 
 [[package]]

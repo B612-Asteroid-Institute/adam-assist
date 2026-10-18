@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "adam_assist"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "adam_core_rs_coords",
  "adam_core_rs_kernel_data",
@@ -22,15 +22,15 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_autodiff"
-version = "0.5.8"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83cf80194317920acc4c814670f23e1e95baa97797d63fad6ed942700675e854"
+checksum = "d633d08df87eda9aece2d8851f4363ba3160f4472ddc14e29695c6197a098e72"
 
 [[package]]
 name = "adam_core_rs_coords"
-version = "0.5.8"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3556510738c5ee91bd7eef98e42d033c58c6d97adec6d2308193fa3a74865951"
+checksum = "918e827e0403977e8e8a2007ed7553535278c4d47771bc3f3589c164e5fafbf4"
 dependencies = [
  "adam_core_rs_autodiff",
  "adam_core_rs_orbit_determination",
@@ -48,30 +48,31 @@ dependencies = [
 
 [[package]]
 name = "adam_core_rs_kernel_data"
-version = "0.5.8"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc15489c3b0f72902872bc3816ce1a85496c466ed8f347a4e52ab69526b45b85"
+checksum = "17d7beb540939f4e576a00b92030a624a1bd23be16d1dda13b885c59c6b5dc7f"
 dependencies = [
+ "flate2",
  "icu_locale_core",
  "icu_normalizer",
  "icu_properties",
  "icu_provider",
+ "rawzip",
  "sha2",
  "ureq",
- "zip",
 ]
 
 [[package]]
 name = "adam_core_rs_orbit_determination"
-version = "0.5.8"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61438383af910eab31ee4cfd08290295a48769a07ebd285f4587448afd7422ed"
+checksum = "c8a4698ae051c4b7f8f1d80aa3d7bdc80b703bbd344a072fb2ba332e353657a0"
 
 [[package]]
 name = "adam_core_rs_spice"
-version = "0.5.8"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47508e0de7bcfb7efc9d37dc90cf9ae7286729274a53f5902b06135d5b4086d4"
+checksum = "0a8f8b9521dd7ccb18c7141931ffcff006972fe875acc0984cbf072d3498ad12"
 dependencies = [
  "adam_core_rs_coords",
  "faer",
@@ -126,15 +127,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cab112f0a86d568ea0e627cc1d6be74a1e9cd55214684db5561995f6dad897c6"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
-dependencies = [
- "derive_arbitrary",
 ]
 
 [[package]]
@@ -469,17 +461,6 @@ name = "defer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "930c7171c8df9fb1782bdf9b918ed9ed2d33d1d22300abb754f9085bc48bf8e8"
-
-[[package]]
-name = "derive_arbitrary"
-version = "1.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
 
 [[package]]
 name = "digest"
@@ -1873,6 +1854,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
 
 [[package]]
+name = "rawzip"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac9999039f74cd73c03158cddfe4362991703c74efe5ce5c8073026f80a5e48c"
+
+[[package]]
 name = "rayon"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2882,39 +2869,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "zip"
-version = "2.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
-dependencies = [
- "arbitrary",
- "crc32fast",
- "crossbeam-utils",
- "displaydoc",
- "flate2",
- "indexmap",
- "memchr",
- "thiserror 2.0.18",
- "zopfli",
-]
-
-[[package]]
 name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
-
-[[package]]
-name = "zopfli"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
-dependencies = [
- "bumpalo",
- "crc32fast",
- "log",
- "simd-adler32",
-]
 
 [[package]]
 name = "zstd"

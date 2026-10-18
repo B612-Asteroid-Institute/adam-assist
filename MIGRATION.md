@@ -79,6 +79,29 @@ resume a partial upload only when already-public files are unyanked and
 checksum-identical to the accepted artifacts. Tags, environment changes, and
 registry uploads remain separate human approval boundaries.
 
+## Stable 0.5.0 Core 0.6 compatibility
+
+The science-code-unchanged `adam-assist 0.5.0` successor raises its compatible
+Core floor to the `0.6` line. Python metadata declares
+`adam-core>=0.6,<0.7`; Cargo manifests use `0.6` requirements while preserving
+the optional/default-feature split. The release-authoritative PDM and Cargo
+locks select public Core `0.6.1` artifacts with registry hashes and checksums.
+They contain no Git/path Core source, provisional patch, `zip`, or `zopfli`;
+kernel-data resolves exact `rawzip 0.5.2` under Rust 1.87.
+
+Each wheel lane builds ASSIST once from those public locks, runs the exact wheel
+with public Core `0.6.1` through immutable Core v0.6.1 clean-room tooling, then
+checks the same ASSIST wheel with public Python Core `0.6.0` and `0.6.1`.
+The packaged Rust crate and fresh no-lock consumers resolve one coherent public
+Core `0.6.1` graph. Core `0.6.0` is not used as an exact fresh Rust lane because
+its immutable kernel-data manifest references the now wholly-yanked `zip 2.x`
+line; Core `0.6.1` is the compatible registry repair.
+
+No propagation, force model, covariance, collision, ephemeris, numerical,
+public-API, or science-fixture behavior changes in this release. Build-once
+artifact provenance and separate merge, tag, protected-environment, crates.io,
+and PyPI approval boundaries remain unchanged.
+
 ## Stable 0.4.1 Core 0.5 compatibility
 
 The packaging-only `adam-assist 0.4.1` successor declares Python

@@ -69,6 +69,19 @@ def verify_rust_lock(repo: Path, core_version: str) -> None:
     )
     if provisional:
         raise ValueError(f"Cargo.lock contains provisional Core patches: {provisional}")
+    for forbidden in ("zip", "zopfli"):
+        if packages.get(forbidden):
+            raise ValueError(f"Cargo.lock contains forbidden dependency {forbidden}")
+    rawzip = packages.get("rawzip", [])
+    if len(rawzip) != 1:
+        raise ValueError(f"Cargo.lock must contain one rawzip, found {len(rawzip)}")
+    rawzip_package = rawzip[0]
+    if (
+        rawzip_package.get("version") != "0.5.2"
+        or rawzip_package.get("source") != CRATES_IO_SOURCE
+        or not rawzip_package.get("checksum")
+    ):
+        raise ValueError("Cargo.lock rawzip must be registry-only version 0.5.2")
 
 
 def main() -> int:

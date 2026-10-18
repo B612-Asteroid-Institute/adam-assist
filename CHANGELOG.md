@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.0] - 2026-10-16
+
+### Changed
+
+- Raised the compatible Core line to Python `adam-core>=0.6,<0.7` and Cargo
+  `0.6`, preserving Rust 1.87 and all feature semantics.
+- Finalized PDM and Cargo locks on public `adam-core 0.6.1` registry artifacts,
+  including all 12 Python wheel hashes and all Core crate checksums.
+- Updated release, clean-room, compatibility, and publication contracts for
+  ASSIST `0.5.0`, immutable Core v0.6.1 acceptance tooling, same-wheel Python
+  Core 0.6.0/0.6.1 validation, and coherent public Rust Core 0.6.1 resolution.
+- Enforced exact PDM 2.29.2 for repository lock and CI behavior and rejected
+  provisional Core sources, `zip`, and `zopfli`; kernel-data resolves
+  `rawzip 0.5.2`.
+
+### Compatibility
+
+- There are no propagation, force-model, covariance, collision, ephemeris,
+  numerical, public-API, or other science/runtime algorithm changes relative
+  to `0.4.1`. This is a dependency/release-engineering minor release for the
+  Core 0.6 compatibility floor.
+
 ## [0.4.1] - 2026-10-06
 
 ### Changed

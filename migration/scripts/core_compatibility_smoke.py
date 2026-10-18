@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise one installed adam-assist wheel across a supported Core 0.5 line."""
+"""Exercise one installed adam-assist wheel across the supported Core 0.6 line."""
 
 from __future__ import annotations
 

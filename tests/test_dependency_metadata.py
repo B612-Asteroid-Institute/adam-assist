@@ -47,7 +47,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     manifest = _cargo_manifest()
     package = manifest["package"]
     assert package["name"] == "adam_assist"
-    assert package["version"] == "0.4.1"
+    assert package["version"] == "0.5.0"
     assert package["rust-version"] == "1.87"
     assert package.get("publish", True) is True
     assert package["license"] == "GPL-3.0"
@@ -68,7 +68,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
     assert dependencies["sha2"] == {"version": "0.10", "optional": True}
     kernel_dependency = {
-        "version": ">=0.5.7, <0.6.0",
+        "version": "0.6",
         "default-features": False,
     }
     assert dependencies["adam_core_rs_kernel_data"] == {
@@ -89,13 +89,15 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
 def test_dev_lint_tool_is_pinned() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
-    assert "ruff==0.16.4" in pyproject["project"]["optional-dependencies"]["dev"]
+    dev = pyproject["project"]["optional-dependencies"]["dev"]
+    assert "ruff==0.16.4" in dev
+    assert "pdm==2.29.2" in dev
 
 
-def test_stable_dependencies_declare_core_05_compatibility() -> None:
+def test_stable_dependencies_declare_core_06_compatibility() -> None:
     dependencies = _project_dependencies()
     assert dependencies == [
-        "adam-core>=0.5.7,<0.6",
+        "adam-core>=0.6,<0.7",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
     ]
@@ -113,15 +115,16 @@ def test_stable_dependencies_declare_core_05_compatibility() -> None:
         assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == ">=0.5.7, <0.6.0"
-    assert dependencies["adam_core_rs_spice"] == ">=0.5.7, <0.6.0"
+    assert dependencies["adam_core_rs_coords"] == "0.6"
+    assert dependencies["adam_core_rs_spice"] == "0.6"
+    assert "patch" not in manifest
     assert not (ROOT / "rust" / "vendor").exists()
 
 
 def test_python_lock_uses_public_core_registry_artifacts() -> None:
     packages = _pdm_lock_packages()
     expected = {
-        "adam-core": "0.5.8",
+        "adam-core": "0.6.1",
         "naif-de440": "2020.12.21.1",
         "jpl-small-bodies-de441-n16": "2021.3.31.1",
         "naif-leapseconds": "2025.4.22",
@@ -135,7 +138,7 @@ def test_python_lock_uses_public_core_registry_artifacts() -> None:
     assert {"git", "path", "url"}.isdisjoint(core)
     files = core["files"]
     assert len(files) == 12
-    assert all(item["file"].startswith("adam_core-0.5.8-") for item in files)
+    assert all(item["file"].startswith("adam_core-0.6.1-") for item in files)
     assert all(item["hash"].startswith("sha256:") for item in files)
 
 
@@ -143,7 +146,7 @@ def test_cargo_lock_uses_public_core_registry_artifacts() -> None:
     with (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").open("rb") as lock_file:
         lock = tomllib.load(lock_file)
     packages = {package["name"]: package for package in lock["package"]}
-    assert packages["adam_assist"]["version"] == "0.4.1"
+    assert packages["adam_assist"]["version"] == "0.5.0"
     source = "registry+https://github.com/rust-lang/crates.io-index"
     for name in (
         "adam_core_rs_autodiff",
@@ -152,7 +155,7 @@ def test_cargo_lock_uses_public_core_registry_artifacts() -> None:
         "adam_core_rs_orbit_determination",
         "adam_core_rs_spice",
     ):
-        assert packages[name]["version"] == "0.5.8"
+        assert packages[name]["version"] == "0.6.1"
         assert packages[name]["source"] == source
         assert packages[name]["checksum"]
     unused = lock.get("patch", {}).get("unused", [])
@@ -168,6 +171,11 @@ def test_cargo_lock_uses_public_core_registry_artifacts() -> None:
         "icu_provider",
     ):
         assert packages[name]["version"] == "2.2.0"
+    assert packages["rawzip"]["version"] == "0.5.2"
+    assert packages["rawzip"]["source"] == source
+    assert packages["rawzip"]["checksum"]
+    assert "zip" not in packages
+    assert "zopfli" not in packages
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:
@@ -183,8 +191,8 @@ def test_python_stable_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.4.1"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.4.1"
+    assert cargo_version == "0.5.0"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.5.0"
 
 
 def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> None:

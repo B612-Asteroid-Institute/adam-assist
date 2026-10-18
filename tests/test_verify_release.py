@@ -14,7 +14,7 @@ def _source(repo: Path, python_version: str, core_version: str, channel: str) ->
         f'__version__ = "{python_version}"\n'
     )
     core_requirement = (
-        "adam-core>=0.5.7,<0.6" if channel == "stable" else f"adam-core=={core_version}"
+        "adam-core>=0.6,<0.7" if channel == "stable" else f"adam-core=={core_version}"
     )
     (repo / "pyproject.toml").write_text(
         "[project]\n" "dependencies = [\n" f'  "{core_requirement}",\n' "]\n"
@@ -62,18 +62,18 @@ def test_verify_release_accepts_preview_and_stable_channels(
     )
 
     stable = tmp_path / "stable"
-    _source(stable, "0.4.0", "0.5.7", "stable")
+    _source(stable, "0.5.0", "0.6.1", "stable")
     monkeypatch.setattr(
         verify_release,
         "cargo_package",
-        lambda _path: _package("0.4.0", "0.5.7", "stable"),
+        lambda _path: _package("0.5.0", "0.6.1", "stable"),
     )
     verify_release.verify(
         stable,
-        python_version="0.4.0",
-        rust_version="0.4.0",
-        core_python_version="0.5.7",
-        core_rust_version="0.5.7",
+        python_version="0.5.0",
+        rust_version="0.5.0",
+        core_python_version="0.6.1",
+        core_rust_version="0.6.1",
         channel="stable",
         rust_checksum="abc",
     )
@@ -86,7 +86,7 @@ def test_verify_release_rejects_mixed_stable_and_preview_python_versions(
     monkeypatch.setattr(
         verify_release,
         "cargo_package",
-        lambda _path: _package("0.4.0", "0.5.7", "stable"),
+        lambda _path: _package("0.4.0", "0.6.0", "stable"),
     )
 
     with pytest.raises(ValueError, match="stable Python"):
@@ -95,7 +95,7 @@ def test_verify_release_rejects_mixed_stable_and_preview_python_versions(
             python_version="0.4.0",
             rust_version="0.4.0",
             core_python_version="0.5.6rc6",
-            core_rust_version="0.5.7",
+            core_rust_version="0.6.0",
             channel="stable",
             rust_checksum="abc",
         )
@@ -104,22 +104,22 @@ def test_verify_release_rejects_mixed_stable_and_preview_python_versions(
 def test_verify_release_rejects_stable_exact_python_core_pin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _source(tmp_path, "0.4.1", "0.5.8", "stable")
+    _source(tmp_path, "0.5.0", "0.6.1", "stable")
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\ndependencies = ["adam-core==0.5.8"]\n'
+        '[project]\ndependencies = ["adam-core==0.6.1"]\n'
     )
     monkeypatch.setattr(
         verify_release,
         "cargo_package",
-        lambda _path: _package("0.4.1", "0.5.8", "stable"),
+        lambda _path: _package("0.5.0", "0.6.1", "stable"),
     )
-    with pytest.raises(ValueError, match="adam-core>=0.5.7,<0.6"):
+    with pytest.raises(ValueError, match="adam-core>=0.6,<0.7"):
         verify_release.verify(
             tmp_path,
-            python_version="0.4.1",
-            rust_version="0.4.1",
-            core_python_version="0.5.8",
-            core_rust_version="0.5.8",
+            python_version="0.5.0",
+            rust_version="0.5.0",
+            core_python_version="0.6.1",
+            core_rust_version="0.6.1",
             channel="stable",
             rust_checksum="abc",
         )
