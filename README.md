@@ -169,22 +169,21 @@ pdm run benchmark-current
 ```
 
 It reuses the existing propagation, nongrav, ephemeris/covariance, and
-collision workload builders, plus five provider-capability checks used by
-adam-core's public OD workflows. Orbit determination remains an adam-core
-product rather than a separate adam-assist surface. Results include current
-public Python timings, genuine Rust-owned `std::time::Instant` timings where
-available, public/native overhead, and exact workload shapes. It does not
-require a frozen Python environment or baseline timing cache, and all ASSIST
-workloads use `max_processes=1`. Use `--quick` for a smoke run or select, for
-example, `--domains nongrav ephemeris covariance --lanes tiny small`. Release
-CI runs 30 ASSIST product workloads plus the five Core-OD backend-capability
-checks, all with native timing required. After wheel acceptance, release
-candidates also run all 54 live JPL Horizons propagation and
-ephemeris accuracy cases.
+collision workload builders. Orbit determination remains exclusively an
+adam-core product; adam-assist supplies its private batched propagation capsule
+instead of provider-owned OD work units. Results include current public Python
+timings, genuine Rust-owned `std::time::Instant` timings where available,
+public/native overhead, and exact workload shapes. It does not require a frozen
+Python environment or baseline timing cache, and all ASSIST workloads use
+`max_processes=1`. Use `--quick` for a smoke run or select, for example,
+`--domains nongrav ephemeris covariance --lanes tiny small`. Release CI runs
+all 30 ASSIST product workloads with native timing required. After wheel
+acceptance, release candidates also run all 54 live JPL Horizons propagation
+and ephemeris accuracy cases.
 
-The deterministic test suite uses reviewed, hash-pinned frozen outputs for all
-formerly two-runtime propagation, covariance, ephemeris, collision, typed
-mapping, and OD/Vallado parity cases. Normal pytest and the current benchmark
+The deterministic test suite uses reviewed, hash-pinned frozen outputs for
+propagation, covariance, ephemeris, collision, typed mapping, and the minimal
+Core-owned capsule integration fixture. Normal pytest and the current benchmark
 suite do not import or launch the archived ASSIST oracle and never skip because
 a legacy virtual environment is absent.
 

@@ -8,20 +8,19 @@ older `adam_assist_0_3_10.json` remains the immutable published-wheel
 compatibility authority; it is not the latest-upstream inventory.
 
 The current surface preserves every useful frozen-upstream name and adds native
-timing plus fused backend capabilities used by adam-core's public OD/IOD
-workflows. Orbit determination remains owned and exposed by adam-core; the
-methods on ``ASSISTPropagator`` are one-crossing provider hooks, not a separate
-adam-assist OD product. Public propagation, sampled 6D/9D covariance,
-ephemeris generation, and collisions/impacts each enter the native
-implementation once. Python retains signatures, quivr/Arrow wrapping, static
-perturber data, published helper names, warnings, and errors.
+timing plus the private propagation capsule consumed by adam-core algorithms.
+Orbit determination remains owned and exposed by adam-core; migration-era OD
+provider methods are removed from ``ASSISTPropagator``. Public propagation,
+sampled 6D/9D covariance, ephemeris generation, and collisions/impacts each
+enter the native implementation once. Python retains signatures, quivr/Arrow
+wrapping, static perturber data, published helper names, warnings, and errors.
 
 Correctness evidence is classified explicitly:
 
 - **bitwise** for IDs, ordering, set membership, schemas, metadata, and exact
   compatibility helpers;
 - **tolerance-based** for deterministic numerical states, covariance,
-  ephemerides, OD/IOD, collision times, and JPL Horizons regressions; and
+  ephemerides, collision times, capsule conformance, and JPL Horizons regressions; and
 - **statistical** for Monte Carlo covariance sampling/collapse because the
   updated-upstream NumPy and Rust-native RNG streams intentionally differ.
 

@@ -280,7 +280,7 @@ jobs:
           if-no-files-found: error
 
   full-current-benchmark:
-    name: Full 35-workload current benchmark
+    name: Full 30-workload current benchmark
     needs: artifact-acceptance
     # The frozen direct-Rust fixture and its immutable last-bit residual envelope
     # were captured on arm64; keep that scientific gate on its authority platform.

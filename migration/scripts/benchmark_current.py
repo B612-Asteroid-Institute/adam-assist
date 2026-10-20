@@ -1,7 +1,7 @@
 """Benchmark current adam-assist public and native Rust boundaries only.
 
 Workloads are imported from the existing propagation, nongrav, ephemeris,
-collision, and orbit-determination benchmark modules. The suite never starts
+and collision benchmark modules. The suite never starts
 the frozen adam-assist oracle and always uses ``max_processes=1``.
 """
 
@@ -34,7 +34,6 @@ from migration.scripts import benchmark_assist_impacts as impacts  # noqa: E402
 from migration.scripts import (  # noqa: E402
     benchmark_assist_nongrav_propagation as nongrav,
 )
-from migration.scripts import benchmark_assist_od as od  # noqa: E402
 from migration.scripts import (  # noqa: E402
     benchmark_assist_public_semantics as propagation,
 )
@@ -47,7 +46,6 @@ DOMAINS = (
     "ephemeris",
     "covariance",
     "collisions",
-    "od",
 )
 LANES = ("tiny", "small", "large")
 
@@ -237,113 +235,6 @@ def _collision_rows(
     return rows
 
 
-def _od_call(
-    operation: str,
-    current: ASSISTPropagator,
-    initial: Any,
-    observations: Any,
-) -> Callable[[], Any]:
-    if operation == "fit_least_squares":
-        return lambda: current.fit_least_squares(initial, observations)
-    if operation == "fit_least_squares_evaluated":
-        return lambda: current.fit_least_squares_evaluated(initial, observations)
-    if operation == "od_fit":
-        return lambda: current.od_fit(
-            initial,
-            observations,
-            rchi2_threshold=100.0,
-            min_obs=5,
-            min_arc_length=1.0,
-            contamination_percentage=0.0,
-            delta=1e-6,
-            max_iter=20,
-            method="central",
-        )
-    if operation == "vallado_least_squares":
-        return lambda: current.vallado_least_squares(
-            initial, observations, use_central_difference=True
-        )
-    raise ValueError(operation)
-
-
-def _od_rows(
-    current: ASSISTPropagator,
-    *,
-    repeats: int,
-    warmups: int,
-) -> list[dict[str, Any]]:
-    observations, initial = od._problem(8)
-    rows = []
-    operations = (
-        "fit_least_squares",
-        "fit_least_squares_evaluated",
-        "od_fit",
-        "vallado_least_squares",
-    )
-    for operation in operations:
-        timing, _ = _timing(
-            current,
-            _od_call(operation, current, initial, observations),
-            repeats=repeats,
-            warmups=warmups,
-        )
-        rows.append(
-            {
-                "domain": "od",
-                "lane": "small",
-                "name": operation,
-                "description": (
-                    f"Noise-free one-orbit {operation} with 8 X05 astrometric "
-                    "observations over a 21-day arc."
-                ),
-                "workload_shape": {
-                    "n_starting_orbits": 1,
-                    "n_observations": len(observations),
-                    "arc_days": 21.0,
-                    "state_parameters": 6,
-                },
-                "options": {"max_processes": 1},
-                "timing_seconds": timing,
-            }
-        )
-    obs_ids = observations.id.to_pylist()
-
-    def iod_call() -> Any:
-        return current.initial_orbit_determination(
-            observations,
-            ["b", "a"],
-            ["b"] * len(obs_ids) + ["a"] * len(obs_ids),
-            obs_ids + obs_ids,
-            min_obs=3,
-            min_arc_length=1.0,
-            rchi2_threshold=1e12,
-            contamination_percentage=0.0,
-            chunk_size=2,
-        )
-
-    timing, _ = _timing(current, iod_call, repeats=repeats, warmups=warmups)
-    rows.append(
-        {
-            "domain": "od",
-            "lane": "small",
-            "name": "initial_orbit_determination",
-            "description": (
-                "Two duplicate 8-observation linkages run through complete "
-                "Gauss-IOD orchestration in one native crossing."
-            ),
-            "workload_shape": {
-                "n_linkages": 2,
-                "n_observations": len(observations),
-                "n_members": 2 * len(obs_ids),
-                "chunk_size": 2,
-            },
-            "options": {"max_processes": 1},
-            "timing_seconds": timing,
-        }
-    )
-    return rows
-
-
 def _markdown(payload: dict[str, Any]) -> str:
     lines = [
         "# Current adam-assist benchmark suite",
@@ -445,9 +336,6 @@ def main(argv: list[str] | None = None) -> int:
         rows.extend(
             _collision_rows(current, repeats=repeats, warmups=warmups, lane_names=lanes)
         )
-    if "od" in domains and "small" in lanes:
-        rows.extend(_od_rows(current, repeats=repeats, warmups=warmups))
-
     payload = {
         "schema_version": 1,
         "benchmark_id": "adam-assist-current-only",

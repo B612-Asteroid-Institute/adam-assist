@@ -254,7 +254,7 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     )[0]
     assert "needs: artifact-acceptance" in full_job_header
     assert "runs-on: macos-14" in full_job_header
-    assert "Full 35-workload current benchmark" in full_job_header
+    assert "Full 30-workload current benchmark" in full_job_header
     assert "Install public Core 0.6.1 and adam-assist candidate" in workflow
     assert 'python -m pip install "adam-core==$ADAM_CORE_RELEASE_VERSION"' in workflow
     assert 'importlib.metadata.version("adam-core") == "0.6.1"' in workflow

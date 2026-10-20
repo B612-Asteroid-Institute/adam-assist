@@ -9,22 +9,45 @@ from adam_assist import ASSISTPropagator
 ```
 
 The Python class is a compatibility veneer. Public propagation, covariance
-sampling/collapse, ephemeris generation, collision detection, and ASSIST-backed
-least-squares operations each enter the Rust backend once; local parallelism is
-Rayon-owned. `max_processes` is retained as the compatible thread-limit control.
+sampling/collapse, ephemeris generation, and collision detection each enter the
+Rust backend once; local parallelism is Rayon-owned. `max_processes` is retained
+as the compatible thread-limit control. Orbit determination is owned by
+`adam-core`, which consumes ASSIST only through its private native propagator
+capsule.
 
 ## Ownership boundary
 
 - `libassist-sys` and `librebound-sys` own reusable FFI and RAII bindings.
-- `adam-assist` owns propagation/ephemeris orchestration, package semantics,
-  its GPL `adam_assist` Rust crate, and its GPL Python wheel.
-- `adam-core` owns permissive generic contracts and cross-package integration.
+- `adam-assist` owns ASSIST dynamics, propagation/ephemeris/collision product
+  behavior, package semantics, its GPL `adam_assist` Rust crate, and its GPL
+  Python wheel.
+- `adam-core` owns permissive generic contracts, orbit determination, fitting,
+  rejection, linkage orchestration, and cross-package integration.
+- The private `propagator_capsule` is the only native Core↔ASSIST execution
+  capability; it transports propagation and STM requests, never OD algorithms.
 
 The temporary identified snapshots under `rust/vendor` were removed after the
 adam-core Rust crates were published. The stable `0.4.0` Rust crate exact-pins
 public `adam_core_rs_coords`, `adam_core_rs_spice`, and optional default
 `adam_core_rs_kernel_data` dependencies to `=0.5.7`; its Python metadata
 exact-pins `adam-core==0.5.7`.
+
+
+## Orbit-determination API migration
+
+The migration-era methods below were provider implementation hooks, not an
+adam-assist OD product, and are removed from `ASSISTPropagator`:
+
+| Removed adam-assist method | Canonical owner |
+|---|---|
+| `fit_least_squares`, `fit_least_squares_evaluated` | `adam_core.orbit_determination.fit_least_squares` / `refine` |
+| `od_fit`, `vallado_least_squares` | `adam_core.orbit_determination.refine` |
+| `initial_orbit_determination` | `adam_core.orbit_determination.run_iod` |
+
+Pass an `ASSISTPropagator` instance to the adam-core API. Core obtains the
+private capsule and owns every candidate, solver, rejection, and linkage loop;
+adam-assist supplies only ASSIST propagation and derivatives. Rust-only users
+continue passing `AssistPropagator` directly to adam-core's generic algorithms.
 
 ## Parity
 

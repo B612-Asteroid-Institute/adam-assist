@@ -148,28 +148,33 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
         "cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2"
     )
     assert summary == {
-        "symbols": 25,
+        "symbols": 21,
         "frozen_updated_upstream_symbols": 14,
         "missing_upstream_symbols": 0,
-        "latest_extension_symbols": 11,
+        "latest_extension_symbols": 7,
         "all_non_plotting_symbols_classified": True,
     }
     symbols = CURRENT_MANIFEST["symbols"]
     assert len(symbols) == summary["symbols"]
     assert len({symbol["id"] for symbol in symbols}) == len(symbols)
     assert all(symbol["classification"] for symbol in symbols)
-    core_od_hooks = {
-        "ASSISTPropagator.fit_least_squares",
-        "ASSISTPropagator.fit_least_squares_evaluated",
-        "ASSISTPropagator.od_fit",
-        "ASSISTPropagator.initial_orbit_determination",
-        "ASSISTPropagator.vallado_least_squares",
-    }
+    assert not any(
+        symbol["classification"] == "core_owned_fused_od_backend_capability"
+        for symbol in symbols
+    )
     assert {
         symbol["id"].split(":", maxsplit=1)[1]
         for symbol in symbols
-        if symbol["classification"] == "core_owned_fused_od_backend_capability"
-    } == core_od_hooks
+        if symbol["classification"] == "private_native_propagator_capability"
+    } == {"ASSISTPropagator.propagator_capsule"}
+    for method in (
+        "fit_least_squares",
+        "fit_least_squares_evaluated",
+        "od_fit",
+        "initial_orbit_determination",
+        "vallado_least_squares",
+    ):
+        assert not hasattr(ASSISTPropagator, method)
     assert set(CURRENT_MANIFEST["correctness_classification"]) == {
         "bitwise",
         "tolerance-based",

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Reduced the Core integration surface to the private native propagator capsule:
+  batched ASSIST propagation, backend identity/capabilities, and optional STMs.
+- Removed provider-owned least-squares, OD, IOD, Vallado, and linkage work units.
+  Use adam-core's `fit_least_squares`, `run_iod`, `refine`, and `run_od` APIs
+  with an `ASSISTPropagator` instance.
+- Removed ASSIST OD benchmarks and public-surface classifications; OD algorithms,
+  defaults, reports, and performance evidence are now exclusively Core-owned.
+
 ## [0.5.0] - 2026-10-16
 
 ### Changed
