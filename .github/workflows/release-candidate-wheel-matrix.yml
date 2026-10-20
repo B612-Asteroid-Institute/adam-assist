@@ -15,7 +15,7 @@ env:
   MATURIN_PEP517_ARGS: "--locked"
   ADAM_CORE_RELEASE_VERSION: "0.6.1"
   ADAM_CORE_ACCEPTANCE_REF: "fa16386fe957d6fc0448a53ef61c29a21ae882cc"
-  ADAM_ASSIST_RELEASE_VERSION: "0.5.0"
+  ADAM_ASSIST_RELEASE_VERSION: "0.6.0"
 
 jobs:
   artifact-acceptance:
@@ -307,7 +307,7 @@ jobs:
           python - <<'PY'
           import importlib.metadata
           assert importlib.metadata.version("adam-core") == "0.6.1"
-          assert importlib.metadata.version("adam-assist") == "0.5.0"
+          assert importlib.metadata.version("adam-assist") == "0.6.0"
           PY
       - name: Pin frozen-fixture kernel bytes
         run: |

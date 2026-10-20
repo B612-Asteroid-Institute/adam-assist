@@ -47,7 +47,6 @@ enum PreparedPropagationInput {
     Variants(OrbitVariantBatch),
 }
 
-
 #[derive(Clone)]
 #[allow(clippy::large_enum_variant)]
 enum NativeBenchmark {
@@ -411,6 +410,33 @@ impl NativeAssistPropagator {
         ephemeris_result_to_dict(py, &result)
     }
 
+    /// Same-epoch collision detection mirroring
+    /// `adam_assist.ASSISTPropagator._detect_collisions`. `states` must be
+    /// barycentric equatorial (N, 6) at one shared TDB epoch; the epoch and
+    /// horizon are TDB Julian dates computed by the Python boundary exactly
+    /// as legacy does. Returns per-row survivor states/indices at the final
+    /// executed (overshooting) step plus one impact record per
+    /// condition-step detection, all in barycentric equatorial with TDB
+    /// Julian-date times.
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        orbit_ids,
+        states,
+        epoch_jd_tdb,
+        final_jd_tdb,
+        condition_bodies,
+        condition_distances_km,
+        condition_stopping,
+        nongrav_source=None,
+        nongrav_a1=None,
+        nongrav_a2=None,
+        nongrav_a3=None,
+        nongrav_aln=None,
+        nongrav_nk=None,
+        nongrav_nm=None,
+        nongrav_nn=None,
+        nongrav_r0=None
+    ))]
     fn detect_collisions<'py>(
         &self,
         py: Python<'py>,

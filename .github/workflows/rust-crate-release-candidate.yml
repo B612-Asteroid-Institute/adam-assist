@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 env:
-  RUST_RELEASE_VERSION: "0.5.0"
+  RUST_RELEASE_VERSION: "0.6.0"
   CORE_RUST_VERSION: "0.6.1"
   RELEASE_CHANNEL: stable
 

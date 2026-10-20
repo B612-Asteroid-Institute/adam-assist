@@ -47,7 +47,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     manifest = _cargo_manifest()
     package = manifest["package"]
     assert package["name"] == "adam_assist"
-    assert package["version"] == "0.5.0"
+    assert package["version"] == "0.6.0"
     assert package["rust-version"] == "1.87"
     assert package.get("publish", True) is True
     assert package["license"] == "GPL-3.0"
@@ -146,7 +146,7 @@ def test_cargo_lock_uses_public_core_registry_artifacts() -> None:
     with (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").open("rb") as lock_file:
         lock = tomllib.load(lock_file)
     packages = {package["name"]: package for package in lock["package"]}
-    assert packages["adam_assist"]["version"] == "0.5.0"
+    assert packages["adam_assist"]["version"] == "0.6.0"
     source = "registry+https://github.com/rust-lang/crates.io-index"
     for name in (
         "adam_core_rs_autodiff",
@@ -191,11 +191,11 @@ def test_python_stable_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.5.0"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.5.0"
+    assert cargo_version == "0.6.0"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.6.0"
 
 
-def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> None:
+def test_current_benchmark_ci_covers_provider_product_workloads() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         command = tomllib.load(pyproject_file)["tool"]["pdm"]["scripts"][
             "benchmark-current-ci"
@@ -212,7 +212,6 @@ def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> 
     ephemeris_count = sum(not workload.covariance for workload in ephemeris_workloads)
     covariance_count = sum(workload.covariance for workload in ephemeris_workloads)
     collision_count = 3
-    od_count = 5
 
     assert (
         propagation_count,
@@ -220,8 +219,7 @@ def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> 
         ephemeris_count,
         covariance_count,
         collision_count,
-        od_count,
-    ) == (17, 3, 5, 2, 3, 5)
+    ) == (17, 3, 5, 2, 3)
     assert (
         sum(
             (
@@ -234,7 +232,6 @@ def test_current_benchmark_ci_covers_product_and_core_od_backend_workloads() -> 
         )
         == 30
     )
-    assert od_count == 5
 
 
 def test_rust_public_semantics_fixture_uses_the_final_legacy_authority() -> None:

@@ -14,12 +14,12 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release version
         required: true
-        default: 0.5.0
+        default: 0.6.0
         type: string
       expected_rust_version:
         description: Exact matching adam_assist Cargo version
         required: true
-        default: 0.5.0
+        default: 0.6.0
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core Python release

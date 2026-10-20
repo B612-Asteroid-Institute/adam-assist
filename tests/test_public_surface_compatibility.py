@@ -162,11 +162,15 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
         symbol["classification"] == "core_owned_fused_od_backend_capability"
         for symbol in symbols
     )
-    assert {
-        symbol["id"].split(":", maxsplit=1)[1]
+    capsule_symbols = [
+        symbol
         for symbol in symbols
         if symbol["classification"] == "private_native_propagator_capability"
-    } == {"ASSISTPropagator.propagator_capsule"}
+    ]
+    assert [symbol["id"].split(":", maxsplit=1)[1] for symbol in capsule_symbols] == [
+        "ASSISTPropagator.propagator_capsule"
+    ]
+    assert capsule_symbols[0]["correctness"] == "tolerance-based"
     for method in (
         "fit_least_squares",
         "fit_least_squares_evaluated",
@@ -182,5 +186,5 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
     }
 
 
-def test_stable_version_module_is_preserved() -> None:
-    assert __version__ == "0.5.0"
+def test_next_source_version_module_is_preserved() -> None:
+    assert __version__ == "0.6.0"

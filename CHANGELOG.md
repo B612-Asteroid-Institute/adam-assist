@@ -1,16 +1,22 @@
 # Changelog
 
-## Unreleased
+## [0.6.0] - Unreleased
+
+### Removed (breaking)
+
+- Removed provider-owned `fit_least_squares`,
+  `fit_least_squares_evaluated`, `od_fit`, `initial_orbit_determination`, and
+  `vallado_least_squares` methods and their native work units. Use adam-core's
+  nondeprecated `refine`, `run_iod`, and `run_od` entry points with an
+  `ASSISTPropagator`; see `MIGRATION.md` for exact policy mappings.
 
 ### Changed
 
 - Reduced the Core integration surface to the private native propagator capsule:
   batched ASSIST propagation, backend identity/capabilities, and optional STMs.
-- Removed provider-owned least-squares, OD, IOD, Vallado, and linkage work units.
-  Use adam-core's `fit_least_squares`, `run_iod`, `refine`, and `run_od` APIs
-  with an `ASSISTPropagator` instance.
-- Removed ASSIST OD benchmarks and public-surface classifications; OD algorithms,
-  defaults, reports, and performance evidence are now exclusively Core-owned.
+- Removed ASSIST OD workloads from the current benchmark and public-surface
+  classifications; OD algorithms, defaults, and reports are now exclusively
+  Core-owned. Historical migration benchmarks and oracle evidence are retained.
 
 ## [0.5.0] - 2026-10-16
 

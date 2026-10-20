@@ -15,7 +15,7 @@ import hashlib
 import random
 from ctypes import c_uint32
 from pathlib import Path
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt

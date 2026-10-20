@@ -55,7 +55,7 @@ def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
 
 def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     candidate = RUST_CANDIDATE_WORKFLOW.read_text()
-    assert 'RUST_RELEASE_VERSION: "0.5.0"' in candidate
+    assert 'RUST_RELEASE_VERSION: "0.6.0"' in candidate
     assert 'CORE_RUST_VERSION: "0.6.1"' in candidate
     assert "RELEASE_CHANNEL: stable" in candidate
     assert "ADAM_CORE_REF" not in candidate
@@ -195,7 +195,7 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     assert workflow.count("clean_room_artifact_smoke.py") == 1
 
     assert 'ADAM_CORE_RELEASE_VERSION: "0.6.1"' in workflow
-    assert 'ADAM_ASSIST_RELEASE_VERSION: "0.5.0"' in workflow
+    assert 'ADAM_ASSIST_RELEASE_VERSION: "0.6.0"' in workflow
     assert "Verify registry-only release locks" in workflow
     assert "pdm lock --check" in workflow
     assert workflow.count('"pdm==2.29.2"') == 2

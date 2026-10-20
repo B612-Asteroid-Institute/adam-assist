@@ -35,25 +35,39 @@ exact-pins `adam-core==0.5.7`.
 
 ## Orbit-determination API migration
 
+This breaking removal starts the adam-assist `0.6.0` source line. Released
+`0.5.0` artifacts retain their historical methods; this candidate does not
+report itself as `0.5.0`-compatible.
+
 The migration-era methods below were provider implementation hooks, not an
 adam-assist OD product, and are removed from `ASSISTPropagator`:
 
-| Removed adam-assist method | Canonical owner |
+| Removed adam-assist method | Canonical nondeprecated adam-core API |
 |---|---|
-| `fit_least_squares`, `fit_least_squares_evaluated` | `adam_core.orbit_determination.fit_least_squares` / `refine` |
-| `od_fit`, `vallado_least_squares` | `adam_core.orbit_determination.refine` |
-| `initial_orbit_determination` | `adam_core.orbit_determination.run_iod` |
+| `fit_least_squares`, `fit_least_squares_evaluated` | `refine(orbit, observations, ASSISTPropagator(), rejection="none")` |
+| `od_fit` | `refine(orbit, observations, ASSISTPropagator(), rejection="worst_residual")` |
+| `initial_orbit_determination` | `run_iod(linkage_observations, ASSISTPropagator(), ...)` for one linkage; top-level `initial_orbit_determination(observations, linkage_members, ASSISTPropagator, ...)` for a linkage table |
+| `vallado_least_squares` | No exact Vallado-trace replacement; use `refine(..., rejection="none")` for Core's supported weighted fit and migrate result handling |
 
-Pass an `ASSISTPropagator` instance to the adam-core API. Core obtains the
-private capsule and owns every candidate, solver, rejection, and linkage loop;
-adam-assist supplies only ASSIST propagation and derivatives. Rust-only users
-continue passing `AssistPropagator` directly to adam-core's generic algorithms.
+`refine` returns Core-owned `FittedOrbits` and `FittedOrbitMembers`, replacing
+the provider methods' tuples or implementation dictionaries. The batched IOD
+entry point remains in adam-core: it partitions membership by linkage and runs
+the same `run_iod` stage per linkage; adam-assist no longer receives linkage
+IDs or owns that loop.
+
+Pass an `ASSISTPropagator` instance to the adam-core stage API (or its class to
+the batched linkage API). Core obtains the private capsule and owns every
+candidate, solver, rejection, and linkage loop; adam-assist supplies only
+ASSIST propagation and derivatives. Rust-only users continue passing
+`AssistPropagator` directly to adam-core's generic algorithms.
 
 ## Parity
 
 `migration/parity` contains the two-runtime legacy oracle. Numerical reference
-runs use pinned legacy adam-core and adam-assist 0.3.9. The complete published
-API authority is the `adam-assist==0.3.10` wheel identified in
+runs use pinned legacy adam-core and adam-assist 0.3.9. Historical OD/Vallado
+oracle code and benchmark evidence remain immutable migration evidence; they
+are not active provider APIs or current benchmark workloads. The complete
+published API authority is the `adam-assist==0.3.10` wheel identified in
 `migration/public_surface/adam_assist_0_3_10.json`; governance tests preserve
 its four modules, root exports, module-level helpers/constants, class methods,
 positional signatures, and defaults. Current Rust tests exercise the public

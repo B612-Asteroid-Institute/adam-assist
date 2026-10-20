@@ -5,6 +5,8 @@ fit is owned and orchestrated by adam-core, which consumes the private native
 propagator capsule without provider-specific OD work units.
 """
 
+import ctypes
+
 import numpy as np
 import pytest
 from adam_core.coordinates import (
@@ -14,12 +16,14 @@ from adam_core.coordinates import (
     SphericalCoordinates,
 )
 from adam_core.observers import Observers
-from adam_core.orbit_determination import fit_least_squares
+from adam_core.orbit_determination import refine
 from adam_core.orbit_determination.evaluate import OrbitDeterminationObservations
+from adam_core.orbit_determination.provenance import backend_identity
 from adam_core.orbits import Orbits
 from adam_core.time import Timestamp
 
 from adam_assist import ASSISTPropagator as RustASSISTPropagator
+from adam_assist.version import __version__
 
 EPOCH_MJD = 60000.0
 TRUTH_STATE = np.array([1.2, 0.1, 0.05, -0.002, 0.016, 0.001])
@@ -53,14 +57,16 @@ def od_problem(frozen_assist_regression):
     observers = Observers.from_code("X05", times)
     values = frozen_assist_regression["od_observed_state"]
     arcsec = (1.0 / 3600.0) ** 2
-    cov = np.tile(np.diag([1.0, arcsec, arcsec, 1.0, 1.0, 1.0]), (n, 1, 1))
+    cov = np.full((n, 6, 6), np.nan)
+    cov[:, 1, 1] = arcsec
+    cov[:, 2, 2] = arcsec
     observed = SphericalCoordinates.from_kwargs(
-        rho=values[:, 0],
+        rho=np.full(n, np.nan),
         lon=values[:, 1],
         lat=values[:, 2],
-        vrho=values[:, 3],
-        vlon=values[:, 4],
-        vlat=values[:, 5],
+        vrho=np.full(n, np.nan),
+        vlon=np.full(n, np.nan),
+        vlat=np.full(n, np.nan),
         time=Timestamp.from_mjd(
             frozen_assist_regression["od_observed_time_mjd"], scale="utc"
         ),
@@ -81,15 +87,23 @@ def od_problem(frozen_assist_regression):
     return observations, initial
 
 
-
 def test_assist_native_backend_is_capsule_only() -> None:
     propagator = RustASSISTPropagator()
     backend = propagator.native_backend
 
     assert backend is not None
     assert backend.name == "adam_assist"
+    assert backend.version == __version__
     assert backend.work_units == frozenset({"propagator_capsule"})
-    assert type(propagator.propagator_capsule()).__name__ == "PyCapsule"
+    # This is the provider identity Core records in run_od provenance.
+    assert backend_identity(propagator) == f"adam_assist {__version__}"
+
+    capsule = propagator.propagator_capsule()
+    get_name = ctypes.pythonapi.PyCapsule_GetName
+    get_name.argtypes = (ctypes.py_object,)
+    get_name.restype = ctypes.c_char_p
+    assert type(capsule).__name__ == "PyCapsule"
+    assert get_name(capsule) == b"adam_core.propagator.v1"
     for method in (
         "fit_least_squares",
         "fit_least_squares_evaluated",
@@ -100,11 +114,15 @@ def test_assist_native_backend_is_capsule_only() -> None:
         assert not hasattr(propagator, method)
 
 
-def test_adam_core_fit_uses_assist_capsule(od_problem) -> None:
+def test_adam_core_refine_uses_assist_capsule_stm(od_problem) -> None:
     observations, initial = od_problem
 
-    fitted_orbit, fitted_members = fit_least_squares(
-        initial, observations, RustASSISTPropagator()
+    fitted_orbit, fitted_members = refine(
+        initial,
+        observations,
+        RustASSISTPropagator(),
+        rejection="none",
+        fit_settings={"jacobian": "propagator"},
     )
 
     assert fitted_orbit.success[0].as_py()

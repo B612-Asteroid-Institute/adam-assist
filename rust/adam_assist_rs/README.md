@@ -14,7 +14,7 @@ memory mapping through `libassist-sys`.
 ```toml
 [dependencies]
 adam_core = "0.6"
-adam_assist = "=0.5.0"
+adam_assist = "=0.6.0"
 ```
 
 ## Kernel setup

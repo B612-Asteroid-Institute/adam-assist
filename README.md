@@ -39,10 +39,10 @@ Rust-only consumers can use the same backend from crates.io without Python:
 ```toml
 [dependencies]
 adam_core = "0.6"
-adam_assist = "=0.5.0"
+adam_assist = "=0.6.0"
 ```
 
-`adam-assist 0.5.0` supports the stable Core `0.6` contract. Python
+`adam-assist 0.6.0` supports the stable Core `0.6` contract. Python
 metadata accepts `adam-core>=0.6,<0.7`, while Cargo uses the idiomatic `0.6`
 line. Registry locks select Core `0.6.1`; release CI tests the same ASSIST
 wheel with public Python Core `0.6.0` and `0.6.1`, and validates fresh Rust

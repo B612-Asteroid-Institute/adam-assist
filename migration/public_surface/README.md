@@ -1,6 +1,6 @@
 # adam-assist public-surface governance
 
-Updated 2026-08-12 against frozen updated-upstream
+Updated 2026-10-20 against frozen updated-upstream
 `cb5bb14b5c1c6b27f43595d327f1a7b3f819e5c2`.
 
 `manifest.json` is the complete current source inventory and disposition. The
