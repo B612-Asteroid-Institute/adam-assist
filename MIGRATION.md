@@ -39,6 +39,13 @@ This breaking removal starts the adam-assist `0.6.0` source line. Released
 `0.5.0` artifacts retain their historical methods; this candidate does not
 report itself as `0.5.0`-compatible.
 
+This line exports only `adam_core.propagator.v2` and is validated against exact
+adam-core commit `e1dc662ea24b5c73b212629bfa818bb602527086`. Public Core
+`0.6.1` has no v2 ABI and is not compatible. The first compatible released
+Core version and Python/Cargo dependency floor are unresolved; the inherited
+manifest ranges, registry locks, and release-workflow pins must be replaced
+before publication and must not be read as a compatibility claim.
+
 The migration-era methods below were provider implementation hooks, not an
 adam-assist OD product, and are removed from `ASSISTPropagator`:
 

@@ -15,7 +15,7 @@ on:
       expected_core_version:
         description: Exact public adam-core Rust version
         required: true
-        default: 0.6.1
+        default: UNASSIGNED_PROPAGATOR_V2_RELEASE
         type: string
       release_channel:
         description: Registry release channel
@@ -48,7 +48,16 @@ permissions:
   id-token: write
 
 jobs:
+  compatibility-floor:
+    name: Block publish until propagator-v2 Core crate exists
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "adam_assist 0.6.0 requires Core propagator-v2; release floor is unassigned" >&2
+          exit 1
+
   publish:
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     environment: ${{ inputs.release_channel == 'stable' && 'crates-io' || 'crates-io-preview' }}
     steps:

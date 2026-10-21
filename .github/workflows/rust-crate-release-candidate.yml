@@ -21,11 +21,20 @@ permissions:
 
 env:
   RUST_RELEASE_VERSION: "0.6.0"
-  CORE_RUST_VERSION: "0.6.1"
+  CORE_RUST_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"
   RELEASE_CHANNEL: stable
 
 jobs:
+  compatibility-floor:
+    name: Block release until propagator-v2 Core crate exists
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "adam_assist 0.6.0 requires Core propagator-v2; release floor is unassigned" >&2
+          exit 1
+
   package-and-test:
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +83,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core-version: ["0.6.1"]
+        core-version: ["UNASSIGNED_PROPAGATOR_V2_RELEASE"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.87.0

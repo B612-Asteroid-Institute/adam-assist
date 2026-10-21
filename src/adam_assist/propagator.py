@@ -38,19 +38,16 @@ from adam_core.observers.observers import Observers
 from adam_core.orbits.ephemeris import Ephemeris
 from adam_core.orbits.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
+from adam_core.propagator.propagator import NativeBackend as _NativeBackend
 from adam_core.propagator.propagator import Propagator
 from adam_core.propagator.utils import ensure_input_origin_and_frame
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 
+from ._native import CARGO_VERSION as _NATIVE_CARGO_VERSION
 from ._native import NativeAssistPropagator
 from .version import __version__ as __version__  # noqa: PLC0414
-
-try:  # adam-core native external-propagator contract
-    from adam_core.propagator.propagator import NativeBackend as _NativeBackend
-except ImportError:  # older adam-core without the capsule contract
-    _NativeBackend = None
 
 C = c.C
 
@@ -297,14 +294,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     #: adam-core runs its orbit-determination stages natively with ASSIST
     #: dynamics through the external-propagator capsule (no Python call per
     #: prediction). A subclass overriding propagation is not covered.
-    native_backend = (
-        None
-        if _NativeBackend is None
-        else _NativeBackend(
-            name="adam_assist",
-            version=__version__,
-            work_units=frozenset({"propagator_capsule"}),
-        )
+    native_backend = _NativeBackend(
+        name="adam_assist",
+        version=_NATIVE_CARGO_VERSION,
+        work_units=frozenset({"propagator_capsule"}),
     )
 
     def propagator_capsule(self) -> Any:

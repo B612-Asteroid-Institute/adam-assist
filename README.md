@@ -34,19 +34,19 @@ unsupported.
 
 ### Pure Rust
 
-Rust-only consumers can use the same backend from crates.io without Python:
+Rust-only consumers use `AssistPropagator` directly with adam-core's generic
+algorithms. The unreleased `0.6.0` source line is validated against exact
+adam-core commit `e1dc662ea24b5c73b212629bfa818bb602527086`, which defines
+the private `adam_core.propagator.v2` ABI. Released adam-core `0.6.1` does not
+contain that ABI and is **not compatible** with this source line.
 
-```toml
-[dependencies]
-adam_core = "0.6"
-adam_assist = "=0.6.0"
-```
-
-`adam-assist 0.6.0` supports the stable Core `0.6` contract. Python
-metadata accepts `adam-core>=0.6,<0.7`, while Cargo uses the idiomatic `0.6`
-line. Registry locks select Core `0.6.1`; release CI tests the same ASSIST
-wheel with public Python Core `0.6.0` and `0.6.1`, and validates fresh Rust
-1.87 consumers against the coherent public Core `0.6.1` graph.
+The eventual Python and Cargo dependency floor is intentionally unassigned.
+The broad `0.6` requirements and registry locks still present in the source
+manifests are development placeholders inherited from `0.5.0`, not release
+claims; local validation patches only the Core source and restores every lock
+afterward. Do not publish `0.6.0` or enable its release workflows until a Core
+release containing the accepted ABI exists and those requirements, locks, and
+CI pins have been regenerated against it.
 
 ```rust,no_run
 use adam_assist::{AssistPropagator, AssistResult};

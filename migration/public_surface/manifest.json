@@ -38,7 +38,7 @@
     {"id":"adam_assist.propagator:ASSISTPropagator.detect_collisions","classification":"rust_owned_public_facade","correctness":"bitwise-set-and-tolerance-time","evidence":"collision/impact survivor-set parity, time tolerance, native timing"},
     {"id":"adam_assist.propagator:ASSISTPropagator.__getstate__","classification":"compatibility_state_veneer","evidence":"published pickle contract"},
     {"id":"adam_assist.propagator:ASSISTPropagator.__setstate__","classification":"compatibility_state_veneer","evidence":"published pickle contract"},
-    {"id":"adam_assist.propagator:ASSISTPropagator.propagator_capsule","classification":"private_native_propagator_capability","correctness":"tolerance-based","evidence":"capsule identity/backend metadata checks and adam-core refine integration through ASSIST STMs"}
+    {"id":"adam_assist.propagator:ASSISTPropagator.propagator_capsule","classification":"private_native_propagator_capability","correctness":"tolerance-based","evidence":"propagator-v2 capsule/table identity, Cargo SemVer, capabilities, non-grav/STM/row-failure conformance, lifetime, and Core-owned OD integration"}
   ],
   "correctness_classification": {
     "bitwise": "IDs, ordering, set membership, schemas, metadata, warnings, and deterministic compatibility helpers where exactness is contractual",

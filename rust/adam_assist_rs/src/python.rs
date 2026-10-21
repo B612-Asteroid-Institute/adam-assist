@@ -147,7 +147,7 @@ impl NativeAssistPropagator {
     }
 
     /// Private adam-core external-propagator capsule
-    /// (``adam_core.propagator.v1``). It exposes batched ASSIST propagation
+    /// (``adam_core.propagator.v2``). It exposes batched ASSIST propagation
     /// and optional STMs only; adam-core owns every consuming algorithm. The
     /// capsule owns a clone of the propagator (shared ephemeris data).
     fn propagator_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
@@ -1463,6 +1463,7 @@ fn py_propagation_error(error: impl std::fmt::Display) -> PyErr {
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("CARGO_VERSION", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<NativeAssistPropagator>()?;
     Ok(())
 }

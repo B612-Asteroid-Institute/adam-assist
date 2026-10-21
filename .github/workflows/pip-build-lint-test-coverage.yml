@@ -19,7 +19,17 @@ env:
   MATURIN_PEP517_ARGS: "--locked"
 
 jobs:
+  compatibility-floor:
+    name: Block CI until propagator-v2 Core release exists
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "local integration contract: adam-core e1dc662ea24b5c73b212629bfa818bb602527086" >&2
+          echo "release dependency floor and registry lock are unassigned" >&2
+          exit 1
+
   lint:
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -28,7 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version UNASSIGNED_PROPAGATOR_V2_RELEASE --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
@@ -53,6 +63,7 @@ jobs:
         run: pdm run typecheck
 
   rust-quality:
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,7 +72,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version UNASSIGNED_PROPAGATOR_V2_RELEASE --python-lock --rust-lock
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@1.87.0
         with:
@@ -77,6 +88,7 @@ jobs:
         run: pdm run rust-quality
 
   test:
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -89,7 +101,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version UNASSIGNED_PROPAGATOR_V2_RELEASE --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)
@@ -139,7 +151,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
+        run: python migration/scripts/verify_registry_locks.py --core-version UNASSIGNED_PROPAGATOR_V2_RELEASE --python-lock --rust-lock
       - name: Get git tags
         run: git fetch --prune --unshallow --tags
       - name: Set up PDM (cached)

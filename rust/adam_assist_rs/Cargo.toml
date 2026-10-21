@@ -19,7 +19,8 @@ python = ["dep:ndarray", "dep:numpy", "dep:pyo3"]
 extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
-# Stable-line contract for public adam-core 0.6 crates.
+# Development placeholders: public Core 0.6.1 lacks propagator-v2. Replace
+# these requirements/locks with the first compatible release before publish.
 adam_core_rs_coords = "0.6"
 adam_core_rs_spice = "0.6"
 adam_core_rs_kernel_data = { version = "0.6", default-features = false, optional = true }

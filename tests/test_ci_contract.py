@@ -17,7 +17,7 @@ def _scripts() -> dict[str, object]:
         return tomllib.load(pyproject_file)["tool"]["pdm"]["scripts"]
 
 
-def test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark() -> None:
+def test_normal_ci_is_fail_closed_but_preserves_quality_contracts() -> None:
     scripts = _scripts()
     workflow = WORKFLOW.read_text()
 
@@ -33,7 +33,9 @@ def test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark() -> None
     assert "pdm run benchmark-current-ci" in workflow
     assert "pdm install --frozen-lockfile -G dev" in workflow
     assert workflow.count("version: '2.29.2'") == 7
-    assert "--core-version 0.6.1" in workflow
+    assert "--core-version UNASSIGNED_PROPAGATOR_V2_RELEASE" in workflow
+    assert "Block CI until propagator-v2 Core release exists" in workflow
+    assert "e1dc662ea24b5c73b212629bfa818bb602527086" in workflow
     assert "fail-fast: false" in workflow
     assert "run: pdm install -G dev" not in workflow
     assert "assist-current-benchmark" in workflow
@@ -53,10 +55,11 @@ def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
         assert "components: rustfmt, clippy" in source, workflow.name
 
 
-def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
+def test_rust_release_is_blocked_but_preserves_artifact_contracts() -> None:
     candidate = RUST_CANDIDATE_WORKFLOW.read_text()
     assert 'RUST_RELEASE_VERSION: "0.6.0"' in candidate
-    assert 'CORE_RUST_VERSION: "0.6.1"' in candidate
+    assert 'CORE_RUST_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"' in candidate
+    assert "Block release until propagator-v2 Core crate exists" in candidate
     assert "RELEASE_CHANNEL: stable" in candidate
     assert "ADAM_CORE_REF" not in candidate
     assert "cba63f" not in candidate
@@ -76,7 +79,7 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert 'adam_core = "=$CORE_RUST_VERSION"' in candidate
     assert 'adam_core = "=$CORE_VERSION"' in candidate
     assert "core-range-compatibility:" in candidate
-    assert 'core-version: ["0.6.1"]' in candidate
+    assert 'core-version: ["UNASSIGNED_PROPAGATOR_V2_RELEASE"]' in candidate
     assert "Download the one tested adam-assist crate" in candidate
     assert "verify_rust_core_line.py" in candidate
     assert "Latest-stable Rust compatibility (non-authoritative)" in candidate
@@ -96,6 +99,8 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "cargo publish" not in candidate
 
     publisher = RUST_PUBLISH_WORKFLOW.read_text()
+    assert "Block publish until propagator-v2 Core crate exists" in publisher
+    assert "needs: compatibility-floor" in publisher
     assert "candidate_run_id:" in publisher
     assert "expected_core_version:" in publisher
     assert "release_channel:" in publisher
@@ -118,6 +123,8 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "cargo publish" not in publisher
 
     python_publisher = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
+    assert "Block publish until propagator-v2 Core release exists" in python_publisher
+    assert "needs: compatibility-floor" in python_publisher
     assert "public Rust prerequisite" in python_publisher
     assert "migration/scripts/verify_release.py" in python_publisher
     assert "api/v1/crates/adam_assist" not in python_publisher
@@ -145,7 +152,7 @@ def test_rust_crate_workflows_package_once_and_publish_tested_bytes() -> None:
     assert "to pypi" in python_publisher
 
 
-def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> None:
+def test_wheel_release_is_blocked_but_preserves_acceptance_contracts() -> None:
     workflow = RELEASE_WORKFLOW.read_text()
 
     # The final candidate remains registry-only. The Core checkout is pinned
@@ -166,8 +173,8 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     assert "Build adam-core native wheel" not in workflow
     assert "python -m pip install ./adam-core" not in workflow
 
-    # All twelve platform/Python lanes use immutable tooling from the public
-    # v0.6.1 Core release commit, including the exact reviewed smoke script.
+    # The matrix shape is retained, but release is fail-closed until a Core
+    # release containing the exact accepted propagator-v2 contract exists.
     assert 'python-version: ["3.11", "3.12", "3.13"]' in workflow
     for platform in (
         "manylinux-x86_64",
@@ -177,14 +184,16 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     ):
         assert f"name: {platform}" in workflow
     assert (
-        'ADAM_CORE_ACCEPTANCE_REF: "fa16386fe957d6fc0448a53ef61c29a21ae882cc"'
+        'ADAM_CORE_ACCEPTANCE_REF: "e1dc662ea24b5c73b212629bfa818bb602527086"'
         in workflow
     )
+    assert 'ADAM_CORE_RELEASE_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"' in workflow
+    assert "Block release until propagator-v2 Core release exists" in workflow
     assert "Checkout immutable public adam-core acceptance tooling" in workflow
     assert "repository: B612-Asteroid-Institute/adam_core" in workflow
     assert "ref: ${{ env.ADAM_CORE_ACCEPTANCE_REF }}" in workflow
     assert "path: adam-core-acceptance" in workflow
-    assert "rev-parse 'v0.6.1^{commit}'" in workflow
+    assert "rev-parse 'vUNASSIGNED_PROPAGATOR_V2_RELEASE^{commit}'" in workflow
     assert (
         "464859e82bd9aea975f1209b040a97299230dd37bf370ab0132beefcbc29435f" in workflow
     )
@@ -194,7 +203,7 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     assert workflow.count("run_clean_room_artifact_acceptance.py") == 2
     assert workflow.count("clean_room_artifact_smoke.py") == 1
 
-    assert 'ADAM_CORE_RELEASE_VERSION: "0.6.1"' in workflow
+    assert 'ADAM_CORE_RELEASE_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"' in workflow
     assert 'ADAM_ASSIST_RELEASE_VERSION: "0.6.0"' in workflow
     assert "Verify registry-only release locks" in workflow
     assert "pdm lock --check" in workflow
@@ -237,14 +246,14 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     assert "acceptance/wheelhouse/*.whl" in workflow
     assert "acceptance/logs/*.log" in workflow
 
-    # Backward compatibility reuses those exact accepted ASSIST/Core 0.6.1
-    # bytes, then swaps only the independently downloaded public Core 0.6.0.
+    # The future compatible range remains structurally gated by the same
+    # bytes; both placeholder downloads remain fail-closed until assignment.
     assert (
-        "Test the same adam-assist wheel with public Core 0.6.0 and 0.6.1" in workflow
+        "Test the same adam-assist wheel across the assigned compatible Core range"
+        in workflow
     )
     assert "run_core_compatibility_matrix.py" in workflow
-    assert '"adam-core==0.6.0"' in workflow
-    assert '"adam-core>=0.6,<0.7"' in workflow
+    assert workflow.count('"adam-core==UNASSIGNED_PROPAGATOR_V2_RELEASE"') >= 2
     assert 'find "$RUNNER_TEMP/acceptance/wheelhouse"' in workflow
     assert "core-compatibility-summary.json" in workflow
 
@@ -255,9 +264,15 @@ def test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels() -> 
     assert "needs: artifact-acceptance" in full_job_header
     assert "runs-on: macos-14" in full_job_header
     assert "Full 30-workload current benchmark" in full_job_header
-    assert "Install public Core 0.6.1 and adam-assist candidate" in workflow
+    assert (
+        "Install public Core UNASSIGNED_PROPAGATOR_V2_RELEASE and "
+        "adam-assist candidate" in workflow
+    )
     assert 'python -m pip install "adam-core==$ADAM_CORE_RELEASE_VERSION"' in workflow
-    assert 'importlib.metadata.version("adam-core") == "0.6.1"' in workflow
+    assert (
+        'importlib.metadata.version("adam-core") == '
+        '"UNASSIGNED_PROPAGATOR_V2_RELEASE"' in workflow
+    )
     assert "Pin frozen-fixture kernel bytes" in workflow
     assert "assist_public_semantics_fixture_2026-05-20.json" in workflow
     assert "ADAM_CORE_RS_ASSIST_PLANETS_PATH" in workflow

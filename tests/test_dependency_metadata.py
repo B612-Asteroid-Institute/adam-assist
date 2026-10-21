@@ -281,3 +281,30 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
     assert "python_reference_propagator" not in source
     assert "_assist_oracle" not in source
     assert ".legacy-assist-venv" not in source
+
+
+def test_propagator_v2_release_floor_is_explicitly_unassigned() -> None:
+    core_ref = "e1dc662ea24b5c73b212629bfa818bb602527086"
+    sentinel = "UNASSIGNED_PROPAGATOR_V2_RELEASE"
+    readme = (ROOT / "README.md").read_text()
+    migration = (ROOT / "MIGRATION.md").read_text()
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    cargo_manifest = (ROOT / "rust" / "adam_assist_rs" / "Cargo.toml").read_text()
+    normal_ci = (
+        ROOT / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
+    ).read_text()
+    release_ci = (
+        ROOT / ".github" / "workflows" / "release-candidate-wheel-matrix.yml"
+    ).read_text()
+
+    assert core_ref in readme and core_ref in migration and core_ref in normal_ci
+    assert "Released adam-core `0.6.1` does not" in readme
+    assert "Development placeholder only" in pyproject
+    assert "Development placeholders" in cargo_manifest
+    assert sentinel in normal_ci and sentinel in release_ci
+    assert "Block CI until propagator-v2 Core release exists" in normal_ci
+    assert "Block release until propagator-v2 Core release exists" in release_ci
+    # The old registry lock remains immutable evidence, not a v2 compatibility
+    # claim. It must be regenerated only after the real release floor exists.
+    assert _cargo_lock_packages()["adam_core_rs_coords"]["version"] == "0.6.1"
+    assert _pdm_lock_packages()["adam-core"]["version"] == "0.6.1"

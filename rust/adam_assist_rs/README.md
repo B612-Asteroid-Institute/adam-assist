@@ -9,13 +9,13 @@ requiring Python, PyO3, NumPy, or a Python runtime. Linux and macOS are
 supported; Windows is currently unavailable because upstream ASSIST uses POSIX
 memory mapping through `libassist-sys`.
 
-## Installation
+## Integration status
 
-```toml
-[dependencies]
-adam_core = "0.6"
-adam_assist = "=0.6.0"
-```
+The unreleased `0.6.0` source line requires adam-core commit
+`e1dc662ea24b5c73b212629bfa818bb602527086` and its private propagator-v2
+contract. Released Core `0.6.1` is incompatible. A crates.io dependency
+snippet is intentionally omitted until the first compatible Core release and
+dependency floor are assigned.
 
 ## Kernel setup
 
@@ -52,8 +52,9 @@ SB441-n16 paths. Disable the default resolver with
   scientific semantics.
 
 `libassist-sys` and `librebound-sys` provide the versioned FFI and RAII layers.
-The `0.6` adam-core crate dependencies provide generic coordinate,
-propagation, SPICE, and kernel-data contracts.
+The adam-core dependencies provide generic coordinate, propagation, SPICE,
+and kernel-data contracts. The manifest's current `0.6` range is a local
+validation placeholder, not a release compatibility declaration.
 
 ## Optional Python extension
 

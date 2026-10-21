@@ -199,6 +199,10 @@ impl Propagator for AssistPropagator {
         true
     }
 
+    fn supports_non_gravitational_parameters(&self) -> bool {
+        true
+    }
+
     /// ASSIST's variational equations: the heliocentric ecliptic state at
     /// each target time with its state-transition matrix (REBOUND's
     /// first-order variational particles). Targets are integrated in time
@@ -206,6 +210,7 @@ impl Propagator for AssistPropagator {
     fn propagate_stm(
         &self,
         state: [f64; 6],
+        non_gravitational_parameters: Option<NonGravitationalParametersRow>,
         epoch_tdb: Epoch,
         times_tdb: &[Epoch],
     ) -> PropagationResultValue<Vec<adam_core_rs_coords::propagation::StmRow>> {
@@ -214,12 +219,18 @@ impl Propagator for AssistPropagator {
                 "assist-rs STM propagation input state was non-finite".to_string(),
             ));
         }
+        let non_gravitational_parameters =
+            assist_non_gravitational_parameters(non_gravitational_parameters, "STM state")?;
+        let orbit = match non_gravitational_parameters {
+            Some(parameters) => AssistOrbit::with_non_grav(state, epoch_tdb.mjd(), parameters),
+            None => AssistOrbit::new(state, epoch_tdb.mjd()),
+        };
         let mut order: Vec<usize> = (0..times_tdb.len()).collect();
         order.sort_by(|&a, &b| times_tdb[a].mjd().total_cmp(&times_tdb[b].mjd()));
         let sorted: Vec<f64> = order.iter().map(|&i| times_tdb[i].mjd()).collect();
         let propagated = assist_propagation::assist_propagate_single(
             &self.data,
-            &AssistOrbit::new(state, epoch_tdb.mjd()),
+            &orbit,
             &sorted,
             true,
             &self.integrator,

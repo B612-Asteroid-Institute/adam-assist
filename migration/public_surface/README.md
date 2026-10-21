@@ -8,7 +8,9 @@ older `adam_assist_0_3_10.json` remains the immutable published-wheel
 compatibility authority; it is not the latest-upstream inventory.
 
 The current surface preserves every useful frozen-upstream name and adds native
-timing plus the private propagation capsule consumed by adam-core algorithms.
+timing plus the private `adam_core.propagator.v2` capsule consumed by
+adam-core algorithms. Its immutable table declares Cargo-SemVer identity,
+thread safety, STM support, and complete non-gravitational-row support.
 Orbit determination remains owned and exposed by adam-core; migration-era OD
 provider methods are removed from ``ASSISTPropagator``. Public propagation,
 sampled 6D/9D covariance, ephemeris generation, and collisions/impacts each

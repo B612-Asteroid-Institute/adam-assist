@@ -24,12 +24,12 @@ on:
       expected_adam_core_version:
         description: Exact already-published adam-core Python release
         required: true
-        default: 0.6.1
+        default: UNASSIGNED_PROPAGATOR_V2_RELEASE
         type: string
       expected_adam_core_rust_version:
         description: Exact already-published adam-core Rust release
         required: true
-        default: 0.6.1
+        default: UNASSIGNED_PROPAGATOR_V2_RELEASE
         type: string
       release_channel:
         description: Registry release channel
@@ -63,7 +63,16 @@ permissions:
   actions: read
 
 jobs:
+  compatibility-floor:
+    name: Block publish until propagator-v2 Core release exists
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "adam-assist 0.6.0 requires Core propagator-v2; release floor is unassigned" >&2
+          exit 1
+
   collect-tested-artifacts:
+    needs: compatibility-floor
     name: Collect and verify already-tested wheels
     runs-on: ubuntu-latest
     steps:

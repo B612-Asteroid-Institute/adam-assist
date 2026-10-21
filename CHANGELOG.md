@@ -12,8 +12,12 @@
 
 ### Changed
 
-- Reduced the Core integration surface to the private native propagator capsule:
-  batched ASSIST propagation, backend identity/capabilities, and optional STMs.
+- Reduced the Core integration surface to the private native
+  `adam_core.propagator.v2` capsule: batched ASSIST propagation, immutable
+  Cargo-SemVer identity, complete non-gravitational rows, row failures, and
+  optional STMs. The accepted local Core contract is
+  `e1dc662ea24b5c73b212629bfa818bb602527086`; released Core `0.6.1` is not
+  compatible and the release dependency floor remains unassigned.
 - Removed ASSIST OD workloads from the current benchmark and public-surface
   classifications; OD algorithms, defaults, and reports are now exclusively
   Core-owned. Historical migration benchmarks and oracle evidence are retained.
