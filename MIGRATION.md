@@ -41,7 +41,7 @@ report itself as `0.5.0`-compatible.
 
 This line exports only `adam_core.propagator.v2`, declares Python
 `adam-core>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements, and is validated
-against accepted Core `0.7.0` commit
+against provisional Core `0.7.0` source-pair commit
 `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`. Core `0.7.0` is not yet on the
 registries: active locks are intentionally absent and release/publication stays
 blocked until public artifacts exist and their real checksums can be locked.
@@ -101,8 +101,11 @@ latest-stable lane checks default, all-feature, no-default, and fresh no-lock
 consumer configurations without changing the MSRV or enforcing moving-stable
 Clippy. While Core `0.7.0` is unpublished, that lane is downstream of the
 fail-closed compatibility gate and is skipped rather than producing unrelated
-PR failures. The adam-assist RC metadata must exact-pin the core RC before
-publication. Its 12 native wheels contain the
+PR failures. Until the registry transition, every release-candidate and publish
+workflow is manual-dispatch-only. A repository-wide structural policy rejects
+bypass conditions, neutralized lock checks, unlocked builds, and publication
+outside provenance-checked trusted-publishing jobs. The adam-assist RC metadata
+must exact-pin the core RC before publication. Its 12 native wheels contain the
 Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into
 adam-assist once; adam-core generic algorithms and ASSIST orchestration then

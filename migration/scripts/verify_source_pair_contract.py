@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -17,10 +18,10 @@ CORE_CRATES = (
     "adam_core_rs_spice",
     "adam_core_rs_kernel_data",
 )
-CONTRACT_PATH = ROOT / "migration" / "source_pair_contract.json"
 PYTHON_REQUIREMENT = "adam-core>=0.7.0,<0.8.0"
 DEPENDENCY_TABLES = {"dependencies", "dev-dependencies", "build-dependencies"}
 FORBIDDEN_CARGO_SOURCES = {
+    "workspace",
     "path",
     "git",
     "registry",
@@ -44,11 +45,11 @@ def _cargo_dependency_entries(table: dict[str, Any], path: tuple[str, ...] = ())
 def verify_cargo_core_dependencies(cargo: dict[str, Any]) -> None:
     found: set[tuple[tuple[str, ...], str]] = set()
     for table_path, dependency, declaration in _cargo_dependency_entries(cargo):
-        canonical = dependency
+        canonical = dependency.replace("-", "_")
         if isinstance(declaration, dict) and isinstance(
             declaration.get("package"), str
         ):
-            canonical = declaration["package"]
+            canonical = declaration["package"].replace("-", "_")
         if not canonical.startswith("adam_core"):
             continue
         version = _dependency_version(declaration)
@@ -77,6 +78,38 @@ def verify_cargo_core_dependencies(cargo: dict[str, Any]) -> None:
         )
 
 
+def _forbidden_cargo_override_paths(
+    table: dict[str, Any], path: tuple[str, ...] = ()
+) -> list[str]:
+    found: list[str] = []
+    for key, value in table.items():
+        current = (*path, key)
+        if key in {"patch", "replace"}:
+            found.append(".".join(current))
+        if isinstance(value, dict):
+            found.extend(_forbidden_cargo_override_paths(value, current))
+    return found
+
+
+def _python_core_requirement_paths(
+    value: Any, path: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], str]]:
+    found: list[tuple[tuple[str, ...], str]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            current = (*path, str(key))
+            normalized_key = str(key).lower().replace("_", "-")
+            if normalized_key == "adam-core":
+                found.append((current, f"{key}{child}"))
+            found.extend(_python_core_requirement_paths(child, current))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(_python_core_requirement_paths(child, (*path, str(index))))
+    elif isinstance(value, str) and re.search(r"(?i)\badam[-_]core\b", value):
+        found.append((path, value))
+    return found
+
+
 def _load_toml(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         return tomllib.load(stream)
@@ -97,8 +130,10 @@ def _git_head(repository: Path) -> str:
     ).strip()
 
 
-def verify(core_tree: Path | None = None) -> dict[str, object]:
-    contract = json.loads(CONTRACT_PATH.read_text())
+def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, object]:
+    contract = json.loads(
+        (root / "migration" / "source_pair_contract.json").read_text()
+    )
     expected = {
         "schema_version": 1,
         "assist_version": "0.6.0",
@@ -107,11 +142,12 @@ def verify(core_tree: Path | None = None) -> dict[str, object]:
         "capsule": "adam_core.propagator.v2",
         "registry_state": "awaiting-core-0.7.0-publication",
         "lock_state": "absent-until-core-0.7.0-is-public",
+        "source_pair_status": "provisional",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")
 
-    pyproject = _load_toml(ROOT / "pyproject.toml")
+    pyproject = _load_toml(root / "pyproject.toml")
     project = pyproject["project"]
     core_requirements = [
         item for item in project["dependencies"] if item.startswith("adam-core")
@@ -120,22 +156,38 @@ def verify(core_tree: Path | None = None) -> dict[str, object]:
         raise ValueError(
             f"expected exactly {PYTHON_REQUIREMENT!r}, got {core_requirements!r}"
         )
+    all_python_core = _python_core_requirement_paths(pyproject)
+    expected_path = (
+        "project",
+        "dependencies",
+        str(project["dependencies"].index(PYTHON_REQUIREMENT)),
+    )
+    if all_python_core != [(expected_path, PYTHON_REQUIREMENT)]:
+        raise ValueError(
+            "adam-core may appear only as the exact primary project dependency: "
+            f"{all_python_core!r}"
+        )
 
-    cargo = _load_toml(ROOT / "rust" / "adam_assist_rs" / "Cargo.toml")
+    cargo = _load_toml(root / "rust" / "adam_assist_rs" / "Cargo.toml")
     if cargo["package"]["version"] != contract["assist_version"]:
         raise ValueError(
             "adam_assist Cargo version does not match source-pair contract"
         )
     verify_cargo_core_dependencies(cargo)
+    overrides = _forbidden_cargo_override_paths(cargo)
+    if overrides:
+        raise ValueError(f"Cargo patch/replace tables are forbidden: {overrides!r}")
 
     forbidden_locks = (
-        ROOT / "pdm.lock",
-        ROOT / "rust" / "adam_assist_rs" / "Cargo.lock",
+        root / "pdm.lock",
+        root / "rust" / "adam_assist_rs" / "Cargo.lock",
+        root / ".cargo" / "config.toml",
+        root / ".cargo" / "config",
     )
-    present = [str(path.relative_to(ROOT)) for path in forbidden_locks if path.exists()]
+    present = [str(path.relative_to(root)) for path in forbidden_locks if path.exists()]
     if present:
         raise ValueError(
-            "pre-release source pairing must not retain stale registry locks: "
+            "pre-release source pairing must not retain registry locks or Cargo config overrides: "
             + ", ".join(present)
         )
 

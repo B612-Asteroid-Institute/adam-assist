@@ -17,8 +17,9 @@
   asteroid default, including propagation and fixed-parameter STM paths.
 - Made exact-source CI install the wheel's complete `dev` extra and verify
   `astropy`, frozen NAIF data versions, and installed-wheel provenance before
-  tests or benchmarks. Release governance now semantically enforces registry
-  locks, locked builds, and compatibility-gated publication/upload steps.
+  tests or benchmarks. A repository-wide structural workflow policy now
+  enforces unconditional compatibility and registry gates, locked builds,
+  tested-candidate provenance, trusted publication, and useful normal CI.
 
 ### Changed
 
@@ -26,8 +27,8 @@
   `adam_core.propagator.v2` capsule: batched ASSIST propagation, immutable
   Cargo-SemVer identity, complete non-gravitational rows, row failures, and
   optional STMs. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
-  coherent Rust `0.7`, validated against accepted Core `0.7.0` commit
-  `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`. Release remains blocked until
+  coherent Rust `0.7`, validated against provisional Core `0.7.0` source-pair
+  commit `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`. Release remains blocked until
   Core `0.7.0` is public and real registry locks can be generated.
 - Removed ASSIST OD workloads from the current benchmark and public-surface
   classifications; OD algorithms, defaults, and reports are now exclusively

@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Checkout immutable public adam-core acceptance tooling
+      - name: Checkout provisional adam-core acceptance tooling
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -70,7 +70,7 @@ jobs:
           if actual != expected:
               raise SystemExit(f"runner architecture mismatch: {actual} != {expected}")
           PY
-      - name: Verify immutable public Core acceptance tooling
+      - name: Verify provisional exact Core acceptance tooling
         shell: bash
         run: |
           set -euo pipefail
@@ -253,7 +253,6 @@ jobs:
               raise SystemExit(f"wheel tag mismatch for {pattern}: {invalid}")
           PY
       - name: Upload exact accepted artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wheel-acceptance-${{ matrix.platform.name }}-py${{ matrix.python-version }}
@@ -284,13 +283,15 @@ jobs:
         with:
           name: wheel-acceptance-macos-arm64-py3.12
           path: accepted-wheels
-      - name: Install the exact accepted Core and ASSIST wheels with dev dependencies
+      - name: Verify registry-only release locks
         run: |
           python -m pip install --upgrade pip "pdm==2.29.2"
           pdm lock --check
           python migration/scripts/verify_registry_locks.py \
             --core-version "$ADAM_CORE_RELEASE_VERSION" \
             --python-lock --rust-lock
+      - name: Install the exact tested Core and ASSIST wheels with dev dependencies
+        run: |
           core_wheel="$(find accepted-wheels -name 'adam_core-*.whl' -print -quit)"
           assist_wheel="$(find accepted-wheels -name 'adam_assist-*.whl' -print -quit)"
           test -n "$core_wheel" && test -n "$assist_wheel"
@@ -358,7 +359,6 @@ jobs:
             --output migration/artifacts/benchmark_current_assist_ci.json \
             --markdown migration/artifacts/benchmark_current_assist_ci.md
       - name: Upload complete benchmark artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: assist-current-benchmark-full

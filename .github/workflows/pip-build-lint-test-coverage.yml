@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout exact accepted adam-core
+      - name: Checkout provisional exact adam-core source pair
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -78,6 +78,8 @@ jobs:
           test -n "$core_wheel" && test -n "$assist_wheel"
           python -m pip install "$core_wheel" "${assist_wheel}[dev]"
           python migration/scripts/verify_dev_environment.py --require-wheel
+      - name: Verify fail-closed workflow policy
+        run: python migration/scripts/verify_workflow_policy.py
       - name: Verify installed versions and wheel dependency floor
         run: |
           python - <<'PY'
@@ -136,7 +138,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout exact accepted adam-core
+      - name: Checkout provisional exact adam-core source pair
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core

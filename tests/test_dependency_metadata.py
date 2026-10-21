@@ -81,6 +81,8 @@ def test_dev_lint_tool_is_pinned() -> None:
     dev = pyproject["project"]["optional-dependencies"]["dev"]
     assert "ruff==0.16.4" in dev
     assert "pdm==2.29.2" in dev
+    assert "packaging" in dev
+    assert "PyYAML" in dev
 
 
 def test_dependencies_declare_core_070_floor() -> None:
@@ -117,6 +119,7 @@ def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
     assert contract["core_version"] == "0.7.0"
     assert contract["core_commit"] == "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
     assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
+    assert contract["source_pair_status"] == "provisional"
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:

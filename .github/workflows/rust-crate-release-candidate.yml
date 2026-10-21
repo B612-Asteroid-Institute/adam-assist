@@ -1,19 +1,6 @@
 name: Rust crate release candidate
 
 on:
-  # Build an artifact for every candidate commit so the publication workflow
-  # can require an exact final-SHA provenance match.
-  push:
-    branches:
-      - "release/adam-assist-*"
-  pull_request:
-    paths:
-      - "rust/**"
-      - "migration/scripts/publish_crate_archive.py"
-      - "migration/scripts/verify_registry_locks.py"
-      - "migration/scripts/verify_rust_core_line.py"
-      - ".github/workflows/rust-crate-*.yml"
-      - ".github/workflows/publish-rust-crate.yml"
   workflow_dispatch:
 
 permissions:
@@ -145,14 +132,13 @@ jobs:
             --metadata "$consumer/metadata.json" --core-version "$CORE_VERSION"
           (
             cd "$consumer"
-            rm Cargo.lock
             cargo check --no-default-features
             cargo test --no-default-features
           )
 
   latest-stable-compatibility:
     name: Latest-stable Rust compatibility (non-authoritative)
-    needs: compatibility-floor
+    needs: package-and-test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -193,6 +179,5 @@ jobs:
           test ! -e "$consumer/Cargo.lock"
           cargo check --manifest-path "$consumer/Cargo.toml"
           cargo test --manifest-path "$consumer/Cargo.toml"
-          rm "$consumer/Cargo.lock"
           cargo check --manifest-path "$consumer/Cargo.toml" --no-default-features
           cargo test --manifest-path "$consumer/Cargo.toml" --no-default-features

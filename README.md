@@ -35,20 +35,25 @@ unsupported.
 ### adam-core compatibility and exact-source validation
 
 The `0.6.0` source line requires `adam-core>=0.7.0,<0.8.0` and the coherent
-`0.7` Rust crate line. It is validated against accepted adam-core commit
-`f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`, which has package/crate version
+`0.7` Rust crate line. It is validated against provisional exact adam-core
+source-pair commit `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`, which has
+package/crate version
 `0.7.0` and defines the private `adam_core.propagator.v2` ABI. Released
 `adam-core 0.6.1` is outside the declared range and has no v2 ABI.
 
 Core `0.7.0` is not yet available from PyPI/crates.io. Active PDM and Cargo
 registry locks are therefore intentionally absent instead of retaining the
 incompatible `0.6.1` graph or inventing checksums. The machine-checked
-`migration/source_pair_contract.json` pins the exact pre-release pairing.
+`migration/source_pair_contract.json` pins the provisional exact pre-release
+pairing.
 Normal CI builds both projects from those sources, installs the built ASSIST
 wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
 NAIF data version before tests and benchmarks. Release, publication, and
 latest-stable registry compatibility remain fail-closed until Core `0.7.0` is
 public and registry locks can be regenerated and verified.
+`migration/scripts/verify_workflow_policy.py` scans every workflow and rejects
+gate/lock neutralization, unlocked release builds, hidden publication paths,
+and conditions that make normal source-pair CI vacuous.
 
 For reproducible local Rust validation, use one detached Core tree for all
 three direct Core crates. Patched Cargo commands create a temporary untracked

@@ -29,14 +29,16 @@ def verify(*, require_wheel: bool = False) -> None:
         for value in pyproject["project"]["optional-dependencies"]["dev"]
         for requirement in [Requirement(value)]
     }
-    if "astropy" not in declared:
-        raise ValueError("the dev extra must declare astropy")
+    for required in ("astropy", "packaging", "PyYAML"):
+        if required not in declared:
+            raise ValueError(f"the dev extra must declare {required}")
     for name, expected in FROZEN_DEV_VERSIONS.items():
         requirement = declared.get(name)
         if requirement is None or str(requirement.specifier) != f"=={expected}":
             raise ValueError(f"dev extra must pin {name}=={expected}")
 
-    importlib.import_module("astropy")
+    for module_name in ("astropy", "packaging", "yaml"):
+        importlib.import_module(module_name)
     for name, expected in FROZEN_DEV_VERSIONS.items():
         actual = importlib.metadata.version(name)
         if actual != expected:

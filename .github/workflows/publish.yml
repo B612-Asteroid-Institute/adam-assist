@@ -322,7 +322,6 @@ jobs:
             --require-complete \
             --output pypi-after.json
       - name: Upload public-registry comparison evidence
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: adam-assist-${{ inputs.expected_version }}-pypi-state

@@ -53,6 +53,8 @@ dev = [
     "black",
     "isort",
     "astropy",
+    "packaging",
+    "PyYAML",
     # Freeze the SPICE authority used by deterministic regression tests
     # without preventing wheel users from receiving current EOP data.
     "naif-leapseconds==2025.4.22",
