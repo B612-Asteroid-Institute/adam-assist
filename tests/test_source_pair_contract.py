@@ -7,6 +7,7 @@ from migration.scripts import verify_dev_environment
 from migration.scripts.verify_dev_environment import FROZEN_DEV_VERSIONS
 from migration.scripts.verify_source_pair_contract import (
     _load_toml,
+    _python_core_requirement_paths,
     verify,
     verify_cargo_core_dependencies,
 )
@@ -87,6 +88,31 @@ def test_dev_environment_verifier_enforces_installed_runtime_versions(
     versions["naif-eop-high-prec"] = "2026.10.21"
     with pytest.raises(ValueError, match="naif-eop-high-prec"):
         verify_dev_environment.verify()
+
+
+@pytest.mark.parametrize(
+    "entry",
+    (
+        "-e ../adam_core",
+        "-e file://${PROJECT_ROOT}/../adam.core",
+        "../adam--core",
+    ),
+)
+def test_python_core_scanner_finds_editable_and_local_pdm_entries(entry: str) -> None:
+    assert _python_core_requirement_paths(entry) == [((), entry)]
+
+
+@pytest.mark.parametrize(
+    "entry",
+    (
+        "actions/upload-artifact@v4",
+        "migration/artifacts/adam_core_rs_coords_benchmark.json",
+    ),
+)
+def test_python_core_scanner_ignores_non_dependency_artifact_strings(
+    entry: str,
+) -> None:
+    assert _python_core_requirement_paths(entry) == []
 
 
 def _copy_contract_tree(tmp_path: Path) -> Path:
@@ -242,6 +268,27 @@ SOURCE_CONTRACT_MUTATIONS = (
         _append(
             "pyproject.toml",
             '\n[tool.pdm.dev-dependencies]\ncore = ["adam-core @ git+https://example.invalid/core"]\n',
+        ),
+    ),
+    (
+        "pdm-editable-local-core",
+        _append(
+            "pyproject.toml",
+            '\n[tool.pdm.dev-dependencies]\ncore = ["-e ../adam_core"]\n',
+        ),
+    ),
+    (
+        "pdm-relative-local-dot-core",
+        _append(
+            "pyproject.toml",
+            '\n[tool.pdm.dev-dependencies]\ncore = ["../adam.core"]\n',
+        ),
+    ),
+    (
+        "pdm-file-local-repeated-separator-core",
+        _append(
+            "pyproject.toml",
+            '\n[tool.pdm.dev-dependencies]\ncore = ["file:///tmp/adam--core"]\n',
         ),
     ),
     (

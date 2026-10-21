@@ -22,6 +22,7 @@ CORE_CRATES = (
 )
 PYTHON_REQUIREMENT = "adam-core>=0.7.0,<0.8.0"
 DEPENDENCY_TABLES = {"dependencies", "dev-dependencies", "build-dependencies"}
+PYTHON_CORE_NAME_IN_TEXT = re.compile(r"(?i)\badam[-_.]+core\b")
 FORBIDDEN_CARGO_SOURCES = {
     "workspace",
     "path",
@@ -118,8 +119,10 @@ def _python_core_requirement_paths(
             found.extend(_python_core_requirement_paths(child, (*path, str(index))))
     elif isinstance(value, str):
         normalized_name = _canonical_python_name(value)
-        if normalized_name == "adam-core" or (
-            normalized_name == "adam-assist" and "[" in value
+        if (
+            normalized_name == "adam-core"
+            or PYTHON_CORE_NAME_IN_TEXT.search(value)
+            or (normalized_name == "adam-assist" and "[" in value)
         ):
             found.append((path, value))
     return found

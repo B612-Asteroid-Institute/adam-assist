@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 NORMAL = "pip-build-lint-test-coverage.yml"
