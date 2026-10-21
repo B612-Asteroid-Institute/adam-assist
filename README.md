@@ -32,21 +32,47 @@ macOS Apple silicon/Intel. Windows is currently unsupported because
 ``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
 unsupported.
 
-### Pure Rust
+### adam-core compatibility and exact-source validation
 
-Rust-only consumers use `AssistPropagator` directly with adam-core's generic
-algorithms. The unreleased `0.6.0` source line is validated against exact
-adam-core commit `e1dc662ea24b5c73b212629bfa818bb602527086`, which defines
-the private `adam_core.propagator.v2` ABI. Released adam-core `0.6.1` does not
-contain that ABI and is **not compatible** with this source line.
+The unreleased `0.6.0` source line is validated against exact adam-core commit
+`e1dc662ea24b5c73b212629bfa818bb602527086`, which defines the private
+`adam_core.propagator.v2` ABI. Released Python package `adam-core 0.6.1` does
+not contain that ABI and is **not compatible** with this source line.
 
 The eventual Python and Cargo dependency floor is intentionally unassigned.
 The broad `0.6` requirements and registry locks still present in the source
 manifests are development placeholders inherited from `0.5.0`, not release
-claims; local validation patches only the Core source and restores every lock
-afterward. Do not publish `0.6.0` or enable its release workflows until a Core
+claims. Do not publish `0.6.0` or enable its release workflows until a Core
 release containing the accepted ABI exists and those requirements, locks, and
 CI pins have been regenerated against it.
+
+For reproducible local Rust validation, use one detached Core tree for all
+three direct Core crates. The temporary patch may rewrite Cargo's lock, so the
+recipe restores it and verifies its content hash rather than trusting a clean
+stat or timestamp:
+
+```console
+git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-e1dc662e
+git -C ../adam-core-e1dc662e checkout --detach e1dc662ea24b5c73b212629bfa818bb602527086
+CORE="$(cd ../adam-core-e1dc662e && pwd)"
+test "$(git -C "$CORE" rev-parse HEAD)" = e1dc662ea24b5c73b212629bfa818bb602527086
+
+test "$(git hash-object rust/adam_assist_rs/Cargo.lock)" = \
+  "$(git rev-parse HEAD:rust/adam_assist_rs/Cargo.lock)"
+cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
+  --all-targets --features python,extension-module \
+  --config "patch.crates-io.adam_core_rs_coords.path='$CORE/rust/adam_core_rs_coords'" \
+  --config "patch.crates-io.adam_core_rs_spice.path='$CORE/rust/adam_core_rs_spice'" \
+  --config "patch.crates-io.adam_core_rs_kernel_data.path='$CORE/rust/adam_core_rs_kernel_data'"
+git checkout HEAD -- rust/adam_assist_rs/Cargo.lock
+test "$(git hash-object rust/adam_assist_rs/Cargo.lock)" = \
+  "$(git rev-parse HEAD:rust/adam_assist_rs/Cargo.lock)"
+```
+
+### Pure Rust
+
+Rust-only consumers use `AssistPropagator` directly with adam-core's generic
+algorithms.
 
 ```rust,no_run
 use adam_assist::{AssistPropagator, AssistResult};
@@ -119,12 +145,14 @@ propagated = propagator.propagate_orbits(orbits)
 
 Orbits whose `non_gravitational_parameters` carry Marsden-style `A1`/`A2`/`A3`
 accelerations (au/d^2) are propagated with ASSIST's non-gravitational force.
-The g(r) law is selected by the `ALN`/`NK`/`NM`/`NN`/`R0` columns: null
-constants mean the asteroid convention g(r) = (1 au / r)^2, and an explicit
-tuple (for example the standard Marsden comet law, or a custom shape such as
-1I/'Oumuamua's) is applied simulation-wide. Batches mixing different g(r)
-tuples are automatically split into one simulation per force law, since
-ASSIST holds the constants per simulation rather than per particle.
+The g(r) law is selected by the `ALN`/`NK`/`NM`/`NN`/`R0` columns. Each null
+field independently takes its asteroid default (`1`, `0`, `2`, `5.093`, `1`),
+so an all-null row means g(r) = (1 au / r)^2 and a partial row combines its
+present values with those defaults. An explicit tuple (for example the standard
+Marsden comet law, or a custom shape such as 1I/'Oumuamua's) is applied
+simulation-wide. Batches mixing different g(r) tuples are automatically split
+into one simulation per force law, since ASSIST holds the constants per
+simulation rather than per particle.
 
 **Supported** (regression-tested against JPL Horizons to tens–hundreds of
 metres over ±300 days): symmetric inverse-square asteroid solutions
@@ -136,7 +164,7 @@ a warning by adam-core's importers — solutions that estimate DT, such as
 67P or 81P, retain km-scale model error through perihelion and should not
 be treated as JPL-parity), thermophysical Yarkovsky (`AMRAT`/`RHO`) models,
 and estimated (rather than fixed) g(r) shape parameters. Non-finite
-A-values, partial constants tuples, and degenerate `ALN <= 0` / `R0 <= 0`
+A-values or present shape constants, and degenerate `ALN <= 0` / `R0 <= 0`
 values are rejected with a `ValueError` rather than silently altering the
 force.
 

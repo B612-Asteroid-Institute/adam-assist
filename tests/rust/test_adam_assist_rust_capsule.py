@@ -5,9 +5,11 @@ fit is owned and orchestrated by adam-core, which consumes the private native
 propagator capsule without provider-specific OD work units.
 """
 
+import ast
 import ctypes
 import gc
 import importlib
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -19,7 +21,7 @@ from adam_core.coordinates import (
     SphericalCoordinates,
 )
 from adam_core.observers import Observers
-from adam_core.orbit_determination import refine, run_od
+from adam_core.orbit_determination import refine, run_iod, run_od
 from adam_core.orbit_determination.evaluate import OrbitDeterminationObservations
 from adam_core.orbit_determination.native_orbit_fitter import NativeOrbitFitter
 from adam_core.orbit_determination.provenance import backend_identity
@@ -321,6 +323,36 @@ def test_assist_native_backend_is_capsule_only() -> None:
     # This is the provider identity Core records in run_od provenance.
     assert backend_identity(propagator) == f"adam_assist {CARGO_VERSION}"
 
+    # Keep the Python declaration tied to the immutable native table identity,
+    # even when Python and Cargo versions happen to have the same spelling.
+    source_path = Path(__file__).parents[2] / "src/adam_assist/propagator.py"
+    module = ast.parse(source_path.read_text())
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "_native"
+        and any(
+            alias.name == "CARGO_VERSION" and alias.asname == "_NATIVE_CARGO_VERSION"
+            for alias in node.names
+        )
+        for node in ast.walk(module)
+    )
+    backend_assignment = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "native_backend"
+            for target in node.targets
+        )
+    )
+    version = next(
+        keyword.value
+        for keyword in backend_assignment.value.keywords
+        if keyword.arg == "version"
+    )
+    assert isinstance(version, ast.Name)
+    assert version.id == "_NATIVE_CARGO_VERSION"
+
     capsule = propagator.propagator_capsule()
     get_name = ctypes.pythonapi.PyCapsule_GetName
     get_name.argtypes = (ctypes.py_object,)
@@ -443,6 +475,30 @@ def test_capsule_propagation_preserves_order_nongrav_and_row_failures() -> None:
     assert error == ""
     assert np.isfinite(output[0]).all()
     assert np.isnan(output[1]).all()
+
+
+def test_capsule_partial_marsden_constants_match_filled_defaults() -> None:
+    capsule = RustASSISTPropagator().propagator_capsule()
+    accelerations = [5.0e-9, -2.9e-9, 4.2e-10]
+    partial = accelerations + [0.25, np.nan, np.nan, 4.0, np.nan]
+    filled = accelerations + [0.25, 0.0, 2.0, 4.0, 1.0]
+
+    partial_result = _call_capsule_propagate(
+        capsule, TRUTH_STATE, [60020, 60010], partial
+    )
+    filled_result = _call_capsule_propagate(
+        capsule, TRUTH_STATE, [60020, 60010], filled
+    )
+    assert partial_result[0] == filled_result[0] == 0
+    assert partial_result[2:] == filled_result[2:]
+    np.testing.assert_array_equal(partial_result[1], filled_result[1])
+
+    partial_stm = _call_capsule_stm(capsule, TRUTH_STATE, [60020, 60010], partial)
+    filled_stm = _call_capsule_stm(capsule, TRUTH_STATE, [60020, 60010], filled)
+    assert partial_stm[0] == filled_stm[0] == 0
+    assert partial_stm[3:] == filled_stm[3:]
+    np.testing.assert_array_equal(partial_stm[1], filled_stm[1])
+    np.testing.assert_array_equal(partial_stm[2], filled_stm[2])
 
 
 def test_capsule_stm_honors_custom_and_inactive_nongrav() -> None:
@@ -655,6 +711,45 @@ def test_core_refine_preserves_but_does_not_activate_source_only_nongrav(
     )
 
 
+def test_adam_core_run_iod_uses_assist_capsule_once(od_problem) -> None:
+    class CountingAssist(RustASSISTPropagator):
+        native_backend = NativeBackend(
+            "adam_assist", CARGO_VERSION, frozenset({"propagator_capsule"})
+        )
+
+        def __init__(self):
+            super().__init__()
+            self.capsule_acquisitions = 0
+
+        def propagator_capsule(self):
+            self.capsule_acquisitions += 1
+            return super().propagator_capsule()
+
+        def propagate_orbits(self, *args, **kwargs):
+            raise AssertionError("Core IOD must use the ASSIST native capsule")
+
+        def generate_ephemeris(self, *args, **kwargs):
+            raise AssertionError("Core IOD must use the ASSIST native capsule")
+
+    observations, _ = od_problem
+    propagator = CountingAssist()
+    fitted, members, report = run_iod(
+        observations,
+        propagator,
+        min_obs=6,
+        min_arc_length=1.0,
+        rchi2_threshold=1000.0,
+        observation_selection_method="combinations",
+        velocity_method="gibbs",
+        acceptance="prefit",
+    )
+
+    assert report.found
+    assert len(fitted) == 1
+    assert len(members) == len(observations)
+    assert propagator.capsule_acquisitions == 1
+
+
 def test_distinct_core_iod_and_assist_refinement_capsules_cross_python_once(
     od_problem,
 ) -> None:
@@ -691,6 +786,12 @@ def test_distinct_core_iod_and_assist_refinement_capsules_cross_python_once(
         def propagator_capsule(self):
             self.capsule_acquisitions += 1
             return super().propagator_capsule()
+
+        def propagate_orbits(self, *args, **kwargs):
+            raise AssertionError("Core refinement must use the ASSIST native capsule")
+
+        def generate_ephemeris(self, *args, **kwargs):
+            raise AssertionError("Core refinement must use the ASSIST native capsule")
 
     observations, _ = od_problem
     iod = CountingCoreTwoBody()
@@ -736,6 +837,6 @@ def test_distinct_core_iod_and_assist_refinement_capsules_cross_python_once(
         fitted.coordinates.values[0],
         truth_at_fit_epoch.coordinates.values[0],
         rtol=0,
-        atol=1e-5,
+        atol=1e-9,
     )
-    assert fitted.reduced_chi2[0].as_py() < 1.0
+    assert fitted.reduced_chi2[0].as_py() < 1e-10

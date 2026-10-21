@@ -10,6 +10,12 @@
   nondeprecated `refine`, `run_iod`, and `run_od` entry points with an
   `ASSISTPropagator`; see `MIGRATION.md` for exact policy mappings.
 
+### Fixed
+
+- Matched adam-core's per-field Marsden default contract: every null
+  `ALN`/`NK`/`NM`/`NN`/`R0` value on an active row independently takes the
+  asteroid default, including propagation and fixed-parameter STM paths.
+
 ### Changed
 
 - Reduced the Core integration surface to the private native

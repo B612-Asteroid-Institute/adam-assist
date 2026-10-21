@@ -909,31 +909,29 @@ fn assist_non_gravitational_parameters(
     if a1 == 0.0 && a2 == 0.0 && a3 == 0.0 {
         return Ok(None);
     }
-    let constants = [row.aln, row.nk, row.nm, row.nn, row.r0];
-    let set_count = constants.iter().filter(|value| value.is_some()).count();
-    if set_count != 0 && set_count != constants.len() {
+    // Match adam-core's `marsden_constants_array`: every null shape
+    // constant independently takes the asteroid g(r) default. This matters
+    // for partially populated source rows as well as the all-null case.
+    let aln = row.aln.unwrap_or(1.0);
+    let nk = row.nk.unwrap_or(0.0);
+    let nm = row.nm.unwrap_or(2.0);
+    let nn = row.nn.unwrap_or(5.093);
+    let r0 = row.r0.unwrap_or(1.0);
+    if ![aln, nk, nm, nn, r0].iter().all(|value| value.is_finite()) || aln <= 0.0 || r0 <= 0.0 {
         return Err(PropagationError::InvalidRequest(format!(
-            "Partially-specified Marsden g(r) constants for orbit {orbit_id}: set all of (ALN, NK, NM, NN, R0) or none (null selects the asteroid (1 au / r)^2 convention)."
+            "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
         )));
     }
-    if let [Some(aln), Some(nk), Some(nm), Some(nn), Some(r0)] = constants {
-        if ![aln, nk, nm, nn, r0].iter().all(|value| value.is_finite()) || aln <= 0.0 || r0 <= 0.0 {
-            return Err(PropagationError::InvalidRequest(format!(
-                "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
-            )));
-        }
-        return Ok(Some(NonGravParams {
-            a1,
-            a2,
-            a3,
-            alpha: Some(aln),
-            nk: Some(nk),
-            nm: Some(nm),
-            nn: Some(nn),
-            r0: Some(r0),
-        }));
-    }
-    Ok(Some(NonGravParams::new(a1, a2, a3)))
+    Ok(Some(NonGravParams {
+        a1,
+        a2,
+        a3,
+        alpha: Some(aln),
+        nk: Some(nk),
+        nm: Some(nm),
+        nn: Some(nn),
+        r0: Some(r0),
+    }))
 }
 
 /// Mutable per-worker ASSIST propagation state implementing adam-core's
@@ -1979,6 +1977,34 @@ mod tests {
         assert_eq!(config.min_dt, Some(1.0e-9));
         assert_eq!(config.adaptive_mode, Some(Ias15AdaptiveMode::Global));
         assert_eq!(config.epsilon, Some(1.0e-6));
+    }
+
+    #[test]
+    fn partial_marsden_constants_fill_asteroid_defaults_per_field() {
+        let parameters = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: None,
+                aln: Some(0.25),
+                nk: None,
+                nm: None,
+                nn: Some(4.0),
+                r0: None,
+            }),
+            "partial",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(parameters.a1, 1.0e-9);
+        assert_eq!(parameters.a2, 0.0);
+        assert_eq!(parameters.a3, 0.0);
+        assert_eq!(parameters.alpha, Some(0.25));
+        assert_eq!(parameters.nk, Some(0.0));
+        assert_eq!(parameters.nm, Some(2.0));
+        assert_eq!(parameters.nn, Some(4.0));
+        assert_eq!(parameters.r0, Some(1.0));
     }
 
     #[test]

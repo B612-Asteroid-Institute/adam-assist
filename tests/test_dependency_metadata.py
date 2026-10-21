@@ -298,7 +298,16 @@ def test_propagator_v2_release_floor_is_explicitly_unassigned() -> None:
     ).read_text()
 
     assert core_ref in readme and core_ref in migration and core_ref in normal_ci
-    assert "Released adam-core `0.6.1` does not" in readme
+    assert "Released Python package `adam-core 0.6.1` does" in readme
+    assert readme.index("Released Python package `adam-core 0.6.1`") < readme.index(
+        "### Pure Rust"
+    )
+    for crate in (
+        "adam_core_rs_coords",
+        "adam_core_rs_spice",
+        "adam_core_rs_kernel_data",
+    ):
+        assert f"patch.crates-io.{crate}.path" in readme
     assert "Development placeholder only" in pyproject
     assert "Development placeholders" in cargo_manifest
     assert sentinel in normal_ci and sentinel in release_ci
