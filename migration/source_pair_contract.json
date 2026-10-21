@@ -7,5 +7,6 @@
   "registry_state": "awaiting-core-0.7.0-publication",
   "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
   "schema_version": 1,
-  "source_pair_status": "provisional"
+  "source_pair_status": "provisional",
+  "workflow_sha256": "0c37bce5c4c4a1067ba4098a6311ca3fc5f347096c2cc3425727ee9930d9d95c"
 }

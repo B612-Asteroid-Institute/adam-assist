@@ -97,6 +97,7 @@ def _copy_contract_tree(tmp_path: Path) -> Path:
         Path("pyproject.toml"),
         Path("migration/source_pair_contract.json"),
         Path("rust/adam_assist_rs/Cargo.toml"),
+        Path(".github/workflows/pip-build-lint-test-coverage.yml"),
     ):
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -268,6 +269,46 @@ SOURCE_CONTRACT_MUTATIONS = (
     (
         "R02-stale-cargo-lock",
         _write("rust/adam_assist_rs/Cargo.lock", "version = 4\n"),
+    ),
+    (
+        "pep503-dot-core-name",
+        _replace(
+            "pyproject.toml",
+            '    "astropy",',
+            '    "astropy",\n    "adam.core==0.6.1",',
+        ),
+    ),
+    (
+        "pep503-repeated-separator-core-name",
+        _replace(
+            "pyproject.toml",
+            '    "astropy",',
+            '    "astropy",\n    "adam--core==0.6.1",',
+        ),
+    ),
+    (
+        "pep503-pdm-dot-key",
+        _append(
+            "pyproject.toml",
+            '\n[tool.pdm.resolution.overrides]\n"adam.core" = "0.6.1"\n',
+        ),
+    ),
+    (
+        "nested-cargo-config",
+        _write(
+            "rust/adam_assist_rs/.cargo/config.toml",
+            '[patch.crates-io]\nadam_core_rs_coords = { path = "../core" }\n',
+        ),
+    ),
+    ("root-cargo-lock", _write("Cargo.lock", "version = 4\n")),
+    ("uv-lock", _write("uv.lock", "version = 1\n")),
+    (
+        "workflow-content-drift",
+        _replace(
+            ".github/workflows/pip-build-lint-test-coverage.yml",
+            "Run benchmarks",
+            "Skip benchmarks",
+        ),
     ),
 )
 

@@ -199,7 +199,7 @@ jobs:
       - name: Run current public/native benchmark smoke
         run: python -m migration.scripts.benchmark_current --lanes tiny small large --repeats 5 --warmups 1 --require-native --output migration/artifacts/benchmark_current_assist_ci.json --markdown migration/artifacts/benchmark_current_assist_ci.md
       - name: Upload current-only benchmark artifact
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: assist-current-benchmark
@@ -207,7 +207,7 @@ jobs:
             migration/artifacts/benchmark_current_assist_ci.json
             migration/artifacts/benchmark_current_assist_ci.md
       - name: Upload benchmark artifact
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bench-json

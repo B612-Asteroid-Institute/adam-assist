@@ -91,7 +91,7 @@ assist-two-runtime-benchmark = "python migration/scripts/perf_assist_two_runtime
 [tool.pytest.ini_options]
 addopts = "-m 'not live'"
 markers = [
-    "live: opt-in network/Horizons accuracy checks; release-candidate gated",
+    "live: opt-in network/Horizons accuracy checks; excluded from ordinary CI",
 ]
 
 [tool.black]

@@ -107,7 +107,7 @@ public propagation, ephemeris, covariance, or collision operation crosses into
 adam-assist once; adam-core generic algorithms and ASSIST orchestration then
 compose Rust-to-Rust inside that extension.
 
-## Stable 0.4.0 release provenance
+## Stable 0.4.0 historical release provenance
 
 The first stable line was Python/Rust `adam-assist 0.4.0`, exact-pinned to
 Python and public Rust `adam-core 0.5.7`. The preliminary stable manifest commit
@@ -167,6 +167,6 @@ bytes with public Python Core `0.5.7` and `0.5.8`. Pure-Rust consumers likewise
 compile the one packaged crate against both exact public Core lines and reject
 a graph containing duplicate or mixed Core crate versions.
 
-Publication automation verifies the registry-only locks and rejects Git/path
-sources or provisional patches. Passing final artifact acceptance does not
+Historical publication automation verified the registry-only locks and rejected
+Git/path sources or provisional patches. Passing final artifact acceptance does not
 authorize a tag or registry upload; those remain separate approval boundaries.

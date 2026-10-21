@@ -51,9 +51,9 @@ wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
 NAIF data version before tests and benchmarks. It is the repository's only
 workflow. No release-candidate or publication automation exists while Core
 `0.7.0` is unpublished and registry locks are absent.
-`migration/scripts/verify_workflow_policy.py` enforces that exact read-only
-workflow inventory and rejects release triggers, write/OIDC permissions,
-credentials, publisher actions or commands, and disabled normal validation.
+`migration/scripts/verify_workflow_policy.py` pins the exact read-only workflow
+content and explicitly checks its triggers, permissions, credentials boundary,
+source-pair matrix, and required validation commands.
 Release automation and authentic registry locks require a separate reviewed
 post-Core-publication commit.
 The retained migration helpers are documented as inert local tools in

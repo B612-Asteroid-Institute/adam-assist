@@ -252,3 +252,133 @@ def test_normal_artifact_and_reporting_actions_are_explicitly_allowed() -> None:
     assert "actions/upload-artifact@v4" in actions
     assert "coverallsapp/github-action@v2.0.0" in actions
     verify_workflow_documents(BASE)
+
+
+REVIEW_GAP_MUTATIONS = [
+    Mutation(
+        "secret-no-space",
+        lambda w: _step(w, "benchmark", "Run benchmarks")
+        .setdefault("env", {})
+        .__setitem__("TOKEN", "${{secrets.PUBLISH}}"),
+    ),
+    Mutation(
+        "secret-index",
+        lambda w: _step(w, "benchmark", "Run benchmarks")
+        .setdefault("env", {})
+        .__setitem__("TOKEN", "${{ secrets['PUBLISH'] }}"),
+    ),
+    Mutation(
+        "secret-to-json",
+        lambda w: _step(w, "benchmark", "Run benchmarks")
+        .setdefault("env", {})
+        .__setitem__("TOKEN", "${{ toJSON(secrets) }}"),
+    ),
+    Mutation(
+        "secret-format",
+        lambda w: _step(w, "benchmark", "Run benchmarks")
+        .setdefault("env", {})
+        .__setitem__("TOKEN", "${{ format('{0}', secrets.PUBLISH) }}"),
+    ),
+    Mutation(
+        "uv-publish-token",
+        lambda w: _step(w, "benchmark", "Run benchmarks")
+        .setdefault("env", {})
+        .__setitem__("UV_PUBLISH_TOKEN", "literal"),
+    ),
+    Mutation(
+        "pypi-environment",
+        lambda w: w[NORMAL]["jobs"]["benchmark"].__setitem__("environment", "pypi"),
+    ),
+    Mutation(
+        "mapped-release-environment",
+        lambda w: w[NORMAL]["jobs"]["benchmark"].__setitem__(
+            "environment", {"name": "release", "url": "https://pypi.org"}
+        ),
+    ),
+    Mutation(
+        "workflow-defaults",
+        lambda w: w[NORMAL].__setitem__("defaults", {"run": {"shell": "false"}}),
+    ),
+    Mutation(
+        "job-defaults",
+        lambda w: w[NORMAL]["jobs"]["benchmark"].__setitem__(
+            "defaults", {"run": {"shell": "false"}}
+        ),
+    ),
+    Mutation(
+        "replace-test-with-true",
+        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+            "run", "true"
+        ),
+    ),
+    Mutation(
+        "append-or-true",
+        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+            "run", "python -m pytest --benchmark-skip -q tests || true"
+        ),
+    ),
+    Mutation(
+        "noop-shell",
+        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+            "shell", "true {0}"
+        ),
+    ),
+    Mutation(
+        "replace-lint-with-true",
+        lambda w: _step(w, "source-pair", "Lint and typecheck the source").__setitem__(
+            "run", "true"
+        ),
+    ),
+    Mutation(
+        "drop-cargo-test",
+        lambda w: _step(
+            w, "rust-quality", "Verify source pair and run Rust gates"
+        ).__setitem__(
+            "run",
+            _step(w, "rust-quality", "Verify source pair and run Rust gates")[
+                "run"
+            ].replace("cargo test", "echo skipped"),
+        ),
+    ),
+    Mutation(
+        "exclude-python-313",
+        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"].__setitem__(
+            "exclude", [{"python-version": "3.13"}]
+        ),
+    ),
+    Mutation(
+        "job-core-ref-override",
+        lambda w: w[NORMAL]["jobs"]["rust-quality"].__setitem__(
+            "env", {"ADAM_CORE_SOURCE_REF": "main"}
+        ),
+    ),
+    Mutation(
+        "drop-rust-core-tree-check",
+        lambda w: _step(
+            w, "rust-quality", "Verify source pair and run Rust gates"
+        ).__setitem__(
+            "run",
+            _step(w, "rust-quality", "Verify source pair and run Rust gates")[
+                "run"
+            ].replace("--core-tree .source-pair/adam-core", ""),
+        ),
+    ),
+    Mutation(
+        "execute-inert-helper-module",
+        _publisher_command(
+            "python -m migration.scripts.publish_crate_archive --execute"
+        ),
+    ),
+    Mutation(
+        "invoke-inert-pypi-helper",
+        _publisher_command("python migration/scripts/prepare_pypi_upload.py"),
+    ),
+]
+
+
+@pytest.mark.parametrize("mutation", REVIEW_GAP_MUTATIONS, ids=lambda value: value.id)
+def test_transition_policy_rejects_review_gap_mutations(mutation: Mutation) -> None:
+    workflows = deepcopy(BASE)
+    mutation.apply(workflows)
+    with pytest.raises(WorkflowPolicyError):
+        verify_workflow_documents(workflows)

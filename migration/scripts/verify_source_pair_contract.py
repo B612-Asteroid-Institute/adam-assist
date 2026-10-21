@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -32,7 +34,9 @@ FORBIDDEN_CARGO_SOURCES = {
 }
 
 
-def _cargo_dependency_entries(table: dict[str, Any], path: tuple[str, ...] = ()):
+def _cargo_dependency_entries(
+    table: dict[str, Any], path: tuple[str, ...] = ()
+) -> Iterator[tuple[tuple[str, ...], str, Any]]:
     for key, value in table.items():
         current = (*path, key)
         if key in DEPENDENCY_TABLES and isinstance(value, dict):
@@ -65,7 +69,7 @@ def verify_cargo_core_dependencies(cargo: dict[str, Any]) -> None:
                 )
         found.add((table_path, canonical))
 
-    required = {
+    required: set[tuple[tuple[str, ...], str]] = {
         (("dependencies",), "adam_core_rs_coords"),
         (("dependencies",), "adam_core_rs_spice"),
         (("dependencies",), "adam_core_rs_kernel_data"),
@@ -91,6 +95,13 @@ def _forbidden_cargo_override_paths(
     return found
 
 
+def _canonical_python_name(value: str) -> str | None:
+    match = re.match(r"\s*([A-Za-z0-9]+(?:[-_.]+[A-Za-z0-9]+)*)", value)
+    if match is None:
+        return None
+    return re.sub(r"[-_.]+", "-", match.group(1)).lower()
+
+
 def _python_core_requirement_paths(
     value: Any, path: tuple[str, ...] = ()
 ) -> list[tuple[tuple[str, ...], str]]:
@@ -98,15 +109,19 @@ def _python_core_requirement_paths(
     if isinstance(value, dict):
         for key, child in value.items():
             current = (*path, str(key))
-            normalized_key = str(key).lower().replace("_", "-")
+            normalized_key = _canonical_python_name(str(key))
             if normalized_key == "adam-core":
                 found.append((current, f"{key}{child}"))
             found.extend(_python_core_requirement_paths(child, current))
     elif isinstance(value, list):
         for index, child in enumerate(value):
             found.extend(_python_core_requirement_paths(child, (*path, str(index))))
-    elif isinstance(value, str) and re.search(r"(?i)\badam[-_]core\b", value):
-        found.append((path, value))
+    elif isinstance(value, str):
+        normalized_name = _canonical_python_name(value)
+        if normalized_name == "adam-core" or (
+            normalized_name == "adam-assist" and "[" in value
+        ):
+            found.append((path, value))
     return found
 
 
@@ -131,8 +146,9 @@ def _git_head(repository: Path) -> str:
 
 
 def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, object]:
-    contract = json.loads(
-        (root / "migration" / "source_pair_contract.json").read_text()
+    contract = cast(
+        dict[str, object],
+        json.loads((root / "migration" / "source_pair_contract.json").read_text()),
     )
     expected = {
         "schema_version": 1,
@@ -144,14 +160,21 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "lock_state": "absent-until-core-0.7.0-is-public",
         "source_pair_status": "provisional",
         "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
+        "workflow_sha256": "0c37bce5c4c4a1067ba4098a6311ca3fc5f347096c2cc3425727ee9930d9d95c",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")
 
+    workflow = root / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
+    if hashlib.sha256(workflow.read_bytes()).hexdigest() != contract["workflow_sha256"]:
+        raise ValueError("canonical exact-source workflow content drifted")
+
     pyproject = _load_toml(root / "pyproject.toml")
     project = pyproject["project"]
     core_requirements = [
-        item for item in project["dependencies"] if item.startswith("adam-core")
+        item
+        for item in project["dependencies"]
+        if _canonical_python_name(item) == "adam-core"
     ]
     if core_requirements != [PYTHON_REQUIREMENT]:
         raise ValueError(
@@ -165,7 +188,8 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
     )
     if all_python_core != [(expected_path, PYTHON_REQUIREMENT)]:
         raise ValueError(
-            "adam-core may appear only as the exact primary project dependency: "
+            "Core requirements and Assist self-references may appear only in the "
+            "exact primary dependency configuration: "
             f"{all_python_core!r}"
         )
 
@@ -179,13 +203,17 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
     if overrides:
         raise ValueError(f"Cargo patch/replace tables are forbidden: {overrides!r}")
 
-    forbidden_locks = (
+    forbidden_locks = {
         root / "pdm.lock",
+        root / "uv.lock",
+        root / "Cargo.lock",
         root / "rust" / "adam_assist_rs" / "Cargo.lock",
-        root / ".cargo" / "config.toml",
-        root / ".cargo" / "config",
+    }
+    forbidden_locks.update(root.glob("**/.cargo/config"))
+    forbidden_locks.update(root.glob("**/.cargo/config.toml"))
+    present = sorted(
+        str(path.relative_to(root)) for path in forbidden_locks if path.exists()
     )
-    present = [str(path.relative_to(root)) for path in forbidden_locks if path.exists()]
     if present:
         raise ValueError(
             "pre-release source pairing must not retain registry locks or Cargo config overrides: "

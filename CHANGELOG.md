@@ -20,6 +20,10 @@
   tests or benchmarks. Exact-source CI is now the sole read-only workflow; all
   release-candidate and publication workflows are absent until Core is public
   and authentic registry locks can be added in a separate reviewed commit.
+- Pinned that sole workflow by content and required-command digests, including
+  its full Python matrix, Rust source-pair gates, read-only execution boundary,
+  and benchmark artifacts on every trigger. Python dependency-name checks now
+  apply full PEP 503 normalization.
 
 ### Changed
 
