@@ -11,11 +11,11 @@ memory mapping through `libassist-sys`.
 
 ## Integration status
 
-The unreleased `0.6.0` source line requires adam-core commit
-`e1dc662ea24b5c73b212629bfa818bb602527086` and its private propagator-v2
-contract. Released Core `0.6.1` is incompatible. A crates.io dependency
-snippet is intentionally omitted until the first compatible Core release and
-dependency floor are assigned.
+The `0.6.0` source line requires the coherent adam-core `0.7` crate line and
+its private propagator-v2 contract. It is source-pair validated against exact
+Core commit `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19` (version `0.7.0`).
+Core `0.7.0` is not yet on crates.io, so the active registry lock is
+intentionally absent and crate release remains blocked until publication.
 
 ## Kernel setup
 

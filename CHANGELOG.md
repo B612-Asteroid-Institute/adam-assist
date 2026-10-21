@@ -21,9 +21,10 @@
 - Reduced the Core integration surface to the private native
   `adam_core.propagator.v2` capsule: batched ASSIST propagation, immutable
   Cargo-SemVer identity, complete non-gravitational rows, row failures, and
-  optional STMs. The accepted local Core contract is
-  `e1dc662ea24b5c73b212629bfa818bb602527086`; released Core `0.6.1` is not
-  compatible and the release dependency floor remains unassigned.
+  optional STMs. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
+  coherent Rust `0.7`, validated against accepted Core `0.7.0` commit
+  `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`. Release remains blocked until
+  Core `0.7.0` is public and real registry locks can be generated.
 - Removed ASSIST OD workloads from the current benchmark and public-surface
   classifications; OD algorithms, defaults, and reports are now exclusively
   Core-owned. Historical migration benchmarks and oracle evidence are retained.

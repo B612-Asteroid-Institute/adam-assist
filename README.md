@@ -34,39 +34,39 @@ unsupported.
 
 ### adam-core compatibility and exact-source validation
 
-The unreleased `0.6.0` source line is validated against exact adam-core commit
-`e1dc662ea24b5c73b212629bfa818bb602527086`, which defines the private
-`adam_core.propagator.v2` ABI. Released Python package `adam-core 0.6.1` does
-not contain that ABI and is **not compatible** with this source line.
+The `0.6.0` source line requires `adam-core>=0.7.0,<0.8.0` and the coherent
+`0.7` Rust crate line. It is validated against accepted adam-core commit
+`f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`, which has package/crate version
+`0.7.0` and defines the private `adam_core.propagator.v2` ABI. Released
+`adam-core 0.6.1` is outside the declared range and has no v2 ABI.
 
-The eventual Python and Cargo dependency floor is intentionally unassigned.
-The broad `0.6` requirements and registry locks still present in the source
-manifests are development placeholders inherited from `0.5.0`, not release
-claims. Do not publish `0.6.0` or enable its release workflows until a Core
-release containing the accepted ABI exists and those requirements, locks, and
-CI pins have been regenerated against it.
+Core `0.7.0` is not yet available from PyPI/crates.io. Active PDM and Cargo
+registry locks are therefore intentionally absent instead of retaining the
+incompatible `0.6.1` graph or inventing checksums. The machine-checked
+`migration/source_pair_contract.json` pins the exact pre-release pairing.
+Normal CI builds both projects from those sources; release and publication
+workflows remain fail-closed until Core `0.7.0` is public and registry locks can
+be regenerated and verified.
 
 For reproducible local Rust validation, use one detached Core tree for all
-three direct Core crates. The temporary patch may rewrite Cargo's lock, so the
-recipe restores it and verifies its content hash rather than trusting a clean
-stat or timestamp:
+three direct Core crates. Patched Cargo commands create a temporary untracked
+lock; remove it afterward and verify that no tracked or untracked changes
+remain:
 
 ```console
-git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-e1dc662e
-git -C ../adam-core-e1dc662e checkout --detach e1dc662ea24b5c73b212629bfa818bb602527086
-CORE="$(cd ../adam-core-e1dc662e && pwd)"
-test "$(git -C "$CORE" rev-parse HEAD)" = e1dc662ea24b5c73b212629bfa818bb602527086
+git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-f0f1aec8
+git -C ../adam-core-f0f1aec8 checkout --detach f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19
+CORE="$(cd ../adam-core-f0f1aec8 && pwd)"
+test "$(git -C "$CORE" rev-parse HEAD)" = f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19
+python migration/scripts/verify_source_pair_contract.py --core-tree "$CORE"
 
-test "$(git hash-object rust/adam_assist_rs/Cargo.lock)" = \
-  "$(git rev-parse HEAD:rust/adam_assist_rs/Cargo.lock)"
 cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
   --all-targets --features python,extension-module \
   --config "patch.crates-io.adam_core_rs_coords.path='$CORE/rust/adam_core_rs_coords'" \
   --config "patch.crates-io.adam_core_rs_spice.path='$CORE/rust/adam_core_rs_spice'" \
   --config "patch.crates-io.adam_core_rs_kernel_data.path='$CORE/rust/adam_core_rs_kernel_data'"
-git checkout HEAD -- rust/adam_assist_rs/Cargo.lock
-test "$(git hash-object rust/adam_assist_rs/Cargo.lock)" = \
-  "$(git rev-parse HEAD:rust/adam_assist_rs/Cargo.lock)"
+rm -f rust/adam_assist_rs/Cargo.lock
+test -z "$(git status --porcelain)"
 ```
 
 ### Pure Rust

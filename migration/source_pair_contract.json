@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "assist_version": "0.6.0",
+  "core_version": "0.7.0",
+  "core_commit": "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19",
+  "capsule": "adam_core.propagator.v2",
+  "registry_state": "awaiting-core-0.7.0-publication",
+  "lock_state": "absent-until-core-0.7.0-is-public"
+}

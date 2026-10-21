@@ -24,12 +24,12 @@ on:
       expected_adam_core_version:
         description: Exact already-published adam-core Python release
         required: true
-        default: UNASSIGNED_PROPAGATOR_V2_RELEASE
+        default: 0.7.0
         type: string
       expected_adam_core_rust_version:
         description: Exact already-published adam-core Rust release
         required: true
-        default: UNASSIGNED_PROPAGATOR_V2_RELEASE
+        default: 0.7.0
         type: string
       release_channel:
         description: Registry release channel
@@ -67,8 +67,11 @@ jobs:
     name: Block publish until propagator-v2 Core release exists
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: Verify explicit pre-release lock state
+        run: python migration/scripts/verify_source_pair_contract.py
       - run: |
-          echo "adam-assist 0.6.0 requires Core propagator-v2; release floor is unassigned" >&2
+          echo "Core 0.7.0 is not yet public; registry locks/checksums are unavailable" >&2
           exit 1
 
   collect-tested-artifacts:
@@ -173,10 +176,10 @@ jobs:
 
           expected_version = Version(os.environ["EXPECTED_VERSION"])
           expected_core = Version(os.environ["EXPECTED_CORE_VERSION"])
-          if expected_core not in Requirement("adam-core>=0.6,<0.7").specifier:
+          if expected_core not in Requirement("adam-core>=0.7.0,<0.8.0").specifier:
               raise SystemExit(f"selected Core {expected_core} is outside the supported range")
           expected_requirements = {
-              "adam-core": "<0.7,>=0.6",
+              "adam-core": "<0.8.0,>=0.7.0",
               "naif-de440": "==2020.12.21.1",
               "jpl-small-bodies-de441-n16": "==2021.3.31.1",
           }

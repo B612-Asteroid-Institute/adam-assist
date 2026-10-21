@@ -9,6 +9,7 @@ from adam_core.utils.spice import DEFAULT_KERNELS
 
 from adam_assist.version import __version__
 from migration.scripts import benchmark_current
+from migration.scripts.verify_source_pair_contract import verify as verify_source_pair
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,18 +23,6 @@ def _project_dependencies() -> list[str]:
 def _cargo_manifest() -> dict:
     with (ROOT / "rust" / "adam_assist_rs" / "Cargo.toml").open("rb") as cargo_file:
         return tomllib.load(cargo_file)
-
-
-def _cargo_lock_packages() -> dict[str, dict]:
-    with (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").open("rb") as lock_file:
-        packages = tomllib.load(lock_file)["package"]
-    return {package["name"]: package for package in packages}
-
-
-def _pdm_lock_packages() -> dict[str, dict]:
-    with (ROOT / "pdm.lock").open("rb") as lock_file:
-        packages = tomllib.load(lock_file)["package"]
-    return {package["name"]: package for package in packages}
 
 
 def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
@@ -68,7 +57,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
     assert dependencies["sha2"] == {"version": "0.10", "optional": True}
     kernel_dependency = {
-        "version": "0.6",
+        "version": "0.7",
         "default-features": False,
     }
     assert dependencies["adam_core_rs_kernel_data"] == {
@@ -94,10 +83,10 @@ def test_dev_lint_tool_is_pinned() -> None:
     assert "pdm==2.29.2" in dev
 
 
-def test_stable_dependencies_declare_core_06_compatibility() -> None:
+def test_dependencies_declare_core_070_floor() -> None:
     dependencies = _project_dependencies()
     assert dependencies == [
-        "adam-core>=0.6,<0.7",
+        "adam-core>=0.7.0,<0.8.0",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
     ]
@@ -115,67 +104,19 @@ def test_stable_dependencies_declare_core_06_compatibility() -> None:
         assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == "0.6"
-    assert dependencies["adam_core_rs_spice"] == "0.6"
+    assert dependencies["adam_core_rs_coords"] == "0.7"
+    assert dependencies["adam_core_rs_spice"] == "0.7"
     assert "patch" not in manifest
     assert not (ROOT / "rust" / "vendor").exists()
 
 
-def test_python_lock_uses_public_core_registry_artifacts() -> None:
-    packages = _pdm_lock_packages()
-    expected = {
-        "adam-core": "0.6.1",
-        "naif-de440": "2020.12.21.1",
-        "jpl-small-bodies-de441-n16": "2021.3.31.1",
-        "naif-leapseconds": "2025.4.22",
-        "naif-eop-predict": "2024.8.28.1",
-        "naif-eop-historical": "2024.8.28.1",
-        "naif-eop-high-prec": "2026.5.9",
-        "naif-earth-itrf93": "2007.4.3.1",
-    }
-    assert {name: packages[name]["version"] for name in expected} == expected
-    core = packages["adam-core"]
-    assert {"git", "path", "url"}.isdisjoint(core)
-    files = core["files"]
-    assert len(files) == 12
-    assert all(item["file"].startswith("adam_core-0.6.1-") for item in files)
-    assert all(item["hash"].startswith("sha256:") for item in files)
-
-
-def test_cargo_lock_uses_public_core_registry_artifacts() -> None:
-    with (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").open("rb") as lock_file:
-        lock = tomllib.load(lock_file)
-    packages = {package["name"]: package for package in lock["package"]}
-    assert packages["adam_assist"]["version"] == "0.6.0"
-    source = "registry+https://github.com/rust-lang/crates.io-index"
-    for name in (
-        "adam_core_rs_autodiff",
-        "adam_core_rs_coords",
-        "adam_core_rs_kernel_data",
-        "adam_core_rs_orbit_determination",
-        "adam_core_rs_spice",
-    ):
-        assert packages[name]["version"] == "0.6.1"
-        assert packages[name]["source"] == source
-        assert packages[name]["checksum"]
-    unused = lock.get("patch", {}).get("unused", [])
-    assert not [
-        package
-        for package in unused
-        if str(package.get("name", "")).startswith("adam_core")
-    ]
-    for name in (
-        "icu_locale_core",
-        "icu_normalizer",
-        "icu_properties",
-        "icu_provider",
-    ):
-        assert packages[name]["version"] == "2.2.0"
-    assert packages["rawzip"]["version"] == "0.5.2"
-    assert packages["rawzip"]["source"] == source
-    assert packages["rawzip"]["checksum"]
-    assert "zip" not in packages
-    assert "zopfli" not in packages
+def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
+    assert not (ROOT / "pdm.lock").exists()
+    assert not (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").exists()
+    contract = verify_source_pair()
+    assert contract["core_version"] == "0.7.0"
+    assert contract["core_commit"] == "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
+    assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:
@@ -283,13 +224,10 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
     assert ".legacy-assist-venv" not in source
 
 
-def test_propagator_v2_release_floor_is_explicitly_unassigned() -> None:
-    core_ref = "e1dc662ea24b5c73b212629bfa818bb602527086"
-    sentinel = "UNASSIGNED_PROPAGATOR_V2_RELEASE"
+def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
+    core_ref = "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
     readme = (ROOT / "README.md").read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
-    pyproject = (ROOT / "pyproject.toml").read_text()
-    cargo_manifest = (ROOT / "rust" / "adam_assist_rs" / "Cargo.toml").read_text()
     normal_ci = (
         ROOT / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
     ).read_text()
@@ -298,8 +236,8 @@ def test_propagator_v2_release_floor_is_explicitly_unassigned() -> None:
     ).read_text()
 
     assert core_ref in readme and core_ref in migration and core_ref in normal_ci
-    assert "Released Python package `adam-core 0.6.1` does" in readme
-    assert readme.index("Released Python package `adam-core 0.6.1`") < readme.index(
+    assert "adam-core>=0.7.0,<0.8.0" in readme
+    assert readme.index("Core `0.7.0` is not yet available") < readme.index(
         "### Pure Rust"
     )
     for crate in (
@@ -308,12 +246,9 @@ def test_propagator_v2_release_floor_is_explicitly_unassigned() -> None:
         "adam_core_rs_kernel_data",
     ):
         assert f"patch.crates-io.{crate}.path" in readme
-    assert "Development placeholder only" in pyproject
-    assert "Development placeholders" in cargo_manifest
-    assert sentinel in normal_ci and sentinel in release_ci
-    assert "Block CI until propagator-v2 Core release exists" in normal_ci
+        assert f"patch.crates-io.{crate}.path" in normal_ci
+    assert "Exact Core source pair" in normal_ci
+    assert "exit 1" not in normal_ci
+    assert 'ADAM_CORE_RELEASE_VERSION: "0.7.0"' in release_ci
     assert "Block release until propagator-v2 Core release exists" in release_ci
-    # The old registry lock remains immutable evidence, not a v2 compatibility
-    # claim. It must be regenerated only after the real release floor exists.
-    assert _cargo_lock_packages()["adam_core_rs_coords"]["version"] == "0.6.1"
-    assert _pdm_lock_packages()["adam-core"]["version"] == "0.6.1"
+    assert "Core 0.7.0 is not yet public" in release_ci

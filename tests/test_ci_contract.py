@@ -1,51 +1,53 @@
-from __future__ import annotations
-
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
-RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release-candidate-wheel-matrix.yml"
-RUST_CANDIDATE_WORKFLOW = (
-    ROOT / ".github" / "workflows" / "rust-crate-release-candidate.yml"
-)
-RUST_PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-rust-crate.yml"
+WORKFLOWS = ROOT / ".github" / "workflows"
+NORMAL = WORKFLOWS / "pip-build-lint-test-coverage.yml"
+WHEEL_CANDIDATE = WORKFLOWS / "release-candidate-wheel-matrix.yml"
+RUST_CANDIDATE = WORKFLOWS / "rust-crate-release-candidate.yml"
+PYTHON_PUBLISH = WORKFLOWS / "publish.yml"
+RUST_PUBLISH = WORKFLOWS / "publish-rust-crate.yml"
+CORE_REF = "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
+CORE_VERSION = "0.7.0"
 
 
-def _scripts() -> dict[str, object]:
-    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
-        return tomllib.load(pyproject_file)["tool"]["pdm"]["scripts"]
+def test_normal_ci_builds_and_tests_the_exact_source_pair() -> None:
+    workflow = NORMAL.read_text()
+    assert "compatibility-floor:" not in workflow
+    assert "exit 1" not in workflow
+    assert f'ADAM_CORE_SOURCE_REF: "{CORE_REF}"' in workflow
+    assert 'ADAM_CORE_VERSION: "0.7.0"' in workflow
+    assert 'python-version: ["3.11", "3.12", "3.13"]' in workflow
+    assert "repository: B612-Asteroid-Institute/adam_core" in workflow
+    assert "ref: ${{ env.ADAM_CORE_SOURCE_REF }}" in workflow
+    assert "verify_source_pair_contract.py" in workflow
+    assert workflow.count("maturin build --release") >= 2
+    assert "[patch.crates-io]" in workflow
+    for crate in (
+        "adam_core_rs_coords",
+        "adam_core_rs_spice",
+        "adam_core_rs_kernel_data",
+    ):
+        assert f'{crate} = {{ path = "$core/{crate}" }}' in workflow
+        assert f"patch.crates-io.{crate}.path" in workflow
+    assert 'python -m pip install "$wheelhouse"/adam_core-*.whl' in workflow
+    assert '"$wheelhouse"/adam_assist-*.whl' in workflow
+    assert 'metadata.version("adam-core") == "0.7.0"' in workflow
+    assert 'str(core.specifier) == "<0.8.0,>=0.7.0"' in workflow
+    assert "python -m pytest --benchmark-skip" in workflow
+    assert "mypy --strict src/adam_assist" in workflow
+    assert "cargo clippy" in workflow and "-- -D warnings" in workflow
+    assert "cargo test" in workflow and "cargo check" in workflow
+    assert "test ! -e pdm.lock" in workflow
+    assert "test ! -e rust/adam_assist_rs/Cargo.lock" in workflow
+    assert "source-pair-wheels-3.12" in workflow
+    assert "benchmark_current" in workflow
 
 
-def test_normal_ci_is_fail_closed_but_preserves_quality_contracts() -> None:
-    scripts = _scripts()
-    workflow = WORKFLOW.read_text()
-
-    assert "rust-quality" in scripts
-    assert "pdm run rust-quality" in workflow
-    assert 'MATURIN_PEP517_ARGS: "--locked"' in workflow
-    assert "ADAM_CORE_REF" not in workflow
-    assert "cba63f" not in workflow
-    assert "Checkout exact prepublication adam-core source pair" not in workflow
-    assert "[patch.crates-io]" not in workflow
-    assert workflow.count("Verify registry-only Core locks") == 4
-    assert workflow.count("--python-lock --rust-lock") == 4
-    assert "pdm run benchmark-current-ci" in workflow
-    assert "pdm install --frozen-lockfile -G dev" in workflow
-    assert workflow.count("version: '2.29.2'") == 7
-    assert "--core-version UNASSIGNED_PROPAGATOR_V2_RELEASE" in workflow
-    assert "Block CI until propagator-v2 Core release exists" in workflow
-    assert "e1dc662ea24b5c73b212629bfa818bb602527086" in workflow
-    assert "fail-fast: false" in workflow
-    assert "run: pdm install -G dev" not in workflow
-    assert "assist-current-benchmark" in workflow
-    assert "migration/artifacts/benchmark_current_assist_ci.json" in workflow
-
-
-def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
-    for workflow in (ROOT / ".github" / "workflows").glob("*.yml"):
+def test_rust_workflows_use_the_msrv_toolchain_and_components() -> None:
+    for workflow in WORKFLOWS.glob("*.yml"):
         source = workflow.read_text()
-        if "dtolnay/rust-toolchain@" not in source:
+        if "cargo " not in source and "maturin" not in source:
             continue
         if workflow.name == "rust-crate-release-candidate.yml":
             assert "dtolnay/rust-toolchain@stable" in source
@@ -55,242 +57,79 @@ def test_every_rust_workflow_uses_the_msrv_toolchain_and_components() -> None:
         assert "components: rustfmt, clippy" in source, workflow.name
 
 
-def test_rust_release_is_blocked_but_preserves_artifact_contracts() -> None:
-    candidate = RUST_CANDIDATE_WORKFLOW.read_text()
-    assert 'RUST_RELEASE_VERSION: "0.6.0"' in candidate
-    assert 'CORE_RUST_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"' in candidate
-    assert "Block release until propagator-v2 Core crate exists" in candidate
-    assert "RELEASE_CHANNEL: stable" in candidate
-    assert "ADAM_CORE_REF" not in candidate
-    assert "cba63f" not in candidate
-    assert ".ci/adam-core" not in candidate
-    assert "[patch.crates-io]" not in candidate
-    assert '"release/adam-assist-*"' in candidate
-    assert "Verify registry-only Core lock" in candidate
-    assert "verify_registry_locks.py" in candidate
-    assert '--core-version "$CORE_RUST_VERSION" --rust-lock' in candidate
-    assert "cargo package --manifest-path" in candidate
-    assert "--locked" in candidate
-    assert 'RUSTDOCFLAGS="-D warnings -D missing-docs"' in candidate
-    assert "adam-assist-rust-crate-publication-set" in candidate
-    assert "publish_crate_archive.py" in candidate
-    assert '--expected-core-version "$CORE_RUST_VERSION"' in candidate
-    assert '--channel "$RELEASE_CHANNEL"' in candidate
-    assert 'adam_core = "=$CORE_RUST_VERSION"' in candidate
-    assert 'adam_core = "=$CORE_VERSION"' in candidate
-    assert "core-range-compatibility:" in candidate
-    assert 'core-version: ["UNASSIGNED_PROPAGATOR_V2_RELEASE"]' in candidate
-    assert "Download the one tested adam-assist crate" in candidate
-    assert "verify_rust_core_line.py" in candidate
-    assert "Latest-stable Rust compatibility (non-authoritative)" in candidate
-    assert "dtolnay/rust-toolchain@stable" in candidate
-    assert (
-        'cargo check --manifest-path "$manifest" --locked --all-features' in candidate
-    )
-    assert (
-        'cargo test --manifest-path "$manifest" --locked --features python' in candidate
-    )
-    assert (
-        'cargo test --manifest-path "$manifest" --locked --lib --no-default-features'
-        in candidate
-    )
-    assert 'test ! -e "$consumer/Cargo.lock"' in candidate
-    assert "AssistPropagator::from_default_kernels" in candidate
-    assert "cargo publish" not in candidate
-
-    publisher = RUST_PUBLISH_WORKFLOW.read_text()
-    assert "Block publish until propagator-v2 Core crate exists" in publisher
-    assert "needs: compatibility-floor" in publisher
-    assert "candidate_run_id:" in publisher
-    assert "expected_core_version:" in publisher
-    assert "release_channel:" in publisher
-    assert "expected_python_version:" in publisher
-    assert (
-        'test "$GITHUB_REF" = "refs/tags/v${{ inputs.expected_python_version }}"'
-        in publisher
-    )
-    assert "cargo_version_to_pep440" in publisher
-    assert "inputs.release_channel == 'stable' && 'crates-io'" in publisher
-    assert "adam-assist-rust-crate-publication-set" in publisher
-    assert "trusted-publishing" in publisher
-    assert "bootstrap-token" not in publisher
-    assert "CRATES_IO_BOOTSTRAP_TOKEN" not in publisher
-    assert "rust-lang/crates-io-auth-action@v1" in publisher
-    assert "publish_crate_archive.py" in publisher
-    assert "Verify registry-only Core Cargo lock" in publisher
-    assert "verify_registry_locks.py" in publisher
-    assert "--execute" in publisher
-    assert "cargo publish" not in publisher
-
-    python_publisher = (ROOT / ".github" / "workflows" / "publish.yml").read_text()
-    assert "Block publish until propagator-v2 Core release exists" in python_publisher
-    assert "needs: compatibility-floor" in python_publisher
-    assert "public Rust prerequisite" in python_publisher
-    assert "migration/scripts/verify_release.py" in python_publisher
-    assert "api/v1/crates/adam_assist" not in python_publisher
-    assert "expected_rust_version:" in python_publisher
-    assert "expected_adam_core_rust_version:" in python_publisher
-    assert "release_channel:" in python_publisher
-    assert "release_sha:" in python_publisher
-    assert "recovery_from_main:" in python_publisher
-    assert "dry_run:" in python_publisher
-    assert "refs/heads/main" in python_publisher
-    assert "refs/heads/release/*" in python_publisher
-    assert "if: inputs.dry_run == false" in python_publisher
-    assert "ref: v${{ inputs.expected_version }}" in python_publisher
-    assert "EXPECTED_SHA: ${{ inputs.release_sha }}" in python_publisher
-    assert "unconditional_requirements != expected_requirements" in python_publisher
-    assert '"adam-core": "<0.7,>=0.6"' in python_publisher
-    assert "selected Core" in python_publisher
-    assert "prepare_pypi_upload.py" in python_publisher
-    assert "Verify registry-only Core locks" in python_publisher
-    assert "--python-lock --rust-lock" in python_publisher
-    assert "packages-dir: upload-dist/" in python_publisher
-    assert "skip-existing" not in python_publisher
-    assert "inputs.release_channel == 'stable' && 'pypi'" in python_publisher
-    assert "testpypi" not in python_publisher.lower()
-    assert "to pypi" in python_publisher
+def test_every_release_and_publish_workflow_is_fail_closed_on_registry_state() -> None:
+    for path in (WHEEL_CANDIDATE, RUST_CANDIDATE, PYTHON_PUBLISH, RUST_PUBLISH):
+        source = path.read_text()
+        assert "compatibility-floor:" in source, path.name
+        assert "needs: compatibility-floor" in source, path.name
+        assert "verify_source_pair_contract.py" in source, path.name
+        assert "Core 0.7.0 is not yet public" in source, path.name
+        assert "registry locks/checksums are unavailable" in source, path.name
+        assert "exit 1" in source, path.name
+        assert "UNASSIGNED_PROPAGATOR_V2_RELEASE" not in source, path.name
 
 
-def test_wheel_release_is_blocked_but_preserves_acceptance_contracts() -> None:
-    workflow = RELEASE_WORKFLOW.read_text()
+def test_rust_candidate_retains_build_once_release_contract_at_070() -> None:
+    source = RUST_CANDIDATE.read_text()
+    assert 'RUST_RELEASE_VERSION: "0.6.0"' in source
+    assert 'CORE_RUST_VERSION: "0.7.0"' in source
+    assert 'core-version: ["0.7.0"]' in source
+    assert "cargo package --manifest-path" in source
+    assert 'RUSTDOCFLAGS="-D warnings -D missing-docs"' in source
+    assert "publish_crate_archive.py" in source
+    assert 'adam_core = "=$CORE_RUST_VERSION"' in source
+    assert "verify_rust_core_line.py" in source
+    assert "Download the one tested adam-assist crate" in source
+    assert "cargo publish" not in source
 
-    # The final candidate remains registry-only. The Core checkout is pinned
-    # acceptance tooling, never an unpublished Python/Rust source pair.
-    assert "adam_core_ref" not in workflow
-    assert "ADAM_CORE_REF" not in workflow
-    assert "cba63f" not in workflow
-    assert "Checkout adam-core candidate" not in workflow
-    assert "Checkout exact adam-core candidate" not in workflow
-    assert "Patch unpublished Core crates" not in workflow
-    assert "[patch.crates-io]" not in workflow
-    assert ".cargo/config.toml" not in workflow
-    assert ".ci/adam-core" not in workflow
-    assert "Write adam-core runtime version" not in workflow
-    assert "python -m build" not in workflow
-    assert "Build adam-core" not in workflow
-    assert "Build adam-core manylinux wheel" not in workflow
-    assert "Build adam-core native wheel" not in workflow
-    assert "python -m pip install ./adam-core" not in workflow
 
-    # The matrix shape is retained, but release is fail-closed until a Core
-    # release containing the exact accepted propagator-v2 contract exists.
-    assert 'python-version: ["3.11", "3.12", "3.13"]' in workflow
-    for platform in (
-        "manylinux-x86_64",
-        "manylinux-aarch64",
-        "macos-arm64",
-        "macos-x86_64",
-    ):
-        assert f"name: {platform}" in workflow
-    assert (
-        'ADAM_CORE_ACCEPTANCE_REF: "e1dc662ea24b5c73b212629bfa818bb602527086"'
-        in workflow
-    )
-    assert 'ADAM_CORE_RELEASE_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"' in workflow
-    assert "Block release until propagator-v2 Core release exists" in workflow
-    assert "Checkout immutable public adam-core acceptance tooling" in workflow
-    assert "repository: B612-Asteroid-Institute/adam_core" in workflow
-    assert "ref: ${{ env.ADAM_CORE_ACCEPTANCE_REF }}" in workflow
-    assert "path: adam-core-acceptance" in workflow
-    assert "rev-parse 'vUNASSIGNED_PROPAGATOR_V2_RELEASE^{commit}'" in workflow
-    assert (
-        "464859e82bd9aea975f1209b040a97299230dd37bf370ab0132beefcbc29435f" in workflow
-    )
-    assert (
-        "bb2df3751929b4e0391e8300d7e51eb5815f1b0b3c012b8a070052b362b24b77" in workflow
-    )
-    assert workflow.count("run_clean_room_artifact_acceptance.py") == 2
-    assert workflow.count("clean_room_artifact_smoke.py") == 1
+def test_publish_workflows_retain_irreversible_action_guards_at_070() -> None:
+    rust = RUST_PUBLISH.read_text()
+    assert "candidate_run_id:" in rust
+    assert "expected_core_version:" in rust
+    assert "default: 0.7.0" in rust
+    assert "trusted-publishing" in rust
+    assert "rust-lang/crates-io-auth-action@v1" in rust
+    assert "publish_crate_archive.py" in rust
+    assert "--execute" in rust
+    assert "cargo publish" not in rust
 
-    assert 'ADAM_CORE_RELEASE_VERSION: "UNASSIGNED_PROPAGATOR_V2_RELEASE"' in workflow
-    assert 'ADAM_ASSIST_RELEASE_VERSION: "0.6.0"' in workflow
-    assert "Verify registry-only release locks" in workflow
-    assert "pdm lock --check" in workflow
-    assert workflow.count('"pdm==2.29.2"') == 2
-    assert "--python-lock --rust-lock" in workflow
-    assert "Build adam-assist manylinux wheel once" in workflow
-    assert "Build adam-assist native wheel once" in workflow
-    assert workflow.count("args: --release --locked") == 2
+    python = PYTHON_PUBLISH.read_text()
+    assert "acceptance_run_id:" in python
+    assert python.count("default: 0.7.0") == 2
+    assert "release_sha:" in python
+    assert "dry_run:" in python
+    assert "recovery_from_main:" in python
+    assert "refs/heads/release/*" in python
+    assert "if: inputs.dry_run == false" in python
+    assert 'Requirement("adam-core>=0.7.0,<0.8.0")' in python
+    assert '"adam-core": "<0.8.0,>=0.7.0"' in python
+    assert "prepare_pypi_upload.py" in python
+    assert "packages-dir: upload-dist/" in python
+    assert "skip-existing" not in python
 
-    # The only runtime inputs are the once-built ASSIST wheel and the exact
-    # public PyPI Core wheel. The Core driver must consume, not rebuild, them.
-    assert "Prepare exact registry wheelhouse for clean-room acceptance" in workflow
-    assert "acceptance-prebuilt-wheelhouse" in workflow
-    assert "cp wheelhouse/adam_assist-*.whl" in workflow
-    assert "--index-url https://pypi.org/simple" in workflow
-    assert "--only-binary=:all: --no-deps" in workflow
-    assert '"adam-core==$ADAM_CORE_RELEASE_VERSION"' in workflow
-    assert "Run exact registry-wheel clean-room acceptance" in workflow
-    assert (
-        "python adam-core-acceptance/migration/scripts/"
-        "run_clean_room_artifact_acceptance.py" in workflow
-    )
-    assert (
-        '--prebuilt-wheelhouse "$RUNNER_TEMP/acceptance-prebuilt-wheelhouse"'
-        in workflow
-    )
-    assert '--adam-core-repo "$GITHUB_WORKSPACE/adam-core-acceptance"' in workflow
-    assert '--adam-core-ref "$ADAM_CORE_ACCEPTANCE_REF"' in workflow
-    assert '--adam-assist-repo "$GITHUB_WORKSPACE"' in workflow
-    assert "--adam-assist-ref HEAD" in workflow
-    assert "forward/backward/same-epoch propagation" in workflow
-    assert "observer ephemeris through embedded Core SPICE" in workflow
-    assert "offline kernel-cache" in workflow
-    assert "installed-wheel provenance" in workflow
-    assert "Inspect public adam-core wheel contents" in workflow
-    assert "check_wheel_artifacts.py" in workflow
-    assert "Verify clean-room artifact identities and platform tags" in workflow
-    assert "acceptance-report.json" in workflow
-    assert "acceptance/invocation/smoke-report.json" in workflow
-    assert "acceptance/wheelhouse/*.whl" in workflow
-    assert "acceptance/logs/*.log" in workflow
 
-    # The future compatible range remains structurally gated by the same
-    # bytes; both placeholder downloads remain fail-closed until assignment.
-    assert (
-        "Test the same adam-assist wheel across the assigned compatible Core range"
-        in workflow
-    )
-    assert "run_core_compatibility_matrix.py" in workflow
-    assert workflow.count('"adam-core==UNASSIGNED_PROPAGATOR_V2_RELEASE"') >= 2
-    assert 'find "$RUNNER_TEMP/acceptance/wheelhouse"' in workflow
-    assert "core-compatibility-summary.json" in workflow
+def test_wheel_candidate_targets_public_070_but_never_builds_unpublished_core() -> None:
+    source = WHEEL_CANDIDATE.read_text()
+    assert 'ADAM_CORE_RELEASE_VERSION: "0.7.0"' in source
+    assert f'ADAM_CORE_ACCEPTANCE_REF: "{CORE_REF}"' in source
+    assert "repository: B612-Asteroid-Institute/adam_core" in source
+    assert "ref: ${{ env.ADAM_CORE_ACCEPTANCE_REF }}" in source
+    assert "rev-parse 'v0.7.0^{commit}'" in source
+    assert '"adam-core>=0.7.0,<0.8.0"' in source
+    assert "python -m pip download --no-cache-dir" in source
+    assert '"adam-core==$ADAM_CORE_RELEASE_VERSION"' in source
+    assert "Build adam-core native wheel" not in source
+    assert "python -m pip install ./adam-core" not in source
+    assert "[patch.crates-io]" not in source
+    assert "run_clean_room_artifact_acceptance.py" in source
+    assert "run_core_compatibility_matrix.py" not in source
+    assert "Full 30-workload current benchmark" in source
 
-    assert "full-current-benchmark:" in workflow
-    full_job_header = workflow.split("  full-current-benchmark:", maxsplit=1)[1].split(
-        "    steps:", maxsplit=1
-    )[0]
-    assert "needs: artifact-acceptance" in full_job_header
-    assert "runs-on: macos-14" in full_job_header
-    assert "Full 30-workload current benchmark" in full_job_header
-    assert (
-        "Install public Core UNASSIGNED_PROPAGATOR_V2_RELEASE and "
-        "adam-assist candidate" in workflow
-    )
-    assert 'python -m pip install "adam-core==$ADAM_CORE_RELEASE_VERSION"' in workflow
-    assert (
-        'importlib.metadata.version("adam-core") == '
-        '"UNASSIGNED_PROPAGATOR_V2_RELEASE"' in workflow
-    )
-    assert "Pin frozen-fixture kernel bytes" in workflow
-    assert "assist_public_semantics_fixture_2026-05-20.json" in workflow
-    assert "ADAM_CORE_RS_ASSIST_PLANETS_PATH" in workflow
-    assert "ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH" in workflow
-    assert "assist_kernel_identity_ci.json" in workflow
-    assert (
-        "${{ github.workspace }}/migration/artifacts/"
-        "assist_public_semantics_residuals_ci.json" in workflow
-    )
-    assert (
-        "cargo test --locked --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored"
-        in workflow
-    )
-    assert (
-        "python -m pytest -m live tests/test_propagate.py tests/test_ephemeris.py"
-        in workflow
-    )
-    assert "--lanes tiny small large" in workflow
-    assert "--repeats 5" in workflow
-    assert "--require-native" in workflow
-    assert "assist-current-benchmark-full" in workflow
+
+def test_no_workflow_claims_the_incompatible_061_floor() -> None:
+    combined = "\n".join(path.read_text() for path in WORKFLOWS.glob("*.yml"))
+    assert "UNASSIGNED_PROPAGATOR_V2_RELEASE" not in combined
+    assert "e1dc662ea24b5c73b212629bfa818bb602527086" not in combined
+    assert "adam-core>=0.6,<0.7" not in combined
+    assert "adam-core==0.6.1" not in combined
