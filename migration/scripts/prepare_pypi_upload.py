@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Prepare only missing, checksum-verified files for an exact PyPI release."""
+"""Inert post-Core-publication PyPI artifact-preparation helper.
+
+No workflow invokes this module during the Core 0.7 transition.
+"""
 
 from __future__ import annotations
 

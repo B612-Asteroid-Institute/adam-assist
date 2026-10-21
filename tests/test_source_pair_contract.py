@@ -17,6 +17,9 @@ def test_source_pair_contract_accepts_current_tree() -> None:
     assert contract["assist_version"] == "0.6.0"
     assert contract["core_version"] == "0.7.0"
     assert contract["source_pair_status"] == "provisional"
+    assert contract["release_automation"] == (
+        "absent-until-core-0.7.0-is-public-and-locked"
+    )
 
 
 def test_every_cargo_dependency_table_rejects_mixed_core_versions() -> None:
@@ -115,6 +118,15 @@ def _replace(relative: str, old: str, new: str):
         source = path.read_text()
         assert old in source
         path.write_text(source.replace(old, new, 1))
+
+    return mutate
+
+
+def _write(relative: str, text: str):
+    def mutate(root: Path) -> None:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
 
     return mutate
 
@@ -251,6 +263,11 @@ SOURCE_CONTRACT_MUTATIONS = (
             "pyproject.toml",
             '\n[tool.poetry.dependencies]\nadam-core = { git = "https://example.invalid/core" }\n',
         ),
+    ),
+    ("R01-stale-pdm-lock", _write("pdm.lock", "[metadata]\nlock_version = '4.5'\n")),
+    (
+        "R02-stale-cargo-lock",
+        _write("rust/adam_assist_rs/Cargo.lock", "version = 4\n"),
     ),
 )
 

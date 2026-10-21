@@ -92,19 +92,15 @@ PyPI: adam-core==0.5.6rc6
 PyPI: adam-assist==0.4.0rc7
 ```
 
-Cargo and pip exclude these from ordinary stable resolution. The public
-`adam_assist` crate uses crates.io trusted publishing. Candidate and publication
-workflows pass the same tested `.crate` bytes without repackaging. Rust 1.87
-remains authoritative for formatting, strict Clippy, tests, documentation,
-packaging, wheels, and clean consumer resolution. A separate non-authoritative
-latest-stable lane checks default, all-feature, no-default, and fresh no-lock
-consumer configurations without changing the MSRV or enforcing moving-stable
-Clippy. While Core `0.7.0` is unpublished, that lane is downstream of the
-fail-closed compatibility gate and is skipped rather than producing unrelated
-PR failures. Until the registry transition, every release-candidate and publish
-workflow is manual-dispatch-only. A repository-wide structural policy rejects
-bypass conditions, neutralized lock checks, unlocked builds, and publication
-outside provenance-checked trusted-publishing jobs. The adam-assist RC metadata
+Cargo and pip exclude these from ordinary stable resolution. Historical public
+crates used trusted publishing, but the current Core `0.7.0` transition has no
+release-candidate or publication workflows at all. Only read-only exact-source
+CI exists until Core is public and authentic PyPI/Cargo locks can be generated.
+The scripts retained under `migration/scripts` are inert local post-publication
+tooling, not authorized CI entry points. Locks and release automation will be
+added together only in a separately reviewed, explicitly approved commit. Rust
+1.87 remains authoritative for formatting, strict Clippy, tests, documentation,
+packaging, wheels, and clean consumer resolution. The adam-assist RC metadata
 must exact-pin the core RC before publication. Its 12 native wheels contain the
 Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into

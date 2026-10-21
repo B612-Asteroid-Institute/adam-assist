@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Validate or publish the exact prebuilt ``adam_assist`` crate archive.
+"""Inert post-Core-publication crate validation/publication helper.
 
-Candidate CI packages and tests the archive once. The publication workflow
-then downloads those exact bytes and sends them through Cargo's registry
-protocol without repackaging.
+No workflow invokes this module during the Core 0.7 transition. Its execute
+mode is not authorized until authentic locks and release automation are added
+in a separate reviewed and explicitly approved commit.
 """
 
 from __future__ import annotations

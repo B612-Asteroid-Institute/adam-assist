@@ -120,6 +120,9 @@ def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
     assert contract["core_commit"] == "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
     assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
     assert contract["source_pair_status"] == "provisional"
+    assert contract["release_automation"] == (
+        "absent-until-core-0.7.0-is-public-and-locked"
+    )
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:
@@ -234,10 +237,6 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
     normal_ci = (
         ROOT / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
     ).read_text()
-    release_ci = (
-        ROOT / ".github" / "workflows" / "release-candidate-wheel-matrix.yml"
-    ).read_text()
-
     assert core_ref in readme and core_ref in migration and core_ref in normal_ci
     assert "adam-core>=0.7.0,<0.8.0" in readme
     assert readme.index("Core `0.7.0` is not yet available") < readme.index(
@@ -252,6 +251,6 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
         assert f"patch.crates-io.{crate}.path" in normal_ci
     assert "Exact Core source pair" in normal_ci
     assert "exit 1" not in normal_ci
-    assert 'ADAM_CORE_RELEASE_VERSION: "0.7.0"' in release_ci
-    assert "Block release until propagator-v2 Core release exists" in release_ci
-    assert "Core 0.7.0 is not yet public" in release_ci
+    workflows = list((ROOT / ".github" / "workflows").glob("*.yml"))
+    assert [path.name for path in workflows] == ["pip-build-lint-test-coverage.yml"]
+    assert "No release-candidate or publication automation exists" in readme

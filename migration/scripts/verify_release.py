@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Verify one exact adam-assist source and public Rust prerequisite release."""
+"""Inert post-Core-publication release metadata verifier.
+
+No workflow invokes this module during the Core 0.7 transition.
+"""
 
 from __future__ import annotations
 

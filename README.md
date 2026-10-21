@@ -48,12 +48,16 @@ incompatible `0.6.1` graph or inventing checksums. The machine-checked
 pairing.
 Normal CI builds both projects from those sources, installs the built ASSIST
 wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
-NAIF data version before tests and benchmarks. Release, publication, and
-latest-stable registry compatibility remain fail-closed until Core `0.7.0` is
-public and registry locks can be regenerated and verified.
-`migration/scripts/verify_workflow_policy.py` scans every workflow and rejects
-gate/lock neutralization, unlocked release builds, hidden publication paths,
-and conditions that make normal source-pair CI vacuous.
+NAIF data version before tests and benchmarks. It is the repository's only
+workflow. No release-candidate or publication automation exists while Core
+`0.7.0` is unpublished and registry locks are absent.
+`migration/scripts/verify_workflow_policy.py` enforces that exact read-only
+workflow inventory and rejects release triggers, write/OIDC permissions,
+credentials, publisher actions or commands, and disabled normal validation.
+Release automation and authentic registry locks require a separate reviewed
+post-Core-publication commit.
+The retained migration helpers are documented as inert local tools in
+`migration/scripts/RELEASE_TOOLING.md`; they are not CI release entry points.
 
 For reproducible local Rust validation, use one detached Core tree for all
 three direct Core crates. Patched Cargo commands create a temporary untracked

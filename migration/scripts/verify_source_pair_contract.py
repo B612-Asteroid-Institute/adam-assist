@@ -143,6 +143,7 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "registry_state": "awaiting-core-0.7.0-publication",
         "lock_state": "absent-until-core-0.7.0-is-public",
         "source_pair_status": "provisional",
+        "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")

@@ -5,6 +5,7 @@
   "core_version": "0.7.0",
   "lock_state": "absent-until-core-0.7.0-is-public",
   "registry_state": "awaiting-core-0.7.0-publication",
+  "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
   "schema_version": 1,
   "source_pair_status": "provisional"
 }
