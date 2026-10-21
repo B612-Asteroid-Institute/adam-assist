@@ -12,7 +12,7 @@ from migration.scripts.verify_rust_core_line import (
 
 def _report(core_version: str, value: float = 1.0) -> dict:
     return {
-        "versions": {"adam-core": core_version, "adam-assist": "0.7.0"},
+        "versions": {"adam-core": core_version, "adam-assist": "0.6.0"},
         "assist_wheel_sha256": "abc",
         "epochs_mjd_tdb": [59216.0],
         "input_schema": "orbits-schema",

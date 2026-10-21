@@ -152,6 +152,7 @@ jobs:
 
   latest-stable-compatibility:
     name: Latest-stable Rust compatibility (non-authoritative)
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

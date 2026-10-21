@@ -15,6 +15,10 @@
 - Matched adam-core's per-field Marsden default contract: every null
   `ALN`/`NK`/`NM`/`NN`/`R0` value on an active row independently takes the
   asteroid default, including propagation and fixed-parameter STM paths.
+- Made exact-source CI install the wheel's complete `dev` extra and verify
+  `astropy`, frozen NAIF data versions, and installed-wheel provenance before
+  tests or benchmarks. Release governance now semantically enforces registry
+  locks, locked builds, and compatibility-gated publication/upload steps.
 
 ### Changed
 

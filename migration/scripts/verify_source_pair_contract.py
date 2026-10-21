@@ -11,13 +11,70 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTRACT_PATH = ROOT / "migration" / "source_pair_contract.json"
-PYTHON_REQUIREMENT = "adam-core>=0.7.0,<0.8.0"
+
 CORE_CRATES = (
     "adam_core_rs_coords",
     "adam_core_rs_spice",
     "adam_core_rs_kernel_data",
 )
+CONTRACT_PATH = ROOT / "migration" / "source_pair_contract.json"
+PYTHON_REQUIREMENT = "adam-core>=0.7.0,<0.8.0"
+DEPENDENCY_TABLES = {"dependencies", "dev-dependencies", "build-dependencies"}
+FORBIDDEN_CARGO_SOURCES = {
+    "path",
+    "git",
+    "registry",
+    "registry-index",
+    "branch",
+    "tag",
+    "rev",
+}
+
+
+def _cargo_dependency_entries(table: dict[str, Any], path: tuple[str, ...] = ()):
+    for key, value in table.items():
+        current = (*path, key)
+        if key in DEPENDENCY_TABLES and isinstance(value, dict):
+            for dependency, declaration in value.items():
+                yield current, dependency, declaration
+        elif isinstance(value, dict):
+            yield from _cargo_dependency_entries(value, current)
+
+
+def verify_cargo_core_dependencies(cargo: dict[str, Any]) -> None:
+    found: set[tuple[tuple[str, ...], str]] = set()
+    for table_path, dependency, declaration in _cargo_dependency_entries(cargo):
+        canonical = dependency
+        if isinstance(declaration, dict) and isinstance(
+            declaration.get("package"), str
+        ):
+            canonical = declaration["package"]
+        if not canonical.startswith("adam_core"):
+            continue
+        version = _dependency_version(declaration)
+        if version != "0.7":
+            location = ".".join((*table_path, dependency))
+            raise ValueError(f"{location} must require the coherent 0.7 line")
+        if isinstance(declaration, dict):
+            forbidden = sorted(FORBIDDEN_CARGO_SOURCES & declaration.keys())
+            if forbidden:
+                location = ".".join((*table_path, dependency))
+                raise ValueError(
+                    f"{location} must be registry-version-only, found {forbidden}"
+                )
+        found.add((table_path, canonical))
+
+    required = {
+        (("dependencies",), "adam_core_rs_coords"),
+        (("dependencies",), "adam_core_rs_spice"),
+        (("dependencies",), "adam_core_rs_kernel_data"),
+        (("dev-dependencies",), "adam_core_rs_kernel_data"),
+    }
+    missing = required - found
+    if missing:
+        raise ValueError(
+            f"missing required Core dependency declarations: {sorted(missing)!r}"
+        )
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -69,10 +126,7 @@ def verify(core_tree: Path | None = None) -> dict[str, object]:
         raise ValueError(
             "adam_assist Cargo version does not match source-pair contract"
         )
-    for section in ("dependencies", "dev-dependencies"):
-        for name, value in cargo.get(section, {}).items():
-            if name in CORE_CRATES and _dependency_version(value) != "0.7":
-                raise ValueError(f"{section}.{name} must require the coherent 0.7 line")
+    verify_cargo_core_dependencies(cargo)
 
     forbidden_locks = (
         ROOT / "pdm.lock",

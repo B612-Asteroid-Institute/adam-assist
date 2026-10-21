@@ -44,9 +44,11 @@ Core `0.7.0` is not yet available from PyPI/crates.io. Active PDM and Cargo
 registry locks are therefore intentionally absent instead of retaining the
 incompatible `0.6.1` graph or inventing checksums. The machine-checked
 `migration/source_pair_contract.json` pins the exact pre-release pairing.
-Normal CI builds both projects from those sources; release and publication
-workflows remain fail-closed until Core `0.7.0` is public and registry locks can
-be regenerated and verified.
+Normal CI builds both projects from those sources, installs the built ASSIST
+wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
+NAIF data version before tests and benchmarks. Release, publication, and
+latest-stable registry compatibility remain fail-closed until Core `0.7.0` is
+public and registry locks can be regenerated and verified.
 
 For reproducible local Rust validation, use one detached Core tree for all
 three direct Core crates. Patched Cargo commands create a temporary untracked

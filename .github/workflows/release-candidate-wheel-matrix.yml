@@ -279,21 +279,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
-      - name: Install public Core 0.7.0 and adam-assist candidate
+      - name: Download the accepted macOS arm64 Python 3.12 wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-acceptance-macos-arm64-py3.12
+          path: accepted-wheels
+      - name: Install the exact accepted Core and ASSIST wheels with dev dependencies
         run: |
-          python -m pip install --upgrade pip maturin "pdm==2.29.2"
+          python -m pip install --upgrade pip "pdm==2.29.2"
           pdm lock --check
           python migration/scripts/verify_registry_locks.py \
             --core-version "$ADAM_CORE_RELEASE_VERSION" \
             --python-lock --rust-lock
-          python -m pip install "adam-core==$ADAM_CORE_RELEASE_VERSION"
-          python migration/scripts/write_maturin_version.py
-          python -m pip install -e ".[dev]"
-          python - <<'PY'
-          import importlib.metadata
-          assert importlib.metadata.version("adam-core") == "0.7.0"
-          assert importlib.metadata.version("adam-assist") == "0.6.0"
-          PY
+          core_wheel="$(find accepted-wheels -name 'adam_core-*.whl' -print -quit)"
+          assist_wheel="$(find accepted-wheels -name 'adam_assist-*.whl' -print -quit)"
+          test -n "$core_wheel" && test -n "$assist_wheel"
+          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          python migration/scripts/verify_dev_environment.py --require-wheel
       - name: Pin frozen-fixture kernel bytes
         run: |
           python - <<'PY'

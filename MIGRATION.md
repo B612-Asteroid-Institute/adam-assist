@@ -99,7 +99,9 @@ remains authoritative for formatting, strict Clippy, tests, documentation,
 packaging, wheels, and clean consumer resolution. A separate non-authoritative
 latest-stable lane checks default, all-feature, no-default, and fresh no-lock
 consumer configurations without changing the MSRV or enforcing moving-stable
-Clippy. The adam-assist RC metadata must exact-pin the core RC before
+Clippy. While Core `0.7.0` is unpublished, that lane is downstream of the
+fail-closed compatibility gate and is skipped rather than producing unrelated
+PR failures. The adam-assist RC metadata must exact-pin the core RC before
 publication. Its 12 native wheels contain the
 Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into
