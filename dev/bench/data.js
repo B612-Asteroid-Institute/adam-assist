@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792287728113,
+  "lastUpdate": 1792777324619,
   "repoUrl": "https://github.com/B612-Asteroid-Institute/adam-assist",
   "entries": {
     "Python Benchmark": [
@@ -1131,6 +1131,93 @@ window.BENCHMARK_DATA = {
             "unit": "iter/sec",
             "range": "stddev: 0.018616215262226548",
             "extra": "mean: 22.867204554199986 sec\nrounds: 5"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "nate.tellis@gmail.com",
+            "name": "Nathaniel Tellis",
+            "username": "ntellis"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a8ec6d22b422da055730ff7c0e076f51afe8b0ba",
+          "message": "Merge pull request #43 from B612-Asteroid-Institute/nt/spicekit-0.2.3-lock\n\nMove the Cargo lock's spicekit to 0.2.3",
+          "timestamp": "2026-10-23T13:21:45-04:00",
+          "tree_id": "47c9681a03251ddb3a2fbe962723f7cd61fdc2e4",
+          "url": "https://github.com/B612-Asteroid-Institute/adam-assist/commit/a8ec6d22b422da055730ff7c0e076f51afe8b0ba"
+        },
+        "date": 1792777324169,
+        "tool": "pytest",
+        "benches": [
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_propagation_vs_raw",
+            "value": 0.47480675874623857,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0019587618284087945",
+            "extra": "mean: 2.1061199774000103 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_ephemeris_generation",
+            "value": 39.86369295033168,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00018150611969921994",
+            "extra": "mean: 25.085483205129886 msec\nrounds: 39"
+          },
+          {
+            "name": "tests/test_benchmarks.py::test_benchmark_impact_detection",
+            "value": 1.0678800148348744,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0018319442070444426",
+            "extra": "mean: 936.4347923999958 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[1]",
+            "value": 1.067874521483711,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0010024313043468928",
+            "extra": "mean: 936.4396096000064 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_some_impacts[2]",
+            "value": 1.0675426508306907,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0012881451900777319",
+            "extra": "mean: 936.7307237999967 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[1]",
+            "value": 3.1797196503888108,
+            "unit": "iter/sec",
+            "range": "stddev: 0.0001644071140841848",
+            "extra": "mean: 314.4931346000021 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_impacts[2]",
+            "value": 3.180604294358539,
+            "unit": "iter/sec",
+            "range": "stddev: 0.00042739384344681725",
+            "extra": "mean: 314.4056623999745 msec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[1]",
+            "value": 0.043155077664043265,
+            "unit": "iter/sec",
+            "range": "stddev: 0.02783091082535748",
+            "extra": "mean: 23.172244244000012 sec\nrounds: 5"
+          },
+          {
+            "name": "tests/test_impacts.py::test_calculate_impacts_benchmark_no_impacts[2]",
+            "value": 0.043394433087435055,
+            "unit": "iter/sec",
+            "range": "stddev: 0.14324045531553137",
+            "extra": "mean: 23.044430560599995 sec\nrounds: 5"
           }
         ]
       }
