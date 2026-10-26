@@ -1,3 +1,5 @@
+import pickle
+
 import pytest
 from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.orbits import Orbits
@@ -32,6 +34,18 @@ def test_default_settings():
     assert prop.initial_dt == 1e-6
     assert prop.adaptive_mode == 1
     assert prop.epsilon == 1e-6
+    assert prop.od_epsilon == 1e-9
+
+
+def test_od_epsilon_is_separate_from_epsilon():
+    """Orbit determination (the native capsule) has its own tolerance."""
+    prop = ASSISTPropagator(epsilon=1e-6, od_epsilon=1e-10)
+    assert prop.epsilon == 1e-6
+    assert prop.od_epsilon == 1e-10
+    restored = pickle.loads(pickle.dumps(prop))
+    assert restored.od_epsilon == 1e-10
+    with pytest.raises(ValueError, match="od_epsilon must be positive"):
+        ASSISTPropagator(od_epsilon=0.0)
 
 
 def test_custom_settings():

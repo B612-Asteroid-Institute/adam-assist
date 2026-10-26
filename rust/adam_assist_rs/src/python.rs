@@ -147,6 +147,9 @@ impl NativeBenchmark {
 #[pyclass]
 struct NativeAssistPropagator {
     inner: RustAssistPropagator,
+    /// The same ASSIST data with the orbit-determination tolerance
+    /// (`od_epsilon`): what `propagator_capsule` hands to adam-core's OD.
+    od_inner: RustAssistPropagator,
     spice: AdamCoreSpiceBackend,
     benchmark: Mutex<Option<NativeBenchmark>>,
 }
@@ -154,7 +157,7 @@ struct NativeAssistPropagator {
 #[pymethods]
 impl NativeAssistPropagator {
     #[new]
-    #[pyo3(signature = (planets_path, asteroids_path, *, min_dt=1.0e-9, initial_dt=1.0e-6, adaptive_mode=1, epsilon=1.0e-6))]
+    #[pyo3(signature = (planets_path, asteroids_path, *, min_dt=1.0e-9, initial_dt=1.0e-6, adaptive_mode=1, epsilon=1.0e-6, od_epsilon=1.0e-9))]
     fn new(
         planets_path: &str,
         asteroids_path: &str,
@@ -162,7 +165,11 @@ impl NativeAssistPropagator {
         initial_dt: f64,
         adaptive_mode: i32,
         epsilon: f64,
+        od_epsilon: f64,
     ) -> PyResult<Self> {
+        if !(od_epsilon > 0.0) {
+            return Err(PyValueError::new_err("od_epsilon must be positive"));
+        }
         if min_dt <= 0.0 {
             return Err(PyValueError::new_err("min_dt must be positive"));
         }
@@ -189,10 +196,15 @@ impl NativeAssistPropagator {
         spice.furnsh(Path::new(planets_path)).map_err(|err| {
             PyRuntimeError::new_err(format!("failed to load SPICE planets kernel: {err}"))
         })?;
+        let data = Arc::new(AssistData::new(ephem));
         Ok(Self {
-            inner: RustAssistPropagator::with_integrator(
-                Arc::new(AssistData::new(ephem)),
-                integrator,
+            inner: RustAssistPropagator::with_integrator(Arc::clone(&data), integrator),
+            od_inner: RustAssistPropagator::with_integrator(
+                data,
+                IntegratorConfig {
+                    epsilon: Some(od_epsilon),
+                    ..integrator
+                },
             ),
             spice,
             benchmark: Mutex::new(None),
@@ -203,7 +215,8 @@ impl NativeAssistPropagator {
     /// ``adam_core.propagator.v1``): adam-core's orbit-determination stages
     /// then run with ASSIST dynamics natively, with no Python call per
     /// prediction. The capsule owns a clone of the propagator (shared
-    /// ephemeris data).
+    /// ephemeris data) integrating at the orbit-determination tolerance
+    /// (`od_epsilon`), not the general `epsilon`.
     fn propagator_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
         let name =
             std::ffi::CString::new(adam_core_rs_coords::propagation::EXTERNAL_PROPAGATOR_CAPSULE)
@@ -211,7 +224,7 @@ impl NativeAssistPropagator {
         PyCapsule::new_bound(
             py,
             adam_core_rs_coords::propagation::OwnedExternalPropagator::new(
-                self.inner.clone(),
+                self.od_inner.clone(),
                 "adam_assist",
                 env!("CARGO_PKG_VERSION"),
             ),

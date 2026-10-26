@@ -196,6 +196,11 @@ These parameters are passed directly to REBOUND's IAS15 integrator. The IAS15 in
 - `initial_dt`: Initial timestep for the integrator (default: 0.001 days)
 - `epsilon`: Controls the adaptive timestep behavior (default: 1e-6)
 - `adaptive_mode`: Controls the adaptive timestep behavior (default: 1)
+- `od_epsilon`: IAS15 tolerance for orbit determination through adam-core, i.e. the
+  propagator capsule its native OD stages integrate with (default: 1e-9). Kept separate
+  from `epsilon`: at 1e-6 predictions jump under sub-metre state changes on smooth
+  (main-belt) orbits, which shifts long-arc orbit fits; 1e-9 is converged at similar
+  fit cost, and 1e-12 stalls state-transition-matrix integration.
 
 These parameters are passed directly to REBOUND's IAS15 integrator. The IAS15 integrator is a high accuracy integrator that uses adaptive timestepping to maintain precision while optimizing performance.
 
