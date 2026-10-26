@@ -138,7 +138,6 @@ def test_legacy_constructor_parameters_remain_accepted() -> None:
         ("initial_dt", 1e-6),
         ("adaptive_mode", 1),
         ("epsilon", 1e-6),
-        ("od_epsilon", 1e-9),
     ]:
         assert parameters[names.index(name)].default == default
 

@@ -313,8 +313,7 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     )
 
     def propagator_capsule(self) -> Any:
-        """The ``adam_core.propagator.v1`` capsule of this propagator, integrating at
-        the orbit-determination tolerance ``od_epsilon`` (default 1e-9)."""
+        """The ``adam_core.propagator.v1`` capsule of this propagator."""
         return self._native.propagator_capsule()
 
     def __init__(
@@ -326,7 +325,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         initial_dt: float = 1e-6,
         adaptive_mode: int = 1,
         epsilon: float = 1e-6,
-        od_epsilon: float = 1e-9,
         **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -338,11 +336,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         self.initial_dt = initial_dt
         self.adaptive_mode = adaptive_mode
         self.epsilon = epsilon
-        # Orbit determination integrates through `propagator_capsule` at this
-        # tolerance. At 1e-6 predictions jump under sub-metre state changes on
-        # smooth (main-belt) orbits, which shifts long-arc fits by many sigma;
-        # 1e-9 is converged at similar fit cost. 1e-12 stalls STM integration.
-        self.od_epsilon = od_epsilon
         self._native = NativeAssistPropagator(
             self.planets_path,
             self.asteroids_path,
@@ -350,7 +343,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             initial_dt=initial_dt,
             adaptive_mode=adaptive_mode,
             epsilon=epsilon,
-            od_epsilon=od_epsilon,
         )
 
     def __getstate__(self) -> dict[str, Any]:
@@ -362,7 +354,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             "initial_dt": self.initial_dt,
             "adaptive_mode": self.adaptive_mode,
             "epsilon": self.epsilon,
-            "od_epsilon": self.od_epsilon,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
