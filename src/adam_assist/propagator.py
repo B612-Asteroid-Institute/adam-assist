@@ -301,7 +301,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     )
 
     def propagator_capsule(self) -> Any:
-        """Private native propagation capsule consumed by adam-core."""
+        """Return Core's private propagation-only ABI-v2 capsule.
+
+        The native descriptor includes immutable fingerprints of all IAS15
+        settings and the exact planetary/small-body kernel contents. Core owns
+        OD orchestration and records those identities in workflow provenance.
+        """
         return self._native.propagator_capsule()
 
     def __init__(

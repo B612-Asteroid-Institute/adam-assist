@@ -14,7 +14,7 @@ categories = ["science", "simulation"]
 
 [features]
 default = ["kernel-data"]
-kernel-data = ["dep:adam_core_rs_kernel_data", "dep:sha2"]
+kernel-data = ["dep:adam_core_rs_kernel_data"]
 python = ["dep:ndarray", "dep:numpy", "dep:pyo3"]
 extension-module = ["python", "pyo3/extension-module"]
 
@@ -31,9 +31,10 @@ ndarray = { version = "0.16", optional = true }
 numpy = { version = "0.22", optional = true }
 pyo3 = { version = "0.22", optional = true }
 rayon = "1.11"
-sha2 = { version = "0.10", optional = true }
+sha2 = "0.10"
 
 [dev-dependencies]
+adam_core = "0.7"
 adam_core_rs_kernel_data = { version = "0.7", default-features = false }
 serde_json = "1"
 

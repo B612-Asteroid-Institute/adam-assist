@@ -29,10 +29,12 @@
 
 - Reduced the Core integration surface to the private native
   `adam_core.propagator.v2` capsule: batched ASSIST propagation, immutable
-  Cargo-SemVer identity, complete non-gravitational rows, row failures, and
-  optional STMs. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
-  coherent Rust `0.7`, validated against provisional Core `0.7.0` source-pair
-  commit `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`. No release automation exists
+  Cargo-SemVer identity, complete non-gravitational rows, row failures,
+  optional STMs, and the append-only configuration/data fingerprint suffix.
+  Standalone Rust callers receive the same provenance-complete provider through
+  `AssistPropagator::external_propagator()`. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
+  coherent Rust `0.7`, validated against the exact final Core `0.7.0` candidate
+  commit `0b49938eb0be04214a8d07b206227d31b248394a`. No release automation exists
   until Core `0.7.0` is public and real registry locks can be generated.
 - Removed ASSIST OD workloads from the current benchmark and public-surface
   classifications; OD algorithms, defaults, and reports are now exclusively

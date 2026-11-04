@@ -12,8 +12,9 @@ The Python class is a compatibility veneer. Public propagation, covariance
 sampling/collapse, ephemeris generation, and collision detection each enter the
 Rust backend once; local parallelism is Rayon-owned. `max_processes` is retained
 as the compatible thread-limit control. Orbit determination is owned by
-`adam-core`, which consumes ASSIST only through its private native propagator
-capsule.
+`adam-core`, which consumes only ASSIST's propagation-only ABI-v2 provider. In
+Python that provider is transported by the private native capsule; standalone
+Rust borrows the same validated table from `AssistExternalPropagator`.
 
 ## Ownership boundary
 
@@ -23,8 +24,9 @@ capsule.
   Python wheel.
 - `adam-core` owns permissive generic contracts, orbit determination, fitting,
   rejection, linkage orchestration, and cross-package integration.
-- The private `propagator_capsule` is the only native Core↔ASSIST execution
-  capability; it transports propagation and STM requests, never OD algorithms.
+- The ABI-v2 provider is the only native Core↔ASSIST execution capability; the
+  private Python `propagator_capsule` transports that table. Both routes carry
+  propagation, STM, and provenance metadata, never OD algorithms.
 
 The temporary identified snapshots under `rust/vendor` were removed after the
 adam-core Rust crates were published. The stable `0.4.0` Rust crate exact-pins
@@ -41,32 +43,33 @@ report itself as `0.5.0`-compatible.
 
 This line exports only `adam_core.propagator.v2`, declares Python
 `adam-core>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements, and is validated
-against provisional Core `0.7.0` source-pair commit
-`f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`. Core `0.7.0` is not yet on the
+against the exact final Core `0.7.0` candidate commit
+`0b49938eb0be04214a8d07b206227d31b248394a`. Core `0.7.0` is not yet on the
 registries: active locks are intentionally absent and release/publication stays
 blocked until public artifacts exist and their real checksums can be locked.
 
 The migration-era methods below were provider implementation hooks, not an
 adam-assist OD product, and are removed from `ASSISTPropagator`:
 
-| Removed adam-assist method | Canonical nondeprecated adam-core API |
+| Removed adam-assist method | Canonical adam-core replacement |
 |---|---|
-| `fit_least_squares`, `fit_least_squares_evaluated` | `refine(orbit, observations, ASSISTPropagator(), rejection="none")` |
-| `od_fit` | `refine(orbit, observations, ASSISTPropagator(), rejection="worst_residual")` |
-| `initial_orbit_determination` | `run_iod(linkage_observations, ASSISTPropagator(), ...)` for one linkage; top-level `initial_orbit_determination(observations, linkage_members, ASSISTPropagator, ...)` for a linkage table |
-| `vallado_least_squares` | No exact Vallado-trace replacement; use `refine(..., rejection="none")` for Core's supported weighted fit and migrate result handling |
+| `fit_least_squares`, `fit_least_squares_evaluated` | Persist a canonical IOD handoff, then call `refine(iod_orbits, iod_members, source_catalog, ASSISTPropagator(), config.for_refinement())` |
+| `od_fit` | `run_od(source_catalog, associations, ASSISTPropagator(), config)` |
+| `initial_orbit_determination` | `run_iod(source_catalog, associations, ASSISTPropagator(), config.for_iod())` |
+| `vallado_least_squares` | No exact Vallado-trace replacement; use canonical `refine(...)` with an explicit `RefinementRunConfig` and migrate result handling |
 
-`refine` returns Core-owned `FittedOrbits` and `FittedOrbitMembers`, replacing
-the provider methods' tuples or implementation dictionaries. The batched IOD
-entry point remains in adam-core: it partitions membership by linkage and runs
-the same `run_iod` stage per linkage; adam-assist no longer receives linkage
-IDs or owns that loop.
+Every canonical Python workflow returns exactly `(FittedOrbits,
+FittedOrbitMembers, OrbitDeterminationFailures)`. Explicit `Associations`
+own grouping, and the self-contained stage configuration owns fitting,
+rejection, resources, and the observation pipeline. There are no provider
+callbacks, hidden model defaults, or ASSIST-owned linkage loops.
 
-Pass an `ASSISTPropagator` instance to the adam-core stage API (or its class to
-the batched linkage API). Core obtains the private capsule and owns every
-candidate, solver, rejection, and linkage loop; adam-assist supplies only
-ASSIST propagation and derivatives. Rust-only users continue passing
-`AssistPropagator` directly to adam-core's generic algorithms.
+Pass one `ASSISTPropagator` instance as the propagation-only provider. Core
+acquires its private capsule once after static preflight and owns every
+candidate, solver, rejection, and grouping decision. Standalone Rust callers
+use `AssistPropagator::external_propagator()`, borrow its validated external
+view into `adam_core::od::OdPropagator::external`, and call the same Core-owned
+`run_iod`, `run_od`, `refine`, or `evaluate_orbits` functions.
 
 ## Parity
 

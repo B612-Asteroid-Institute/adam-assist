@@ -47,15 +47,12 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert "ADAM_CORE_RS_ASSIST_PLANETS_PATH" not in crate_readme
 
     assert manifest["features"]["default"] == ["kernel-data"]
-    assert manifest["features"]["kernel-data"] == [
-        "dep:adam_core_rs_kernel_data",
-        "dep:sha2",
-    ]
+    assert manifest["features"]["kernel-data"] == ["dep:adam_core_rs_kernel_data"]
     dependencies = manifest["dependencies"]
     assert "assist-rs" not in dependencies
     assert dependencies["libassist-sys"] == "=1.2.1"
     assert dependencies["librebound-sys"] == "=4.6.0"
-    assert dependencies["sha2"] == {"version": "0.10", "optional": True}
+    assert dependencies["sha2"] == "0.10"
     kernel_dependency = {
         "version": "0.7",
         "default-features": False,
@@ -64,6 +61,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
         **kernel_dependency,
         "optional": True,
     }
+    assert manifest["dev-dependencies"]["adam_core"] == "0.7"
     assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == (
         kernel_dependency
     )
@@ -117,7 +115,7 @@ def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
     assert not (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").exists()
     contract = verify_source_pair()
     assert contract["core_version"] == "0.7.0"
-    assert contract["core_commit"] == "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
+    assert contract["core_commit"] == "0b49938eb0be04214a8d07b206227d31b248394a"
     assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
     assert contract["source_pair_status"] == "provisional"
     assert contract["release_automation"] == (
@@ -231,7 +229,7 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
 
 
 def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
-    core_ref = "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
+    core_ref = "0b49938eb0be04214a8d07b206227d31b248394a"
     readme = (ROOT / "README.md").read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
     normal_ci = (
@@ -243,6 +241,7 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
         "### Pure Rust"
     )
     for crate in (
+        "adam_core",
         "adam_core_rs_coords",
         "adam_core_rs_spice",
         "adam_core_rs_kernel_data",

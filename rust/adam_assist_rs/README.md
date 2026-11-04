@@ -13,7 +13,7 @@ memory mapping through `libassist-sys`.
 
 The `0.6.0` source line requires the coherent adam-core `0.7` crate line and
 its private propagator-v2 contract. It is source-pair validated against exact
-Core commit `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19` (version `0.7.0`).
+Core commit `0b49938eb0be04214a8d07b206227d31b248394a` (version `0.7.0`).
 Core `0.7.0` is not yet on crates.io, so the active registry lock is
 intentionally absent and crate release remains blocked until publication.
 
@@ -42,10 +42,38 @@ For explicit data ownership or offline deployments, call
 SB441-n16 paths. Disable the default resolver with
 `default-features = false`.
 
+Core's canonical standalone workflows accept `OdPropagator`, not arbitrary
+predictor callbacks. Convert ASSIST to its owned, provenance-complete ABI-v2
+view and keep that owner alive for the workflow call:
+
+```no_run
+use adam_assist::AssistPropagator;
+use adam_core::od::{AssociatedObservations, OdBatchResult, OdConfig, OdPropagator};
+use std::path::Path;
+
+fn run(
+    planets: &Path,
+    asteroids: &Path,
+    input: &AssociatedObservations,
+    config: &OdConfig,
+) -> Result<OdBatchResult, Box<dyn std::error::Error>> {
+    let assist = AssistPropagator::from_paths(planets, asteroids)?;
+    let external = assist.external_propagator()?;
+    let provider = OdPropagator::external(external.external());
+    Ok(adam_core::run_od(input, config, &provider)?)
+}
+```
+
+The same provider works with Core-owned `run_iod`, `refine`, and
+`evaluate_orbits`. ASSIST supplies propagation, non-gravitational dynamics,
+STMs, and immutable configuration/data fingerprints only.
+
 ## Public Rust surface
 
 - `AssistPropagator` implements adam-core's typed `Propagator` contract.
-- `AssistData` owns the shared ASSIST ephemeris.
+- `AssistExternalPropagator` safely owns the validated ABI-v2 view used by
+  Core's canonical OD workflows.
+- `AssistData` owns the shared ASSIST ephemeris and its content fingerprint.
 - `assist_propagation` exposes lower-level orbit, nongravitational,
   covariance/STM, and pooling operations.
 - Collision and ephemeris helpers preserve the Python package's reviewed
@@ -53,8 +81,8 @@ SB441-n16 paths. Disable the default resolver with
 
 `libassist-sys` and `librebound-sys` provide the versioned FFI and RAII layers.
 The adam-core dependencies provide generic coordinate, propagation, SPICE,
-and kernel-data contracts. The manifest's current `0.6` range is a local
-validation placeholder, not a release compatibility declaration.
+and kernel-data contracts. The manifest declares the coherent Core `0.7` line; exact pre-publication
+validation is pinned to the commit above.
 
 ## Optional Python extension
 
@@ -64,9 +92,9 @@ Rust consumers.
 
 ## Validation
 
-```bash
-cargo +1.87.0 fmt --check
-cargo +1.87.0 clippy --all-targets --all-features -- -D warnings
-cargo +1.87.0 test --locked
-cargo +1.87.0 package --locked
-```
+Until Core `0.7.0` is public, run these gates from the repository's exact
+source-pair checkout rather than inventing a registry lock. The root README
+shows the complete four-crate path-patch command used by CI. That command runs
+Rust 1.87 formatting, strict Clippy, all targets, tests, doctests, and this
+compiled standalone example. Registry package verification remains blocked
+until authentic Core artifacts exist.

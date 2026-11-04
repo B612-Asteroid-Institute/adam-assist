@@ -16,7 +16,7 @@ concurrency:
 
 env:
   ADAM_CORE_VERSION: "0.7.0"
-  ADAM_CORE_SOURCE_REF: "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
+  ADAM_CORE_SOURCE_REF: "0b49938eb0be04214a8d07b206227d31b248394a"
 
 jobs:
   source-pair:
@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout provisional exact adam-core source pair
+      - name: Checkout final exact adam-core source pair
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -66,6 +66,7 @@ jobs:
           mkdir -p .cargo
           cat > .cargo/config.toml <<EOF
           [patch.crates-io]
+          adam_core = { path = "$core/adam_core" }
           adam_core_rs_coords = { path = "$core/adam_core_rs_coords" }
           adam_core_rs_spice = { path = "$core/adam_core_rs_spice" }
           adam_core_rs_kernel_data = { path = "$core/adam_core_rs_kernel_data" }
@@ -137,7 +138,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout provisional exact adam-core source pair
+      - name: Checkout final exact adam-core source pair
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -158,6 +159,7 @@ jobs:
             --core-tree .source-pair/adam-core
           core="$GITHUB_WORKSPACE/.source-pair/adam-core/rust"
           configs=(
+            --config "patch.crates-io.adam_core.path='$core/adam_core'"
             --config "patch.crates-io.adam_core_rs_coords.path='$core/adam_core_rs_coords'"
             --config "patch.crates-io.adam_core_rs_spice.path='$core/adam_core_rs_spice'"
             --config "patch.crates-io.adam_core_rs_kernel_data.path='$core/adam_core_rs_kernel_data'"

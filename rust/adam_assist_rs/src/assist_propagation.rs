@@ -23,11 +23,11 @@
 use crate::{AssistError as Error, AssistResult as Result};
 use libassist_sys::{ffi, AssistSim, Ephemeris};
 use librebound_sys::{IntegratorConfig, Simulation};
-#[cfg(feature = "kernel-data")]
 use sha2::{Digest, Sha256};
-#[cfg(feature = "kernel-data")]
+use std::collections::HashMap;
 use std::io::{BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
 
@@ -40,24 +40,51 @@ const SB441_N16_SIZE_BYTES: u64 = 645_727_232;
 #[cfg(feature = "kernel-data")]
 const SB441_N16_SHA256: &str = "919d612ce3c72a78fc7158f9120156542d0f21e6b8b052e4c1339c759747fd90";
 
-#[cfg(feature = "kernel-data")]
-fn verify_kernel_identity(
-    path: &Path,
-    label: &str,
-    expected_size: u64,
-    expected_sha256: &str,
-) -> Result<()> {
-    let file = std::fs::File::open(path)
-        .map_err(|error| Error::Other(format!("failed to open {label} kernel: {error}")))?;
-    let size = file
-        .metadata()
-        .map_err(|error| Error::Other(format!("failed to inspect {label} kernel: {error}")))?
-        .len();
-    if size != expected_size {
-        return Err(Error::Other(format!(
-            "{label} kernel size mismatch for {}: expected {expected_size}, got {size}",
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct FileIdentity {
+    size: u64,
+    sha256: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct FileCacheKey {
+    path: PathBuf,
+    size: u64,
+    modified_nanos: Option<u128>,
+}
+
+static FILE_IDENTITIES: LazyLock<Mutex<HashMap<FileCacheKey, FileIdentity>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn file_identity(path: &Path, label: &str) -> Result<FileIdentity> {
+    let canonical = path.canonicalize().map_err(|error| {
+        Error::Other(format!(
+            "failed to resolve {label} kernel {}: {error}",
             path.display()
-        )));
+        ))
+    })?;
+    let file = std::fs::File::open(&canonical)
+        .map_err(|error| Error::Other(format!("failed to open {label} kernel: {error}")))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| Error::Other(format!("failed to inspect {label} kernel: {error}")))?;
+    let modified_nanos = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos());
+    let key = FileCacheKey {
+        path: canonical,
+        size: metadata.len(),
+        modified_nanos,
+    };
+    if let Some(identity) = FILE_IDENTITIES
+        .lock()
+        .map_err(|_| Error::Other("kernel identity cache is poisoned".to_string()))?
+        .get(&key)
+        .cloned()
+    {
+        return Ok(identity);
     }
 
     let mut reader = BufReader::new(file);
@@ -72,14 +99,48 @@ fn verify_kernel_identity(
         }
         hasher.update(&buffer[..count]);
     }
-    let actual_sha256 = format!("{:x}", hasher.finalize());
-    if actual_sha256 != expected_sha256 {
+    let identity = FileIdentity {
+        size: key.size,
+        sha256: format!("{:x}", hasher.finalize()),
+    };
+    FILE_IDENTITIES
+        .lock()
+        .map_err(|_| Error::Other("kernel identity cache is poisoned".to_string()))?
+        .insert(key, identity.clone());
+    Ok(identity)
+}
+
+fn kernel_pair_fingerprint(planets: &FileIdentity, asteroids: &FileIdentity) -> String {
+    let canonical = format!(
+        "adam-assist-kernel-data-v1\nplanets_size={}\nplanets_sha256={}\nasteroids_size={}\nasteroids_sha256={}",
+        planets.size, planets.sha256, asteroids.size, asteroids.sha256
+    );
+    format!("{:x}", Sha256::digest(canonical.as_bytes()))
+}
+
+#[cfg(feature = "kernel-data")]
+fn verify_kernel_identity(
+    path: &Path,
+    label: &str,
+    expected_size: u64,
+    expected_sha256: &str,
+) -> Result<FileIdentity> {
+    let identity = file_identity(path, label)?;
+    if identity.size != expected_size {
         return Err(Error::Other(format!(
-            "{label} kernel SHA-256 mismatch for {}: expected {expected_sha256}, got {actual_sha256}",
-            path.display()
+            "{label} kernel size mismatch for {}: expected {expected_size}, got {}",
+            path.display(),
+            identity.size
         )));
     }
-    Ok(())
+    if identity.sha256 != expected_sha256 {
+        return Err(Error::Other(format!(
+            "{label} kernel SHA-256 mismatch for {}: expected {expected_sha256}, got {}",
+            path.display(),
+            identity.sha256
+        )));
+    }
+    Ok(identity)
 }
 
 /// The data resource every propagation entry point needs: the JPL SPK
@@ -88,12 +149,31 @@ fn verify_kernel_identity(
 pub struct AssistData {
     /// JPL SPK ephemeris.
     pub ephem: Ephemeris,
+    data_fingerprint: Option<String>,
 }
 
 impl AssistData {
     /// Wrap an already loaded ASSIST ephemeris.
+    ///
+    /// The original kernel bytes are unavailable on this route, so this value
+    /// cannot be exported as a provenance-complete external OD provider. Use
+    /// [`Self::from_paths`] when a capsule data fingerprint is required.
     pub fn new(ephem: Ephemeris) -> Self {
-        Self { ephem }
+        Self {
+            ephem,
+            data_fingerprint: None,
+        }
+    }
+
+    fn from_ephemeris_and_identities(
+        ephem: Ephemeris,
+        planets: &FileIdentity,
+        asteroids: &FileIdentity,
+    ) -> Self {
+        Self {
+            ephem,
+            data_fingerprint: Some(kernel_pair_fingerprint(planets, asteroids)),
+        }
     }
 
     /// Load the planetary and small-body ASSIST ephemeris kernels explicitly.
@@ -101,10 +181,19 @@ impl AssistData {
         planets_path: impl AsRef<Path>,
         asteroids_path: impl AsRef<Path>,
     ) -> Result<Self> {
-        Ok(Self::new(Ephemeris::from_paths(
-            planets_path.as_ref(),
-            asteroids_path.as_ref(),
-        )?))
+        let planets_path = planets_path.as_ref();
+        let asteroids_path = asteroids_path.as_ref();
+        let planets = file_identity(planets_path, "planetary")?;
+        let asteroids = file_identity(asteroids_path, "small-body")?;
+        let ephem = Ephemeris::from_paths(planets_path, asteroids_path)?;
+        Ok(Self::from_ephemeris_and_identities(
+            ephem, &planets, &asteroids,
+        ))
+    }
+
+    /// Return the immutable content identity for both loaded kernel slots.
+    pub fn data_fingerprint(&self) -> Option<&str> {
+        self.data_fingerprint.as_deref()
     }
 
     /// Resolve DE440 plus SB441-n16 using adam-core's pure-Rust override ->
@@ -116,14 +205,20 @@ impl AssistData {
         let (planets, asteroids) = resolver
             .assist_ephemeris_paths()
             .map_err(|error| Error::Other(format!("failed to resolve ASSIST kernels: {error}")))?;
-        verify_kernel_identity(&planets, "DE440", DE440_SIZE_BYTES, DE440_SHA256)?;
-        verify_kernel_identity(
+        let planets_identity =
+            verify_kernel_identity(&planets, "DE440", DE440_SIZE_BYTES, DE440_SHA256)?;
+        let asteroids_identity = verify_kernel_identity(
             &asteroids,
             "SB441-n16",
             SB441_N16_SIZE_BYTES,
             SB441_N16_SHA256,
         )?;
-        Self::from_paths(planets, asteroids)
+        let ephem = Ephemeris::from_paths(&planets, &asteroids)?;
+        Ok(Self::from_ephemeris_and_identities(
+            ephem,
+            &planets_identity,
+            &asteroids_identity,
+        ))
     }
 }
 
@@ -1049,6 +1144,26 @@ fn mjd_to_assist_time(mjd_tdb: f64, jd_ref: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kernel_pair_fingerprint_is_slot_aware_and_content_pinned() {
+        let planets = FileIdentity {
+            size: 119_799_808,
+            sha256: "a4ce9bf9b3282becc9f4b2ac3cebe03a2ae7599981aabd7265fd8482fff7c4b5".to_string(),
+        };
+        let asteroids = FileIdentity {
+            size: 645_727_232,
+            sha256: "919d612ce3c72a78fc7158f9120156542d0f21e6b8b052e4c1339c759747fd90".to_string(),
+        };
+        assert_eq!(
+            kernel_pair_fingerprint(&planets, &asteroids),
+            "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69"
+        );
+        assert_ne!(
+            kernel_pair_fingerprint(&planets, &asteroids),
+            kernel_pair_fingerprint(&asteroids, &planets)
+        );
+    }
 
     #[cfg(feature = "kernel-data")]
     #[test]

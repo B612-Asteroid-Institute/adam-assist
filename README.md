@@ -35,8 +35,8 @@ unsupported.
 ### adam-core compatibility and exact-source validation
 
 The `0.6.0` source line requires `adam-core>=0.7.0,<0.8.0` and the coherent
-`0.7` Rust crate line. It is validated against provisional exact adam-core
-source-pair commit `f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19`, which has
+`0.7` Rust crate line. It is validated against the exact final adam-core
+candidate commit `0b49938eb0be04214a8d07b206227d31b248394a`, which has
 package/crate version
 `0.7.0` and defines the private `adam_core.propagator.v2` ABI. Released
 `adam-core 0.6.1` is outside the declared range and has no v2 ABI.
@@ -44,8 +44,7 @@ package/crate version
 Core `0.7.0` is not yet available from PyPI/crates.io. Active PDM and Cargo
 registry locks are therefore intentionally absent instead of retaining the
 incompatible `0.6.1` graph or inventing checksums. The machine-checked
-`migration/source_pair_contract.json` pins the provisional exact pre-release
-pairing.
+`migration/source_pair_contract.json` pins this exact pre-release pairing.
 Normal CI builds both projects from those sources, installs the built ASSIST
 wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
 NAIF data version before tests and benchmarks. It is the repository's only
@@ -65,14 +64,15 @@ lock; remove it afterward and verify that no tracked or untracked changes
 remain:
 
 ```console
-git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-f0f1aec8
-git -C ../adam-core-f0f1aec8 checkout --detach f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19
-CORE="$(cd ../adam-core-f0f1aec8 && pwd)"
-test "$(git -C "$CORE" rev-parse HEAD)" = f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19
+git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-0b49938e
+git -C ../adam-core-0b49938e checkout --detach 0b49938eb0be04214a8d07b206227d31b248394a
+CORE="$(cd ../adam-core-0b49938e && pwd)"
+test "$(git -C "$CORE" rev-parse HEAD)" = 0b49938eb0be04214a8d07b206227d31b248394a
 python migration/scripts/verify_source_pair_contract.py --core-tree "$CORE"
 
 cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
   --all-targets --features python,extension-module \
+  --config "patch.crates-io.adam_core.path='$CORE/rust/adam_core'" \
   --config "patch.crates-io.adam_core_rs_coords.path='$CORE/rust/adam_core_rs_coords'" \
   --config "patch.crates-io.adam_core_rs_spice.path='$CORE/rust/adam_core_rs_spice'" \
   --config "patch.crates-io.adam_core_rs_kernel_data.path='$CORE/rust/adam_core_rs_kernel_data'"
@@ -82,8 +82,9 @@ test -z "$(git status --porcelain)"
 
 ### Pure Rust
 
-Rust-only consumers use `AssistPropagator` directly with adam-core's generic
-algorithms.
+Rust-only consumers use `AssistPropagator` directly for propagation. For
+Core-owned canonical OD workflows, `AssistPropagator::external_propagator()`
+returns the owned ABI-v2 view accepted by `adam_core::od::OdPropagator::external`.
 
 ```rust,no_run
 use adam_assist::{AssistPropagator, AssistResult};

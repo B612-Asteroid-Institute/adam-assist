@@ -18,7 +18,6 @@ use adam_core_rs_coords::{
     TimeScale, VariantId,
 };
 use adam_core_rs_spice::AdamCoreSpiceBackend;
-use libassist_sys::Ephemeris;
 use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
 use numpy::{IntoPyArray, PyArray2, PyReadonlyArray2};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -122,7 +121,7 @@ impl NativeAssistPropagator {
             ));
         }
         let adaptive_mode = parse_adaptive_mode(adaptive_mode)?;
-        let ephem = Ephemeris::from_paths(Path::new(planets_path), Path::new(asteroids_path))
+        let data = AssistData::from_paths(Path::new(planets_path), Path::new(asteroids_path))
             .map_err(|err| {
                 PyRuntimeError::new_err(format!("failed to load ASSIST kernels: {err}"))
             })?;
@@ -137,10 +136,7 @@ impl NativeAssistPropagator {
             PyRuntimeError::new_err(format!("failed to load SPICE planets kernel: {err}"))
         })?;
         Ok(Self {
-            inner: RustAssistPropagator::with_integrator(
-                Arc::new(AssistData::new(ephem)),
-                integrator,
-            ),
+            inner: RustAssistPropagator::with_integrator(Arc::new(data), integrator),
             spice,
             benchmark: Mutex::new(None),
         })
@@ -148,18 +144,28 @@ impl NativeAssistPropagator {
 
     /// Private adam-core external-propagator capsule
     /// (``adam_core.propagator.v2``). It exposes batched ASSIST propagation
-    /// and optional STMs only; adam-core owns every consuming algorithm. The
-    /// capsule owns a clone of the propagator (shared ephemeris data).
+    /// and optional STMs only; adam-core owns every consuming algorithm. Its
+    /// append-only suffix carries immutable IAS15 configuration and kernel
+    /// content fingerprints. The capsule owns a clone of the propagator
+    /// (shared ephemeris data).
     fn propagator_capsule<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyCapsule>> {
         let name =
             std::ffi::CString::new(adam_core_rs_coords::propagation::EXTERNAL_PROPAGATOR_CAPSULE)
                 .expect("no NUL");
+        let configuration_fingerprint = self.inner.configuration_fingerprint();
+        let data_fingerprint = self.inner.data_fingerprint().ok_or_else(|| {
+            PyRuntimeError::new_err(
+                "ASSIST provider has no kernel content fingerprint; construct it from paths",
+            )
+        })?;
         PyCapsule::new_bound(
             py,
-            adam_core_rs_coords::propagation::OwnedExternalPropagator::new(
+            adam_core_rs_coords::propagation::OwnedExternalPropagator::new_with_fingerprints(
                 self.inner.clone(),
                 "adam_assist",
                 env!("CARGO_PKG_VERSION"),
+                &configuration_fingerprint,
+                data_fingerprint,
             ),
             Some(name),
         )

@@ -16,6 +16,7 @@ from typing import Any, cast
 ROOT = Path(__file__).resolve().parents[2]
 
 CORE_CRATES = (
+    "adam_core",
     "adam_core_rs_coords",
     "adam_core_rs_spice",
     "adam_core_rs_kernel_data",
@@ -71,6 +72,7 @@ def verify_cargo_core_dependencies(cargo: dict[str, Any]) -> None:
         found.add((table_path, canonical))
 
     required: set[tuple[tuple[str, ...], str]] = {
+        (("dev-dependencies",), "adam_core"),
         (("dependencies",), "adam_core_rs_coords"),
         (("dependencies",), "adam_core_rs_spice"),
         (("dependencies",), "adam_core_rs_kernel_data"),
@@ -157,13 +159,13 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "schema_version": 1,
         "assist_version": "0.6.0",
         "core_version": "0.7.0",
-        "core_commit": "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19",
+        "core_commit": "0b49938eb0be04214a8d07b206227d31b248394a",
         "capsule": "adam_core.propagator.v2",
         "registry_state": "awaiting-core-0.7.0-publication",
         "lock_state": "absent-until-core-0.7.0-is-public",
         "source_pair_status": "provisional",
         "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
-        "workflow_sha256": "0c37bce5c4c4a1067ba4098a6311ca3fc5f347096c2cc3425727ee9930d9d95c",
+        "workflow_sha256": "867e6a509e27a136007df1fcad72c558ed6b033e620585d9779411e656955fc8",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")

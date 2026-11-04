@@ -20,7 +20,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 NORMAL = "pip-build-lint-test-coverage.yml"
-CORE_REF = "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"
+CORE_REF = "0b49938eb0be04214a8d07b206227d31b248394a"
 CORE_REPOSITORY = "B612-Asteroid-Institute/adam_core"
 ALLOWED_ACTIONS = {
     "actions/checkout@v4",
@@ -49,7 +49,7 @@ INERT_RELEASE_HELPERS = (
     "verify_registry_locks",
     "verify_release",
 )
-WORKFLOW_SHA256 = "0c37bce5c4c4a1067ba4098a6311ca3fc5f347096c2cc3425727ee9930d9d95c"
+WORKFLOW_SHA256 = "867e6a509e27a136007df1fcad72c558ed6b033e620585d9779411e656955fc8"
 REQUIRED_RUN_SHA256 = {
     (
         "source-pair",
@@ -62,7 +62,7 @@ REQUIRED_RUN_SHA256 = {
     (
         "source-pair",
         "Build Core and ASSIST wheels from the exact pair",
-    ): "7eed6d4891ec0d61287c8d6902d93ee0da75395185a7572cd322cf7affc1224d",
+    ): "b0ecdd18b2b8f304dde2e2dd577cea58e57a45113d51c93d35671bcb966c68eb",
     (
         "source-pair",
         "Verify transitional workflow policy",
@@ -90,7 +90,7 @@ REQUIRED_RUN_SHA256 = {
     (
         "rust-quality",
         "Verify source pair and run Rust gates",
-    ): "13e6b3ffc68306b6a97bf38ceb5675e8e8fc15fb5d4199ed5da92be53e3fd9cb",
+    ): "f21ce1c86181cc1291c5a01a31f91b1dfd4e75030500d297c9ca2a3bfa5d6d67",
     (
         "benchmark",
         "Install the already-tested source-pair wheels",
@@ -185,13 +185,13 @@ def _require_condition(step: Mapping[str, Any], expected: str | None) -> None:
 
 
 def _verify_checkout(job: Mapping[str, Any], location: str) -> None:
-    step = _step_by_name(job, "Checkout provisional exact adam-core source pair")
+    step = _step_by_name(job, "Checkout final exact adam-core source pair")
     if step.get("uses") != "actions/checkout@v4" or step.get("with") != {
         "repository": CORE_REPOSITORY,
         "ref": "${{ env.ADAM_CORE_SOURCE_REF }}",
         "path": ".source-pair/adam-core",
     }:
-        _fail(location, "Core checkout must use the provisional exact source pair")
+        _fail(location, "Core checkout must use the final exact source pair")
 
 
 def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:

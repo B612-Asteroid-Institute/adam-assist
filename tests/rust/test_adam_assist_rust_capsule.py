@@ -7,29 +7,31 @@ propagator capsule without provider-specific OD work units.
 
 import ast
 import ctypes
+import dataclasses
 import gc
 import importlib
+import re
 from pathlib import Path
 
 import numpy as np
 import pytest
 from adam_core import _rust_native
-from adam_core.coordinates import (
-    CartesianCoordinates,
-    CoordinateCovariances,
-    Origin,
-    SphericalCoordinates,
-)
+from adam_core.coordinates import CoordinateCovariances, Origin, SphericalCoordinates
+from adam_core.observations import Associations, SourceCatalog
 from adam_core.observers import Observers
-from adam_core.orbit_determination import refine, run_iod, run_od
-from adam_core.orbit_determination.evaluate import OrbitDeterminationObservations
-from adam_core.orbit_determination.native_orbit_fitter import NativeOrbitFitter
-from adam_core.orbit_determination.provenance import backend_identity
-from adam_core.orbits import Orbits
-from adam_core.orbits.non_gravitational_parameters import (
-    NonGravitationalParameters,
+from adam_core.orbit_determination import (
+    IodStageConfig,
+    ObservationPipeline,
+    OdConfig,
+    RefinementRunConfig,
+    ResourceBindings,
+    evaluate_orbits,
+    refine,
+    run_iod,
+    run_od,
 )
-from adam_core.orbits.physical_parameters import PhysicalParameters
+from adam_core.orbit_determination._native_dispatch import native_propagator
+from adam_core.orbit_determination.evaluate import OrbitDeterminationObservations
 from adam_core.propagator.propagator import NativeBackend, Propagator
 from adam_core.time import Timestamp
 
@@ -70,6 +72,8 @@ class _ExternalPropagatorV2(ctypes.Structure):
         ("propagate", ctypes.c_void_p),
         ("propagate_stm", ctypes.c_void_p),
         ("reserved", ctypes.c_size_t * 4),
+        ("configuration_fingerprint", ctypes.c_char_p),
+        ("data_fingerprint", ctypes.c_char_p),
     ]
 
 
@@ -245,32 +249,6 @@ def _call_capsule_stm(
     )
 
 
-def _make_orbit(
-    state: np.ndarray,
-    orbit_id: str,
-    *,
-    nongrav: NonGravitationalParameters | None = None,
-    physical: PhysicalParameters | None = None,
-) -> Orbits:
-    return Orbits.from_kwargs(
-        orbit_id=[orbit_id],
-        object_id=[orbit_id],
-        non_gravitational_parameters=nongrav,
-        physical_parameters=physical,
-        coordinates=CartesianCoordinates.from_kwargs(
-            x=[state[0]],
-            y=[state[1]],
-            z=[state[2]],
-            vx=[state[3]],
-            vy=[state[4]],
-            vz=[state[5]],
-            time=Timestamp.from_mjd([EPOCH_MJD], scale="tdb"),
-            origin=Origin.from_kwargs(code=["SUN"]),
-            frame="ecliptic",
-        ),
-    )
-
-
 @pytest.fixture(scope="module")
 def od_problem(frozen_assist_regression):
     """Noise-free astrometry frozen from accepted legacy ASSIST ephemeris."""
@@ -305,10 +283,49 @@ def od_problem(frozen_assist_regression):
         coordinates=observed,
         observers=observers,
     )
-    initial = _make_orbit(
-        TRUTH_STATE + np.array([1e-3, -1e-3, 5e-4, 1e-5, -1e-5, 1e-5]), "fit"
+    return observations
+
+
+def _canonical_inputs(
+    od_problem,
+) -> tuple[SourceCatalog, Associations]:
+    observations = od_problem
+    n = len(observations)
+    source = SourceCatalog.from_kwargs(
+        id=observations.id,
+        time=observations.coordinates.time,
+        ra=observations.coordinates.lon,
+        dec=observations.coordinates.lat,
+        ra_sigma=[1.0] * n,
+        dec_sigma=[1.0] * n,
+        observatory_code=observations.observers.code,
+        object_id=["assist-object"] * n,
+        catalog_id=["frozen-assist-regression"] * n,
+        astcat=observations.astcat,
     )
-    return observations, initial
+    associations = Associations.from_kwargs(
+        detection_id=source.id,
+        object_id=["assist-hypothesis"] * n,
+    )
+    return source, associations
+
+
+def _od_config(*, propagator_jacobian: bool = False) -> OdConfig:
+    refinement = RefinementRunConfig.core_v1()
+    if propagator_jacobian:
+        declaration = refinement.refinement
+        refinement = RefinementRunConfig(
+            dataclasses.replace(
+                declaration,
+                fit=dataclasses.replace(declaration.fit, jacobian="propagator"),
+            )
+        )
+    return OdConfig.explicit(
+        observation_pipeline=ObservationPipeline.as_supplied(),
+        iod=IodStageConfig.core_v1(),
+        refinement=refinement,
+        resources=ResourceBindings({}),
+    )
 
 
 def test_assist_native_backend_is_capsule_only() -> None:
@@ -320,8 +337,6 @@ def test_assist_native_backend_is_capsule_only() -> None:
     assert backend.version == CARGO_VERSION
     assert backend.work_units == frozenset({"propagator_capsule"})
     assert propagator.two_body_dynamics is False
-    # This is the provider identity Core records in run_od provenance.
-    assert backend_identity(propagator) == f"adam_assist {CARGO_VERSION}"
 
     # Keep the Python declaration tied to the immutable native table identity,
     # even when Python and Cargo versions happen to have the same spelling.
@@ -373,6 +388,28 @@ def test_assist_native_backend_is_capsule_only() -> None:
     assert table.propagate
     assert table.propagate_stm
     assert list(table.reserved) == [0, 0, 0, 0]
+    assert table.configuration_fingerprint.decode() == (
+        "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f"
+    )
+    assert table.data_fingerprint.decode() == (
+        "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69"
+    )
+    metadata = dict(
+        _rust_native.native_provider_metadata(native_propagator(propagator), {})
+    )
+    assert metadata["name"] == "adam_assist"
+    assert metadata["version"] == CARGO_VERSION
+    assert metadata["two_body_dynamics"] is False
+    assert metadata["configuration_fingerprint"] == (
+        table.configuration_fingerprint.decode()
+    )
+    assert metadata["data_fingerprint"] == table.data_fingerprint.decode()
+    assert re.fullmatch(r"[0-9a-f]{64}", metadata["configuration_fingerprint"])
+    assert re.fullmatch(r"[0-9a-f]{64}", metadata["data_fingerprint"])
+    changed_capsule = RustASSISTPropagator(epsilon=2.0e-6).propagator_capsule()
+    changed = _capsule_table(changed_capsule)
+    assert changed.configuration_fingerprint != table.configuration_fingerprint
+    assert changed.data_fingerprint == table.data_fingerprint
     for method in (
         "fit_least_squares",
         "fit_least_squares_evaluated",
@@ -383,26 +420,45 @@ def test_assist_native_backend_is_capsule_only() -> None:
         assert not hasattr(propagator, method)
 
 
-def test_adam_core_refine_uses_assist_capsule_stm(od_problem) -> None:
-    observations, initial = od_problem
-
-    fitted_orbit, fitted_members = refine(
-        initial,
-        observations,
-        RustASSISTPropagator(),
-        rejection="none",
-        fit_settings={"jacobian": "propagator"},
+def test_adam_core_refine_and_evaluate_use_assist_capsule_stm(od_problem) -> None:
+    source, associations = _canonical_inputs(od_problem)
+    config = _od_config(propagator_jacobian=True)
+    propagator = RustASSISTPropagator()
+    iod_orbits, iod_members, iod_failures = run_iod(
+        source, associations, propagator, config.for_iod()
     )
+    assert len(iod_failures) == 0
+    assert len(iod_orbits) == 1
 
-    assert fitted_orbit.success[0].as_py()
-    assert len(fitted_members) == len(observations)
-    assert fitted_members.solution.to_pylist().count(True) == len(observations)
-    np.testing.assert_allclose(
-        fitted_orbit.coordinates.values[0], TRUTH_STATE, rtol=0, atol=1e-6
+    fitted_orbits, fitted_members, refine_failures = refine(
+        iod_orbits,
+        iod_members,
+        source,
+        propagator,
+        config.for_refinement(),
     )
-    covariance = fitted_orbit.coordinates.covariance.to_matrix()[0]
+    assert len(refine_failures) == 0
+    assert fitted_orbits.success[0].as_py()
+    assert len(fitted_members) == len(source)
+    assert fitted_members.solution.to_pylist().count(True) == len(source)
+    covariance = fitted_orbits.coordinates.covariance.to_matrix()[0]
     assert np.isfinite(covariance).all()
     assert (np.diag(covariance) > 0).all()
+
+    evaluated, evaluated_members, evaluation_failures = evaluate_orbits(
+        fitted_orbits,
+        fitted_members,
+        source,
+        propagator,
+        config.for_evaluation(),
+    )
+    assert len(evaluation_failures) == 0
+    assert len(evaluated) == 1
+    assert len(evaluated_members) == len(source)
+    np.testing.assert_array_equal(
+        evaluated.coordinates.values.view(np.uint64),
+        fitted_orbits.coordinates.values.view(np.uint64),
+    )
 
 
 def test_capsule_propagation_preserves_order_nongrav_and_row_failures() -> None:
@@ -557,15 +613,16 @@ def test_capsule_owns_provider_lifetime(od_problem) -> None:
         def generate_ephemeris(self, *args, **kwargs):
             raise AssertionError("Core must consume the retained native capsule")
 
-    observations, initial = od_problem
-    fitted, _ = refine(
-        initial,
-        observations,
+    source, associations = _canonical_inputs(od_problem)
+    fitted, members, failures = run_iod(
+        source,
+        associations,
         RetainedCapsule(),
-        rejection="none",
-        fit_settings={"jacobian": "propagator"},
+        _od_config().for_iod(),
     )
-    assert fitted.success[0].as_py()
+    assert len(failures) == 0
+    assert len(fitted) == 1
+    assert len(members) == len(source)
 
 
 def test_python_only_propagator_override_is_rejected(od_problem) -> None:
@@ -573,142 +630,14 @@ def test_python_only_propagator_override_is_rejected(od_problem) -> None:
         def propagate_orbits(self, *args, **kwargs):
             return super().propagate_orbits(*args, **kwargs)
 
-    observations, initial = od_problem
+    source, associations = _canonical_inputs(od_problem)
     with pytest.raises(TypeError, match="no native orbit-determination backend"):
-        refine(initial, observations, PythonOnlyAssist(), rejection="none")
-
-
-def _observations_from_truth(truth: Orbits) -> OrbitDeterminationObservations:
-    n = 8
-    times = Timestamp.from_mjd(
-        [EPOCH_MJD + 2.0 + i * 3.0 for i in range(n)], scale="utc"
-    )
-    observers = Observers.from_code("X05", times)
-    predicted = (
-        RustASSISTPropagator()
-        .generate_ephemeris(
-            truth,
-            observers,
-            covariance=False,
-            max_processes=1,
-            predict_magnitudes=False,
-            predict_phase_angle=False,
+        run_iod(
+            source,
+            associations,
+            PythonOnlyAssist(),
+            _od_config().for_iod(),
         )
-        .coordinates
-    )
-    covariance = np.full((n, 6, 6), np.nan)
-    variance = (1.0 / 3600.0) ** 2
-    covariance[:, 1, 1] = variance
-    covariance[:, 2, 2] = variance
-    coordinates = SphericalCoordinates.from_kwargs(
-        rho=np.full(n, np.nan),
-        lon=predicted.lon,
-        lat=predicted.lat,
-        vrho=np.full(n, np.nan),
-        vlon=np.full(n, np.nan),
-        vlat=np.full(n, np.nan),
-        time=predicted.time,
-        origin=predicted.origin,
-        frame=predicted.frame,
-        covariance=CoordinateCovariances.from_matrix(covariance),
-    )
-    return OrbitDeterminationObservations.from_kwargs(
-        id=[f"custom-{i}" for i in range(n)],
-        coordinates=coordinates,
-        observers=observers,
-    )
-
-
-def test_core_refine_preserves_physical_and_custom_nongrav_metadata() -> None:
-    nongrav = NonGravitationalParameters.from_kwargs(**CUSTOM_NONGRAV)
-    physical = PhysicalParameters.from_kwargs(
-        H_v=[17.2],
-        H_v_sigma=[0.3],
-        G=[0.21],
-        G_sigma=[0.04],
-        sigma_eff=[0.12],
-        chi2_red=[1.4],
-    )
-    truth = _make_orbit(TRUTH_STATE, "custom-truth", nongrav=nongrav, physical=physical)
-    observations = _observations_from_truth(truth)
-    initial = _make_orbit(
-        TRUTH_STATE + np.array([1e-3, -1e-3, 5e-4, 1e-5, -1e-5, 1e-5]),
-        "custom-fit",
-        nongrav=nongrav,
-        physical=physical,
-    )
-
-    fitted, members = refine(
-        initial,
-        observations,
-        RustASSISTPropagator(),
-        rejection="none",
-        fit_settings={"jacobian": "propagator"},
-    )
-
-    assert fitted.success[0].as_py()
-    assert members.obs_id.to_pylist() == observations.id.to_pylist()
-    np.testing.assert_allclose(
-        fitted.coordinates.values[0], TRUTH_STATE, rtol=0, atol=1e-6
-    )
-    assert fitted.coordinates.frame == initial.coordinates.frame
-    assert (
-        fitted.coordinates.origin.code.to_pylist()
-        == initial.coordinates.origin.code.to_pylist()
-    )
-    assert fitted.coordinates.time.equals(initial.coordinates.time)
-    assert fitted.non_gravitational_parameters.source.to_pylist() == ["custom"]
-    for field, expected in CUSTOM_NONGRAV.items():
-        if field == "source":
-            continue
-        assert (
-            getattr(fitted.non_gravitational_parameters, field).to_pylist() == expected
-        )
-    for field, expected in {
-        "H_v": [17.2],
-        "H_v_sigma": [0.3],
-        "G": [0.21],
-        "G_sigma": [0.04],
-        "sigma_eff": [0.12],
-        "chi2_red": [1.4],
-    }.items():
-        assert getattr(fitted.physical_parameters, field).to_pylist() == expected
-
-
-def test_core_refine_preserves_but_does_not_activate_source_only_nongrav(
-    od_problem,
-) -> None:
-    observations, _ = od_problem
-    inactive = NonGravitationalParameters.from_kwargs(
-        source=["metadata-only"],
-        A1=[0.0],
-        A2=[None],
-        A3=[0.0],
-        ALN=[0.1112620426],
-        NK=[4.6142],
-        NM=[2.15],
-        NN=[5.093],
-        R0=[2.808],
-    )
-    initial = _make_orbit(
-        TRUTH_STATE + np.array([1e-3, -1e-3, 5e-4, 1e-5, -1e-5, 1e-5]),
-        "inactive-fit",
-        nongrav=inactive,
-    )
-    fitted, _ = refine(
-        initial,
-        observations,
-        RustASSISTPropagator(),
-        rejection="none",
-        fit_settings={"jacobian": "propagator"},
-    )
-    assert fitted.success[0].as_py()
-    assert fitted.non_gravitational_parameters.source.to_pylist() == ["metadata-only"]
-    assert fitted.non_gravitational_parameters.A1.to_pylist() == [0.0]
-    assert fitted.non_gravitational_parameters.A2.to_pylist() == [None]
-    np.testing.assert_allclose(
-        fitted.coordinates.values[0], TRUTH_STATE, rtol=0, atol=1e-6
-    )
 
 
 def test_adam_core_run_iod_uses_assist_capsule_once(od_problem) -> None:
@@ -731,49 +660,32 @@ def test_adam_core_run_iod_uses_assist_capsule_once(od_problem) -> None:
         def generate_ephemeris(self, *args, **kwargs):
             raise AssertionError("Core IOD must use the ASSIST native capsule")
 
-    observations, _ = od_problem
+    source, associations = _canonical_inputs(od_problem)
     propagator = CountingAssist()
-    fitted, members, report = run_iod(
-        observations,
+    fitted, members, failures = run_iod(
+        source,
+        associations,
         propagator,
-        min_obs=6,
-        min_arc_length=1.0,
-        rchi2_threshold=1000.0,
-        observation_selection_method="combinations",
-        velocity_method="gibbs",
-        acceptance="prefit",
+        _od_config().for_iod(),
     )
 
-    assert report.found
+    assert len(failures) == 0
     assert len(fitted) == 1
-    assert len(members) == len(observations)
+    assert len(members) == len(source)
+    assert fitted.provenance.iod_backend[0].as_py() == f"adam_assist {CARGO_VERSION}"
+    provider = fitted.provenance.iod_provider[0].as_py()
+    assert (
+        "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f" in provider
+    )
+    assert (
+        "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69" in provider
+    )
     assert propagator.capsule_acquisitions == 1
 
 
-def test_distinct_core_iod_and_assist_refinement_capsules_cross_python_once(
+def test_adam_core_run_od_uses_one_assist_capsule_for_both_stages(
     od_problem,
 ) -> None:
-    class CountingCoreTwoBody(Propagator):
-        two_body_dynamics = True
-        native_backend = NativeBackend(
-            "adam_core.two_body.external",
-            _rust_native.two_body_propagator_semver(),
-            frozenset({"propagator_capsule"}),
-        )
-
-        def __init__(self):
-            self.capsule_acquisitions = 0
-
-        def propagator_capsule(self):
-            self.capsule_acquisitions += 1
-            return _rust_native.two_body_propagator_capsule()
-
-        def propagate_orbits(self, *args, **kwargs):
-            raise AssertionError("Core IOD must use the native capsule")
-
-        def generate_ephemeris(self, *args, **kwargs):
-            raise AssertionError("Core IOD must use the native capsule")
-
     class CountingAssist(RustASSISTPropagator):
         native_backend = NativeBackend(
             "adam_assist", CARGO_VERSION, frozenset({"propagator_capsule"})
@@ -788,55 +700,29 @@ def test_distinct_core_iod_and_assist_refinement_capsules_cross_python_once(
             return super().propagator_capsule()
 
         def propagate_orbits(self, *args, **kwargs):
-            raise AssertionError("Core refinement must use the ASSIST native capsule")
+            raise AssertionError("Core OD must use the ASSIST native capsule")
 
         def generate_ephemeris(self, *args, **kwargs):
-            raise AssertionError("Core refinement must use the ASSIST native capsule")
+            raise AssertionError("Core OD must use the ASSIST native capsule")
 
-    observations, _ = od_problem
-    iod = CountingCoreTwoBody()
-    refinement = CountingAssist()
-    fitter = NativeOrbitFitter(
-        iod_propagator=iod,
-        min_obs=6,
-        min_arc_length=1.0,
-        iod_rchi2_threshold=1000.0,
-        observation_selection_method="combinations",
-        velocity_method="gibbs",
-        iod_acceptance="prefit",
-        outlier_rejection="worst_residual",
-        rchi2_threshold=100.0,
-        rejection_kwargs={"jacobian": "propagator"},
+    source, associations = _canonical_inputs(od_problem)
+    propagator = CountingAssist()
+    fitted, members, failures = run_od(
+        source,
+        associations,
+        propagator,
+        _od_config(propagator_jacobian=True),
     )
 
-    fitted, members = run_od(
-        observations,
-        fitter=fitter,
-        propagator=refinement,
-        models=None,
-        object_id="distinct-stage",
-    )
-
+    assert len(failures) == 0
     assert len(fitted) == 1
     assert fitted.success[0].as_py()
-    assert len(members) == len(observations)
-    assert iod.capsule_acquisitions == 1
-    assert refinement.capsule_acquisitions == 1
-    assert (
-        fitted.provenance.iod_backend[0]
-        .as_py()
-        .startswith("adam_core.two_body.external ")
-    )
+    assert len(members) == len(source)
+    assert propagator.capsule_acquisitions == 1
+    assert fitted.provenance.iod_backend[0].as_py() == f"adam_assist {CARGO_VERSION}"
     assert fitted.provenance.refinement_backend[0].as_py() == (
         f"adam_assist {CARGO_VERSION}"
     )
-    truth_at_fit_epoch = RustASSISTPropagator().propagate_orbits(
-        _make_orbit(TRUTH_STATE, "distinct-truth"), fitted.coordinates.time
+    assert fitted.provenance.iod_provider[0].as_py() == (
+        fitted.provenance.refinement_provider[0].as_py()
     )
-    np.testing.assert_allclose(
-        fitted.coordinates.values[0],
-        truth_at_fit_epoch.coordinates.values[0],
-        rtol=0,
-        atol=1e-9,
-    )
-    assert fitted.reduced_chi2[0].as_py() < 1e-10

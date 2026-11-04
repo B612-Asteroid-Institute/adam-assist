@@ -9,10 +9,10 @@
 //! `libassist-sys` and `librebound-sys` binding layers.
 
 use adam_core_rs_coords::propagation::{
-    CovariancePropagation, EpochPolicy, OrbitRow, PropagationConvergence,
-    PropagationConvergenceStatus, PropagationDiagnostics, PropagationError, PropagationFailureCode,
-    PropagationRequest, PropagationResult, PropagationResultValue, Propagator, PropagatorShard,
-    RowOutput,
+    CovariancePropagation, EpochPolicy, ExternalPropagator, OrbitRow, OwnedExternalPropagator,
+    PropagationConvergence, PropagationConvergenceStatus, PropagationDiagnostics, PropagationError,
+    PropagationFailureCode, PropagationRequest, PropagationResult, PropagationResultValue,
+    Propagator, PropagatorShard, RowOutput,
 };
 use adam_core_rs_coords::types::Frame;
 use adam_core_rs_coords::{
@@ -27,6 +27,7 @@ use libassist_sys::{ffi, AssistSim};
 use librebound_sys::Simulation;
 pub use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
 use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
@@ -51,6 +52,24 @@ const BACKEND_NAME: &str = "assist_rs";
 pub struct AssistPropagator {
     data: Arc<AssistData>,
     integrator: IntegratorConfig,
+}
+
+/// Stable owner and validated view of ASSIST's propagation-only ABI-v2 table.
+///
+/// Keep this value alive while borrowing [`Self::external`]. Standalone Rust
+/// callers can pass that view to `adam_core::od::OdPropagator::external` and
+/// invoke Core's canonical `run_iod`, `run_od`, `refine`, or
+/// `evaluate_orbits` workflow without Python or PyO3.
+pub struct AssistExternalPropagator {
+    external: ExternalPropagator,
+    _owner: Box<OwnedExternalPropagator<AssistPropagator>>,
+}
+
+impl AssistExternalPropagator {
+    /// Borrow the validated external provider for adam-core integration.
+    pub fn external(&self) -> &ExternalPropagator {
+        &self.external
+    }
 }
 
 impl AssistPropagator {
@@ -95,6 +114,43 @@ impl AssistPropagator {
     /// Return this propagator's IAS15 configuration.
     pub fn integrator(&self) -> IntegratorConfig {
         self.integrator
+    }
+
+    /// Return the canonical identity of every dynamics-affecting IAS15 option.
+    pub fn configuration_fingerprint(&self) -> String {
+        integrator_configuration_fingerprint(self.integrator)
+    }
+
+    /// Return the canonical content identity of the planetary and small-body kernels.
+    pub fn data_fingerprint(&self) -> Option<&str> {
+        self.data.data_fingerprint()
+    }
+
+    /// Build a provenance-complete ABI-v2 provider for standalone adam-core OD.
+    pub fn external_propagator(&self) -> AssistResult<AssistExternalPropagator> {
+        let configuration_fingerprint = self.configuration_fingerprint();
+        let data_fingerprint = self.data_fingerprint().ok_or_else(|| {
+            AssistError::Other(
+                "ASSIST provider has no kernel content fingerprint; construct it from paths"
+                    .to_string(),
+            )
+        })?;
+        let owner = Box::new(OwnedExternalPropagator::new_with_fingerprints(
+            self.clone(),
+            "adam_assist",
+            env!("CARGO_PKG_VERSION"),
+            &configuration_fingerprint,
+            data_fingerprint,
+        ));
+        // SAFETY: `owner` is boxed before decoding, so its table and context
+        // remain at stable addresses until the returned wrapper is dropped.
+        // The wrapper keeps `owner` alive longer than `external`.
+        let external = unsafe { ExternalPropagator::from_raw(owner.table()) }
+            .map_err(|error| AssistError::Other(error.to_string()))?;
+        Ok(AssistExternalPropagator {
+            external,
+            _owner: owner,
+        })
     }
 
     fn propagate_with_stm(
@@ -1090,6 +1146,31 @@ fn python_default_integrator() -> IntegratorConfig {
     }
 }
 
+fn integrator_configuration_fingerprint(config: IntegratorConfig) -> String {
+    fn float_option(value: Option<f64>) -> String {
+        value.map_or_else(
+            || "none".to_string(),
+            |value| format!("some:{:016x}", value.to_bits()),
+        )
+    }
+
+    let adaptive_mode = match config.adaptive_mode {
+        None => "none",
+        Some(Ias15AdaptiveMode::Individual) => "individual",
+        Some(Ias15AdaptiveMode::Global) => "global",
+        Some(Ias15AdaptiveMode::Prs23) => "prs23",
+        Some(Ias15AdaptiveMode::Aarseth85) => "aarseth85",
+    };
+    let canonical = format!(
+        "adam-assist-configuration-v1\nintegrator=ias15\ninitial_dt={}\nmin_dt={}\nadaptive_mode={}\nepsilon={}",
+        float_option(config.initial_dt),
+        float_option(config.min_dt),
+        adaptive_mode,
+        float_option(config.epsilon),
+    );
+    format!("{:x}", Sha256::digest(canonical.as_bytes()))
+}
+
 fn rescale_for_assist(
     times: &TimeArray,
     provider: &dyn TimeScaleProvider,
@@ -1977,6 +2058,38 @@ mod tests {
         assert_eq!(config.min_dt, Some(1.0e-9));
         assert_eq!(config.adaptive_mode, Some(Ias15AdaptiveMode::Global));
         assert_eq!(config.epsilon, Some(1.0e-6));
+    }
+
+    #[test]
+    fn configuration_fingerprint_is_complete_and_bit_canonical() {
+        let defaults = python_default_integrator();
+        assert_eq!(
+            integrator_configuration_fingerprint(defaults),
+            "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f"
+        );
+        for changed in [
+            IntegratorConfig {
+                initial_dt: Some(2.0e-6),
+                ..defaults
+            },
+            IntegratorConfig {
+                min_dt: Some(2.0e-9),
+                ..defaults
+            },
+            IntegratorConfig {
+                adaptive_mode: Some(Ias15AdaptiveMode::Individual),
+                ..defaults
+            },
+            IntegratorConfig {
+                epsilon: Some(2.0e-6),
+                ..defaults
+            },
+        ] {
+            assert_ne!(
+                integrator_configuration_fingerprint(defaults),
+                integrator_configuration_fingerprint(changed)
+            );
+        }
     }
 
     #[test]
