@@ -48,11 +48,15 @@ incompatible `0.6.1` graph or inventing checksums. The machine-checked
 Normal CI builds both projects from those sources, installs the built ASSIST
 wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
 NAIF data version before tests and benchmarks. It is the repository's only
-workflow. No release-candidate or publication automation exists while Core
-`0.7.0` is unpublished and registry locks are absent.
-`migration/scripts/verify_workflow_policy.py` pins the exact read-only workflow
-content and explicitly checks its triggers, permissions, credentials boundary,
-source-pair matrix, and required validation commands.
+workflow. The reviewed release-candidate and publication workflows remain in
+the repository, but every release job is explicitly disabled while Core `0.7.0`
+is unpublished and registry locks are absent.
+`migration/scripts/verify_workflow_policy.py` pins the active read-only workflow
+and the exact disabled release-workflow inventory. It checks triggers, per-job
+disable guards, versions, the credentials boundary, the source-pair matrix, and
+required validation commands. Enabling publication requires public dependencies,
+authentic registry-only locks, a separate reviewed change, and explicit human
+authorization.
 Release automation and authentic registry locks require a separate reviewed
 post-Core-publication commit.
 The retained migration helpers are documented as inert local tools in

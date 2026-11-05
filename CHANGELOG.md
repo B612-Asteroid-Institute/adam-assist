@@ -17,10 +17,12 @@
   asteroid default, including propagation and fixed-parameter STM paths.
 - Made exact-source CI install the wheel's complete `dev` extra and verify
   `astropy`, frozen NAIF data versions, and installed-wheel provenance before
-  tests or benchmarks. Exact-source CI is now the sole read-only workflow; all
-  release-candidate and publication workflows are absent until Core is public
-  and authentic registry locks can be added in a separate reviewed commit.
-- Pinned that sole workflow by content and required-command digests, including
+  tests or benchmarks. Exact-source CI is the sole active workflow; the reviewed
+  release-candidate and publication workflows remain present but every job is
+  explicitly disabled until Core is public and authentic registry locks are
+  added in a separate reviewed commit.
+- Pinned active CI by content and required-command digests and pinned the exact
+  disabled release-workflow inventory, including
   its full Python matrix, Rust source-pair gates, read-only execution boundary,
   and benchmark artifacts on every trigger. Python dependency-name checks now
   apply full PEP 503 normalization.

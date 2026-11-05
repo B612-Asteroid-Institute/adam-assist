@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Verify the no-release-automation transition policy.
+"""Verify exact-source CI and preserved-but-disabled release workflows.
 
-Until Core 0.7 is public and authentic registry locks exist, the repository has
-one read-only workflow: exact-source CI. Release automation must be introduced
-later in a separately reviewed commit.
+Until Core 0.7 is public and authentic registry locks exist, exact-source CI is
+the only active workflow. Reviewed release infrastructure remains present but
+every release job is explicitly disabled and dispatch-only.
 """
 
 from __future__ import annotations
@@ -20,6 +20,15 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 NORMAL = "pip-build-lint-test-coverage.yml"
+RELEASE_WORKFLOWS = (
+    "publish-rust-crate.yml",
+    "publish.yml",
+    "release-candidate-wheel-matrix.yml",
+    "rust-crate-release-candidate.yml",
+)
+WORKFLOW_INVENTORY = (NORMAL, *RELEASE_WORKFLOWS)
+DISABLED_JOB_CONDITION = "${{ false }}"
+RELEASE_AUTOMATION_STATE = "present-but-disabled-until-core-0.7.0-is-public-and-locked"
 CORE_REF = "0b49938eb0be04214a8d07b206227d31b248394a"
 CORE_REPOSITORY = "B612-Asteroid-Institute/adam_core"
 ALLOWED_ACTIONS = {
@@ -125,12 +134,17 @@ def load_workflows(root: Path = ROOT) -> dict[str, dict[str, Any]]:
         for path in directory.iterdir()
         if path.is_file() and path.suffix.lower() in {".yml", ".yaml"}
     )
-    if [path.name for path in paths] != [NORMAL]:
-        _fail("workflows", f"transitional inventory must be exactly [{NORMAL!r}]")
-    document = yaml.safe_load(paths[0].read_text())
-    if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
-        _fail(NORMAL, "workflow must contain a jobs mapping")
-    return {NORMAL: document}
+    names = tuple(path.name for path in paths)
+    expected = tuple(sorted(WORKFLOW_INVENTORY))
+    if names != expected:
+        _fail("workflows", f"workflow inventory {names!r} != {expected!r}")
+    workflows: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        document = yaml.safe_load(path.read_text())
+        if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+            _fail(path.name, "workflow must contain a jobs mapping")
+        workflows[path.name] = document
+    return workflows
 
 
 def _steps(job: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -374,24 +388,54 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
             _fail(NORMAL, "wheel-backed jobs must verify installed provenance and pins")
 
 
+def _verify_disabled_release_workflow(name: str, workflow: Mapping[str, Any]) -> None:
+    if _on(workflow) != {
+        "workflow_dispatch": workflow.get(True, workflow.get("on"))["workflow_dispatch"]
+    }:
+        _fail(name, "release workflows must be workflow_dispatch-only")
+    jobs = workflow.get("jobs")
+    if not isinstance(jobs, Mapping) or not jobs:
+        _fail(name, "release workflow must retain its reviewed job inventory")
+    for job_id, job in jobs.items():
+        if not isinstance(job, Mapping):
+            _fail(f"{name}:{job_id}", "job must be a mapping")
+        if job.get("if") != DISABLED_JOB_CONDITION:
+            _fail(
+                f"{name}:{job_id}",
+                "every release job must remain explicitly disabled",
+            )
+
+    serialized = json.dumps(workflow)
+    for stale in ("0.5.0", "0.6.1", "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"):
+        if stale in serialized:
+            _fail(name, f"stale release identity remains: {stale}")
+    for required in ("0.6.0", "0.7.0", "not yet public", "registry locks"):
+        if required not in serialized:
+            _fail(name, f"missing dependency-readiness marker: {required}")
+    if name == "release-candidate-wheel-matrix.yml" and CORE_REF not in serialized:
+        _fail(name, "wheel matrix must retain the exact reviewed Core ref")
+
+
 def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> None:
-    if set(workflows) != {NORMAL}:
-        _fail("workflows", f"transitional inventory must be exactly [{NORMAL!r}]")
+    if set(workflows) != set(WORKFLOW_INVENTORY):
+        _fail("workflows", f"workflow inventory must be {WORKFLOW_INVENTORY!r}")
     workflow = workflows[NORMAL]
     for value in _walk(workflow):
         if isinstance(value, str):
             lowered = value.lower()
             if SECRET_IDENTIFIER.search(value):
-                _fail(NORMAL, "any workflow use of secrets is forbidden")
+                _fail(NORMAL, "any active workflow use of secrets is forbidden")
             if REGISTRY_CREDENTIAL.search(value):
                 _fail(NORMAL, "registry credential/token references are forbidden")
             if any(helper in lowered for helper in INERT_RELEASE_HELPERS):
-                _fail(NORMAL, "inert release helpers are forbidden in workflows")
+                _fail(NORMAL, "release helpers are forbidden in active CI")
         if isinstance(value, dict) and (
             "id-token" in value or any(child == "write" for child in value.values())
         ):
-            _fail(NORMAL, "write/id-token permissions are forbidden")
+            _fail(NORMAL, "write/id-token permissions are forbidden in active CI")
     _verify_normal(workflow)
+    for name in RELEASE_WORKFLOWS:
+        _verify_disabled_release_workflow(name, workflows[name])
 
 
 def verify(root: Path = ROOT) -> None:
@@ -403,11 +447,11 @@ def verify(root: Path = ROOT) -> None:
             "source_pair_contract",
             "workflow policy applies only to registry transition",
         )
-    if (
-        contract.get("release_automation")
-        != "absent-until-core-0.7.0-is-public-and-locked"
-    ):
-        _fail("source_pair_contract", "release automation must be explicitly absent")
+    if contract.get("release_automation") != RELEASE_AUTOMATION_STATE:
+        _fail(
+            "source_pair_contract",
+            "release automation must be present but explicitly disabled",
+        )
     if contract.get("workflow_sha256") != WORKFLOW_SHA256:
         _fail("source_pair_contract", "canonical workflow digest drifted")
     workflow_path = root / ".github" / "workflows" / NORMAL
@@ -422,7 +466,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args()
     verify(args.root.resolve())
-    print("verified no-release-automation transition policy")
+    print("verified active CI and disabled release-workflow transition policy")
 
 
 if __name__ == "__main__":

@@ -1,22 +1,34 @@
 from pathlib import Path
 
-from migration.scripts.verify_workflow_policy import NORMAL, load_workflows, verify
+from migration.scripts.verify_workflow_policy import (
+    DISABLED_JOB_CONDITION,
+    NORMAL,
+    RELEASE_WORKFLOWS,
+    WORKFLOW_INVENTORY,
+    load_workflows,
+    verify,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_only_exact_source_normal_ci_exists() -> None:
+def test_exact_workflow_inventory_and_disabled_release_jobs() -> None:
     workflows = load_workflows()
-    assert set(workflows) == {NORMAL}
+    assert set(workflows) == set(WORKFLOW_INVENTORY)
     assert set(workflows[NORMAL]["jobs"]) == {
         "source-pair",
         "rust-quality",
         "benchmark",
     }
+    for name in RELEASE_WORKFLOWS:
+        assert workflows[name]["jobs"]
+        assert {job["if"] for job in workflows[name]["jobs"].values()} == {
+            DISABLED_JOB_CONDITION
+        }
     verify()
 
 
-def test_no_workflow_contains_release_or_publication_credentials() -> None:
+def test_active_ci_contains_no_release_or_publication_credentials() -> None:
     source = (ROOT / ".github" / "workflows" / NORMAL).read_text().lower()
     for forbidden in (
         "id-token",
@@ -30,15 +42,20 @@ def test_no_workflow_contains_release_or_publication_credentials() -> None:
         assert forbidden not in source
 
 
-def test_post_publication_release_tools_are_not_ci_entry_points() -> None:
-    source = (ROOT / ".github" / "workflows" / NORMAL).read_text()
+def test_release_tools_exist_only_behind_disabled_workflow_jobs() -> None:
+    active = (ROOT / ".github" / "workflows" / NORMAL).read_text()
+    disabled = "\n".join(
+        (ROOT / ".github" / "workflows" / name).read_text()
+        for name in RELEASE_WORKFLOWS
+    )
     for script in (
         "publish_crate_archive",
         "prepare_pypi_upload",
         "verify_release",
         "verify_registry_locks",
     ):
-        assert script not in source
+        assert script not in active
+        assert script in disabled
 
 
 def test_critical_ci_commands_and_benchmark_evidence_are_pinned() -> None:
@@ -82,8 +99,9 @@ def test_workflow_inventory_is_case_insensitive(tmp_path: Path) -> None:
     root = tmp_path
     workflow_dir = root / ".github" / "workflows"
     workflow_dir.mkdir(parents=True)
-    source = ROOT / ".github" / "workflows" / NORMAL
-    shutil.copy2(source, workflow_dir / NORMAL)
+    for name in WORKFLOW_INVENTORY:
+        source = ROOT / ".github" / "workflows" / name
+        shutil.copy2(source, workflow_dir / name)
     (workflow_dir / "hidden.YML").write_text("name: hidden\n")
     try:
         load_workflows(root)

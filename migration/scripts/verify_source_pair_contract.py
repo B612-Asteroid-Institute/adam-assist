@@ -164,7 +164,7 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "registry_state": "awaiting-core-0.7.0-publication",
         "lock_state": "absent-until-core-0.7.0-is-public",
         "source_pair_status": "exact-reviewed-source",
-        "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
+        "release_automation": "present-but-disabled-until-core-0.7.0-is-public-and-locked",
         "workflow_sha256": "fe5124fac493fd064238e92a0887c41fe404ba091a5bd7843f3af49206006e6b",
     }
     if contract != expected:

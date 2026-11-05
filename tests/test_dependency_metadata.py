@@ -120,7 +120,7 @@ def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
     assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
     assert contract["source_pair_status"] == "exact-reviewed-source"
     assert contract["release_automation"] == (
-        "absent-until-core-0.7.0-is-public-and-locked"
+        "present-but-disabled-until-core-0.7.0-is-public-and-locked"
     )
 
 
@@ -329,6 +329,14 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
         assert f"patch.crates-io.{crate}.path" in normal_ci
     assert "Exact Core source pair" in normal_ci
     assert "exit 1" not in normal_ci
-    workflows = list((ROOT / ".github" / "workflows").glob("*.yml"))
-    assert [path.name for path in workflows] == ["pip-build-lint-test-coverage.yml"]
-    assert "No release-candidate or publication automation exists" in readme
+    workflows = sorted(
+        path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")
+    )
+    assert workflows == [
+        "pip-build-lint-test-coverage.yml",
+        "publish-rust-crate.yml",
+        "publish.yml",
+        "release-candidate-wheel-matrix.yml",
+        "rust-crate-release-candidate.yml",
+    ]
+    assert "every release job is explicitly disabled" in readme

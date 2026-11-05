@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Inert post-Core-publication registry-lock verifier.
 
-No workflow invokes this module while authentic Core 0.7 locks are absent.
+No enabled workflow invokes this module while authentic Core 0.7 locks are absent.
 """
 
 from __future__ import annotations

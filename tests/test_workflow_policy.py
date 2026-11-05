@@ -8,7 +8,9 @@ from typing import Any
 import pytest
 
 from migration.scripts.verify_workflow_policy import (
+    DISABLED_JOB_CONDITION,
     NORMAL,
+    RELEASE_WORKFLOWS,
     WorkflowPolicyError,
     load_workflows,
     verify_workflow_documents,
@@ -230,8 +232,66 @@ MUTATIONS = [
 ]
 
 
-def test_transition_policy_accepts_exact_source_ci() -> None:
+def test_transition_policy_accepts_active_ci_and_disabled_release_workflows() -> None:
     verify_workflow_documents(BASE)
+
+
+def _replace_workflow_string(value: Any, old: str, new: str) -> Any:
+    if isinstance(value, str):
+        return value.replace(old, new)
+    if isinstance(value, list):
+        return [_replace_workflow_string(item, old, new) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _replace_workflow_string(item, old, new) for key, item in value.items()
+        }
+    return value
+
+
+@pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
+def test_release_workflow_inventory_is_required(name: str) -> None:
+    workflows = deepcopy(BASE)
+    workflows.pop(name)
+    with pytest.raises(WorkflowPolicyError, match="inventory"):
+        verify_workflow_documents(workflows)
+
+
+@pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
+def test_every_release_job_must_remain_disabled(name: str) -> None:
+    workflows = deepcopy(BASE)
+    job = next(iter(workflows[name]["jobs"].values()))
+    assert job.pop("if") == DISABLED_JOB_CONDITION
+    with pytest.raises(WorkflowPolicyError, match="explicitly disabled"):
+        verify_workflow_documents(workflows)
+
+
+@pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
+def test_release_workflows_reject_automatic_triggers(name: str) -> None:
+    workflows = deepcopy(BASE)
+    workflow = workflows[name]
+    key: Any = True if True in workflow else "on"
+    dispatch = workflow[key]["workflow_dispatch"]
+    workflow[key] = {"push": None, "workflow_dispatch": dispatch}
+    with pytest.raises(WorkflowPolicyError, match="workflow_dispatch-only"):
+        verify_workflow_documents(workflows)
+
+
+@pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
+def test_release_workflows_require_dependency_readiness_markers(name: str) -> None:
+    workflows = deepcopy(BASE)
+    workflows[name] = _replace_workflow_string(
+        workflows[name], "not yet public", "temporarily unavailable"
+    )
+    with pytest.raises(WorkflowPolicyError, match="readiness marker"):
+        verify_workflow_documents(workflows)
+
+
+@pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
+def test_release_workflows_reject_stale_core_versions(name: str) -> None:
+    workflows = deepcopy(BASE)
+    workflows[name] = _replace_workflow_string(workflows[name], "0.7.0", "0.6.1")
+    with pytest.raises(WorkflowPolicyError, match="stale release identity"):
+        verify_workflow_documents(workflows)
 
 
 @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda value: value.id)

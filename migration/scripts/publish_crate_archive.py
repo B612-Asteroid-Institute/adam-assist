@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Inert post-Core-publication crate validation/publication helper.
 
-No workflow invokes this module during the Core 0.7 transition. Its execute
-mode is not authorized until authentic locks and release automation are added
-in a separate reviewed and explicitly approved commit.
+No enabled workflow invokes this module during the Core 0.7 transition. Its
+execute mode is not authorized until authentic locks exist and release jobs are
+enabled in a separate reviewed and explicitly approved commit.
 """
 
 from __future__ import annotations

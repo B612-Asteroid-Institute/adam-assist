@@ -1,0 +1,376 @@
+name: Release candidate wheel matrix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-wheel-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_ONLY_BINARY: ":all:"
+  MATURIN_PEP517_ARGS: "--locked"
+  ADAM_CORE_RELEASE_VERSION: "0.7.0"
+  ADAM_CORE_ACCEPTANCE_REF: "0b49938eb0be04214a8d07b206227d31b248394a"
+  ADAM_ASSIST_RELEASE_VERSION: "0.6.0"
+
+jobs:
+  # Transition guard: preserve reviewed release infrastructure while Core 0.7
+  # and authentic registry-only locks are unavailable. A separately reviewed
+  # dependency-readiness commit must remove these per-job guards.
+  compatibility-floor:
+    if: ${{ false }}
+    name: Block release until propagator-v2 Core release exists
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify explicit pre-release lock state
+        run: python migration/scripts/verify_source_pair_contract.py
+      - run: |
+          echo "Core 0.7.0 is not yet public; registry locks/checksums are unavailable" >&2
+          exit 1
+
+  artifact-acceptance:
+    if: ${{ false }}
+    needs: compatibility-floor
+    name: ${{ matrix.platform.name }} / CPython ${{ matrix.python-version }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        platform:
+          - {name: manylinux-x86_64, runner: ubuntu-latest, system: Linux-x86_64, family: manylinux, target: x86_64, wheel_tag: "manylinux*x86_64"}
+          - {name: manylinux-aarch64, runner: ubuntu-24.04-arm, system: Linux-aarch64, family: manylinux, target: aarch64, wheel_tag: "manylinux*aarch64"}
+          - {name: macos-arm64, runner: macos-14, system: Darwin-arm64, family: native, wheel_tag: "macosx*arm64"}
+          - {name: macos-x86_64, runner: macos-15-intel, system: Darwin-x86_64, family: native, wheel_tag: "macosx*x86_64"}
+    steps:
+      - name: Checkout adam-assist candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Checkout provisional adam-core acceptance tooling
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_ACCEPTANCE_REF }}
+          path: adam-core-acceptance
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Verify runner architecture
+        shell: bash
+        run: |
+          python - <<'PY'
+          import platform
+          expected = "${{ matrix.platform.system }}"
+          actual = f"{platform.system()}-{platform.machine()}"
+          if actual != expected:
+              raise SystemExit(f"runner architecture mismatch: {actual} != {expected}")
+          PY
+      - name: Verify provisional exact Core acceptance tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C adam-core-acceptance rev-parse HEAD)" = "$ADAM_CORE_ACCEPTANCE_REF"
+          test "$(git -C adam-core-acceptance rev-parse 'v0.7.0^{commit}')" = "$ADAM_CORE_ACCEPTANCE_REF"
+          test -z "$(git -C adam-core-acceptance status --porcelain)"
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          root = Path("adam-core-acceptance/migration/scripts")
+          expected = {
+              "run_clean_room_artifact_acceptance.py": (
+                  "464859e82bd9aea975f1209b040a97299230dd37bf370ab0132beefcbc29435f"
+              ),
+              "clean_room_artifact_smoke.py": (
+                  "bb2df3751929b4e0391e8300d7e51eb5815f1b0b3c012b8a070052b362b24b77"
+              ),
+          }
+          for name, expected_sha256 in expected.items():
+              path = root / name
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected_sha256:
+                  raise SystemExit(
+                      f"immutable Core acceptance script mismatch: {name} "
+                      f"{actual} != {expected_sha256}"
+                  )
+          PY
+      - name: Verify registry-only release locks
+        run: |
+          python -m pip install "pdm==2.29.2"
+          pdm lock --check
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_RELEASE_VERSION" \
+            --python-lock --rust-lock
+      - name: Build adam-assist manylinux wheel once
+        if: matrix.platform.family == 'manylinux'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.platform.target }}
+          manylinux: "2_17"
+          working-directory: .
+          args: --release --locked -i python${{ matrix.python-version }} --out wheelhouse
+      - name: Build adam-assist native wheel once
+        if: matrix.platform.family == 'native'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          working-directory: .
+          args: --release --locked -i python${{ matrix.python-version }} --out wheelhouse
+      - name: Prepare exact registry wheelhouse for clean-room acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/acceptance-prebuilt-wheelhouse"
+          rm -rf "$wheelhouse"
+          mkdir -p "$wheelhouse"
+          cp wheelhouse/adam_assist-*.whl "$wheelhouse/"
+          python -m pip download --no-cache-dir \
+            --index-url https://pypi.org/simple \
+            --only-binary=:all: --no-deps \
+            --dest "$wheelhouse" "adam-core==$ADAM_CORE_RELEASE_VERSION"
+          test "$(find "$wheelhouse" -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 1
+          test "$(find "$wheelhouse" -maxdepth 1 -name 'adam_core-*.whl' | wc -l | tr -d ' ')" = 1
+      - name: Run exact registry-wheel clean-room acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The pinned smoke covers forward/backward/same-epoch propagation,
+          # observer ephemeris through embedded Core SPICE, offline kernel-cache
+          # policy, and installed-wheel provenance. The Core checkout supplies
+          # only immutable tooling and provenance roots; --prebuilt-wheelhouse
+          # prevents either package from being built or source-paired here.
+          python adam-core-acceptance/migration/scripts/run_clean_room_artifact_acceptance.py \
+            --prebuilt-wheelhouse "$RUNNER_TEMP/acceptance-prebuilt-wheelhouse" \
+            --adam-core-repo "$GITHUB_WORKSPACE/adam-core-acceptance" \
+            --adam-core-ref "$ADAM_CORE_ACCEPTANCE_REF" \
+            --adam-assist-repo "$GITHUB_WORKSPACE" \
+            --adam-assist-ref HEAD \
+            --workspace "$RUNNER_TEMP/acceptance" \
+            --report "$RUNNER_TEMP/acceptance-report.json" \
+            --python "$(command -v python)"
+      - name: Inspect public adam-core wheel contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          inspection="$RUNNER_TEMP/core-wheel-inspection"
+          rm -rf "$inspection"
+          mkdir -p "$inspection"
+          cp "$RUNNER_TEMP"/acceptance/wheelhouse/adam_core-*.whl "$inspection/"
+          python adam-core-acceptance/migration/scripts/check_wheel_artifacts.py "$inspection"
+      - name: Verify clean-room artifact identities and platform tags
+        shell: bash
+        run: |
+          python - <<'PY'
+          import email
+          import fnmatch
+          import os
+          import zipfile
+          from pathlib import Path
+
+          wheelhouse = Path(os.environ["RUNNER_TEMP"]) / "acceptance" / "wheelhouse"
+          core = list(wheelhouse.glob("adam_core-*.whl"))
+          assist = list(wheelhouse.glob("adam_assist-*.whl"))
+          if len(core) != 1 or len(assist) != 1:
+              raise SystemExit(f"expected one wheel per package; got {core=} {assist=}")
+          expected = {
+              "adam_core": os.environ["ADAM_CORE_RELEASE_VERSION"],
+              "adam_assist": os.environ["ADAM_ASSIST_RELEASE_VERSION"],
+          }
+          for package, paths in (("adam_core", core), ("adam_assist", assist)):
+              wheel = paths[0]
+              with zipfile.ZipFile(wheel) as archive:
+                  names = archive.namelist()
+                  metadata_paths = [
+                      name for name in names if name.endswith(".dist-info/METADATA")
+                  ]
+                  if len(metadata_paths) != 1:
+                      raise SystemExit(f"{wheel.name}: unexpected METADATA files")
+                  metadata = email.message_from_bytes(archive.read(metadata_paths[0]))
+                  native_prefix = (
+                      "adam_core/_rust_native"
+                      if package == "adam_core"
+                      else "adam_assist/_native"
+                  )
+                  if not any(
+                      name.startswith(native_prefix)
+                      and name.endswith((".so", ".pyd", ".dylib"))
+                      for name in names
+                  ):
+                      raise SystemExit(f"{wheel.name}: missing native extension")
+                  if package == "adam_assist":
+                      if "adam_assist/version.py" not in names:
+                          raise SystemExit(f"{wheel.name}: missing version.py")
+                      namespace = {}
+                      exec(archive.read("adam_assist/version.py"), namespace)
+                      if namespace.get("__version__") != expected[package]:
+                          raise SystemExit(f"{wheel.name}: bad runtime version")
+                      packaged_tests = [
+                          name
+                          for name in names
+                          if name.startswith("adam_assist/")
+                          and (
+                              "/tests/" in name
+                              or Path(name).name.startswith("test_")
+                          )
+                      ]
+                      if packaged_tests:
+                          raise SystemExit(
+                              f"{wheel.name}: packaged tests {packaged_tests[:1]}"
+                          )
+              if metadata["Version"] != expected[package]:
+                  raise SystemExit(
+                      f"{package} release version mismatch: "
+                      f"{metadata['Version']} != {expected[package]}"
+                  )
+              if package == "adam_assist":
+                  requirements = {
+                      value.replace(" ", "").lower()
+                      for value in metadata.get_all("Requires-Dist", [])
+                  }
+                  expected_requirements = {
+                      "adam-core>=0.7.0,<0.8.0",
+                      "naif-de440==2020.12.21.1",
+                      "jpl-small-bodies-de441-n16==2021.3.31.1",
+                  }
+                  if not expected_requirements <= requirements:
+                      raise SystemExit(
+                          "adam-assist release dependencies missing: "
+                          f"{sorted(expected_requirements - requirements)}"
+                      )
+          pattern = "*${{ matrix.platform.wheel_tag }}.whl"
+          invalid = [
+              path.name
+              for path in core + assist
+              if not fnmatch.fnmatch(path.name, pattern)
+          ]
+          if invalid:
+              raise SystemExit(f"wheel tag mismatch for {pattern}: {invalid}")
+          PY
+      - name: Upload exact accepted artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-acceptance-${{ matrix.platform.name }}-py${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/acceptance-report.json
+            ${{ runner.temp }}/acceptance/invocation/smoke-report.json
+            ${{ runner.temp }}/acceptance/wheelhouse/*.whl
+            ${{ runner.temp }}/acceptance/logs/*.log
+          if-no-files-found: error
+
+  full-current-benchmark:
+    if: ${{ false }}
+    name: Full 30-workload current benchmark
+    needs: artifact-acceptance
+    # The frozen direct-Rust fixture and its immutable last-bit residual envelope
+    # were captured on arm64; keep that scientific gate on its authority platform.
+    runs-on: macos-14
+    steps:
+      - name: Checkout adam-assist candidate
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Download the accepted macOS arm64 Python 3.12 wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-acceptance-macos-arm64-py3.12
+          path: accepted-wheels
+      - name: Verify registry-only release locks
+        run: |
+          python -m pip install --upgrade pip "pdm==2.29.2"
+          pdm lock --check
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_RELEASE_VERSION" \
+            --python-lock --rust-lock
+      - name: Install the exact tested Core and ASSIST wheels with dev dependencies
+        run: |
+          core_wheel="$(find accepted-wheels -name 'adam_core-*.whl' -print -quit)"
+          assist_wheel="$(find accepted-wheels -name 'adam_assist-*.whl' -print -quit)"
+          test -n "$core_wheel" && test -n "$assist_wheel"
+          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          python migration/scripts/verify_dev_environment.py --require-wheel
+      - name: Pin frozen-fixture kernel bytes
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          from jpl_small_bodies_de441_n16 import de441_n16
+          from naif_de440 import de440
+
+          fixture_path = Path(
+              "migration/artifacts/assist_public_semantics_fixture_2026-05-20.json"
+          )
+          fixture = json.loads(fixture_path.read_text())
+          expected = {item["label"]: item for item in fixture["kernels"]}
+          paths = {
+              "naif_de440": Path(de440),
+              "jpl_small_bodies_de441_n16": Path(de441_n16),
+          }
+          env_vars = {
+              "naif_de440": "ADAM_CORE_RS_ASSIST_PLANETS_PATH",
+              "jpl_small_bodies_de441_n16": "ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH",
+          }
+          observed = {}
+          with Path(os.environ["GITHUB_ENV"]).open("a") as github_env:
+              for label, path in paths.items():
+                  data = path.read_bytes()
+                  identity = {
+                      "file_name": path.name,
+                      "size_bytes": len(data),
+                      "sha256": hashlib.sha256(data).hexdigest(),
+                  }
+                  authority = expected[label]
+                  assert identity == {
+                      "file_name": authority["file_name"],
+                      "size_bytes": authority["size_bytes"],
+                      "sha256": authority["sha256"],
+                  }, (label, identity, authority)
+                  resolved = path.resolve()
+                  observed[label] = {**identity, "path": str(resolved)}
+                  print(f"{env_vars[label]}={resolved}", file=github_env)
+          output = Path("migration/artifacts/assist_kernel_identity_ci.json")
+          output.write_text(json.dumps(observed, indent=2, sort_keys=True) + "\n")
+          print(output.read_text())
+          PY
+      - name: Run direct Rust frozen-fixture and kernel integrations
+        env:
+          ADAM_CORE_RS_ASSIST_RESIDUALS_PATH: ${{ github.workspace }}/migration/artifacts/assist_public_semantics_residuals_ci.json
+        run: cargo test --locked --manifest-path rust/adam_assist_rs/Cargo.toml -- --ignored
+      - name: Run complete JPL Horizons accuracy matrix
+        run: python -m pytest -m live tests/test_propagate.py tests/test_ephemeris.py
+      - name: Run complete current public/native benchmark grid
+        run: |
+          python -m migration.scripts.benchmark_current \
+            --lanes tiny small large \
+            --repeats 5 \
+            --warmups 1 \
+            --require-native \
+            --output migration/artifacts/benchmark_current_assist_ci.json \
+            --markdown migration/artifacts/benchmark_current_assist_ci.md
+      - name: Upload complete benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: assist-current-benchmark-full
+          path: |
+            migration/artifacts/benchmark_current_assist_ci.json
+            migration/artifacts/benchmark_current_assist_ci.md
+            migration/artifacts/assist_kernel_identity_ci.json
+            migration/artifacts/assist_public_semantics_residuals_ci.json
+          if-no-files-found: error
