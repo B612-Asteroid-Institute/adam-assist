@@ -19,8 +19,8 @@
   `astropy`, frozen NAIF data versions, and installed-wheel provenance before
   tests or benchmarks. Exact-source CI is the sole active workflow; the reviewed
   release-candidate and publication workflows remain present but every job is
-  explicitly disabled until Core is public and authentic registry locks are
-  added in a separate reviewed commit.
+  gated by the unset `ADAM_ASSIST_RELEASES_ENABLED` repository variable until
+  Core is public and authentic registry locks are added in a reviewed commit.
 - Pinned active CI by content and required-command digests and pinned the exact
   disabled release-workflow inventory, including
   its full Python matrix, Rust source-pair gates, read-only execution boundary,
@@ -57,8 +57,11 @@
   Standalone Rust callers receive the same provenance-complete provider through
   `AssistPropagator::external_propagator()`. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
   coherent Rust `0.7`, validated against the exact reviewed Core `0.7.0`
-  source commit `0b49938eb0be04214a8d07b206227d31b248394a`. No release automation exists
-  until Core `0.7.0` is public and real registry locks can be generated.
+  source commit `0b49938eb0be04214a8d07b206227d31b248394a`. Reviewed release workflows remain
+  manual-only, and every job is gated by the unset
+  `ADAM_ASSIST_RELEASES_ENABLED` repository variable until Core `0.7.0` is
+  public, authentic locks and environment protections are reviewed, and
+  publication is separately authorized.
 - Removed ASSIST OD workloads from the current benchmark and public-surface
   classifications; OD algorithms, defaults, and reports are now exclusively
   Core-owned. The stale generator that called removed methods is retired;

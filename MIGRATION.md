@@ -96,7 +96,7 @@ semantic candidate. The 12 accepted commits ending at
 | Set the Core 0.7 floor | Retained as Python `>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements. |
 | Harden source-pair and release gates | Retained and strengthened with exact-commit wheel and Rust lanes. |
 | Enforce structural release policy | Retained. |
-| Remove prerelease publication workflows | Retained; only read-only CI remains. |
+| Remove prerelease publication workflows | Superseded by owner policy: the reviewed workflows remain manual-only and every job is gated by the unset `ADAM_ASSIST_RELEASES_ENABLED` repository variable. |
 | Close transition-policy tripwires | Retained. |
 | Reject local Core dependency overrides | Retained in package metadata; CI-only `--config patch.crates-io` values point at the one exact reviewed Core checkout. |
 
@@ -278,10 +278,10 @@ inconvenient:
 | `tests/rust/test_adam_assist_rust_od.py::test_public_fit_least_squares_dispatches_to_native` | Removed because that public Assist method no longer exists; Python delegates to Core and the capsule contains propagation callbacks only. |
 | `tests/rust/test_adam_assist_rust_od.py::test_rust_od_recovers_truth` | Replaced by real-provider Core `run_iod`/`run_od`/`refine` truth, composition, determinism, and evaluation probes in `test_provider_capsule_od.py`. |
 | `tests/rust/test_adam_assist_rust_od.py::test_vallado_least_squares_matches_frozen_parity` | Removed with the noncanonical Vallado hook; the frozen oracle remains migration evidence and Core `refine` is the documented replacement. |
-| `tests/test_ci_contract.py::test_every_rust_workflow_uses_the_msrv_toolchain_and_components` | Adapted into the active read-only CI policy plus default/all/no-default Rust 1.87 matrix checks; preserved release workflows remain explicitly disabled. |
-| `tests/test_ci_contract.py::test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark` | Adapted into `test_exact_workflow_inventory_and_disabled_release_jobs` and `test_critical_ci_commands_and_benchmark_evidence_are_pinned`. |
+| `tests/test_ci_contract.py::test_every_rust_workflow_uses_the_msrv_toolchain_and_components` | Adapted into the active read-only CI policy plus default/all/no-default Rust 1.87 matrix checks; preserved release workflows remain gated by the unset release variable. |
+| `tests/test_ci_contract.py::test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark` | Adapted into `test_exact_workflow_inventory_and_gated_release_jobs` and `test_critical_ci_commands_and_benchmark_evidence_are_pinned`. |
 | `tests/test_ci_contract.py::test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels` | Deferred until authentic Core 0.7 registry artifacts exist. The reviewed workflow remains present with every job disabled; exact-source wheel cross-pairs cover this source state. |
-| `tests/test_ci_contract.py::test_rust_crate_workflows_package_once_and_publish_tested_bytes` | Intentionally removed with all publication workflows; crate packaging is validated locally without publishing. |
+| `tests/test_ci_contract.py::test_rust_crate_workflows_package_once_and_publish_tested_bytes` | Deferred until public Core 0.7 and authentic registry locks exist. The reviewed workflow remains present behind the unset release gate; crate packaging is validated locally without publishing. |
 | `tests/test_core_compatibility_gates.py::test_same_wheel_reports_accept_compatible_core_06_outputs` | Replaced by `test_same_wheel_reports_accept_compatible_core_07_outputs`; Core 0.6 is intentionally incompatible with ABI-v2 provenance. |
 | `tests/test_dependency_metadata.py::test_cargo_lock_uses_public_core_registry_artifacts` | Deferred until Core 0.7 is public; `test_prerelease_source_pair_has_no_stale_registry_locks` enforces honest absent-lock state. |
 | `tests/test_dependency_metadata.py::test_current_benchmark_ci_covers_product_and_core_od_backend_workloads` | Adapted to `test_current_benchmark_ci_covers_provider_product_workloads`; Assist-owned OD workloads are retired. |
@@ -330,14 +330,17 @@ PyPI: adam-assist==0.4.0rc7
 ```
 
 Cargo and pip exclude these from ordinary stable resolution. Historical public
-crates used trusted publishing, but the current Core `0.7.0` transition has no
-release-candidate or publication workflows at all. Only read-only exact-source
-CI exists until Core is public and authentic PyPI/Cargo locks can be generated.
-The scripts retained under `migration/scripts` are inert local post-publication
-tooling, not authorized CI entry points. Locks and release automation will be
-added together only in a separately reviewed, explicitly approved commit. Rust
-1.87 remains authoritative for formatting, strict Clippy, tests, documentation,
-packaging, wheels, and clean consumer resolution. The adam-assist RC metadata
+crates used trusted publishing. During the Core `0.7.0` transition, the reviewed
+release-candidate and publication workflows remain workflow-dispatch-only, and
+every job requires the unset repository variable
+`ADAM_ASSIST_RELEASES_ENABLED == 'true'`; exact-source CI is the only active
+workflow. That variable may be configured only after Core 0.7 is public,
+authentic registry-only locks are committed and reviewed, environment
+protections are verified, and separate publication authorization is granted.
+The scripts under `migration/scripts` remain gated release tooling, not enabled
+publication entry points. Rust 1.87 remains authoritative for formatting,
+strict Clippy, tests, documentation, packaging, wheels, and clean consumer
+resolution. The adam-assist RC metadata
 must exact-pin the core RC before publication. Its 12 native wheels contain the
 Python compatibility veneer and compiled `adam_assist._native` extension. Each
 public propagation, ephemeris, covariance, or collision operation crosses into

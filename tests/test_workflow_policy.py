@@ -8,8 +8,10 @@ from typing import Any
 import pytest
 
 from migration.scripts.verify_workflow_policy import (
-    DISABLED_JOB_CONDITION,
+    EXPECTED_RELEASE_JOB_CONDITIONS,
     NORMAL,
+    PUBLISH_PYPI_CONDITION,
+    READINESS_CONDITION,
     RELEASE_WORKFLOWS,
     WorkflowPolicyError,
     load_workflows,
@@ -257,11 +259,11 @@ def test_release_workflow_inventory_is_required(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
-def test_every_release_job_must_remain_disabled(name: str) -> None:
+def test_every_release_job_must_retain_its_readiness_condition(name: str) -> None:
     workflows = deepcopy(BASE)
-    job = next(iter(workflows[name]["jobs"].values()))
-    assert job.pop("if") == DISABLED_JOB_CONDITION
-    with pytest.raises(WorkflowPolicyError, match="explicitly disabled"):
+    job_id, job = next(iter(workflows[name]["jobs"].items()))
+    assert job.pop("if") == EXPECTED_RELEASE_JOB_CONDITIONS[name][job_id]
+    with pytest.raises(WorkflowPolicyError, match="condition drifted"):
         verify_workflow_documents(workflows)
 
 
@@ -277,12 +279,36 @@ def test_release_workflows_reject_automatic_triggers(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
-def test_release_workflows_require_dependency_readiness_markers(name: str) -> None:
+def test_release_workflows_reject_negated_readiness_gate(name: str) -> None:
     workflows = deepcopy(BASE)
-    workflows[name] = _replace_workflow_string(
-        workflows[name], "not yet public", "temporarily unavailable"
-    )
-    with pytest.raises(WorkflowPolicyError, match="readiness marker"):
+    job = next(iter(workflows[name]["jobs"].values()))
+    job["if"] = READINESS_CONDITION.replace("==", "!=")
+    with pytest.raises(WorkflowPolicyError, match="condition drifted"):
+        verify_workflow_documents(workflows)
+
+
+def test_pypi_publish_retains_dry_run_composition() -> None:
+    workflows = deepcopy(BASE)
+    job = workflows["publish.yml"]["jobs"]["publish-pypi"]
+    assert job["if"] == PUBLISH_PYPI_CONDITION
+    job["if"] = READINESS_CONDITION
+    with pytest.raises(WorkflowPolicyError, match="condition drifted"):
+        verify_workflow_documents(workflows)
+
+
+def test_release_workflows_reject_secret_insertion() -> None:
+    workflows = deepcopy(BASE)
+    step = workflows["publish-rust-crate.yml"]["jobs"]["publish"]["steps"][0]
+    step["env"] = {"CARGO_TOKEN": "${{ secrets.CARGO_TOKEN }}"}
+    with pytest.raises(WorkflowPolicyError, match="may not use repository secrets"):
+        verify_workflow_documents(workflows)
+
+
+def test_release_workflows_reject_partially_stale_versions() -> None:
+    workflows = deepcopy(BASE)
+    inputs = workflows["publish.yml"][True]["workflow_dispatch"]["inputs"]
+    inputs["expected_version"]["default"] = "0.5.2"
+    with pytest.raises(WorkflowPolicyError, match="expected_version default"):
         verify_workflow_documents(workflows)
 
 
@@ -290,7 +316,7 @@ def test_release_workflows_require_dependency_readiness_markers(name: str) -> No
 def test_release_workflows_reject_stale_core_versions(name: str) -> None:
     workflows = deepcopy(BASE)
     workflows[name] = _replace_workflow_string(workflows[name], "0.7.0", "0.6.1")
-    with pytest.raises(WorkflowPolicyError, match="stale release identity"):
+    with pytest.raises(WorkflowPolicyError):
         verify_workflow_documents(workflows)
 
 

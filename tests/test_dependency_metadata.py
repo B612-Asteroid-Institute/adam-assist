@@ -339,4 +339,4 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
         "release-candidate-wheel-matrix.yml",
         "rust-crate-release-candidate.yml",
     ]
-    assert "every release job is explicitly disabled" in readme
+    assert "every job requires the unset-by-default repository" in readme

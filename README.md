@@ -48,19 +48,18 @@ incompatible `0.6.1` graph or inventing checksums. The machine-checked
 Normal CI builds both projects from those sources, installs the built ASSIST
 wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
 NAIF data version before tests and benchmarks. It is the repository's only
-workflow. The reviewed release-candidate and publication workflows remain in
-the repository, but every release job is explicitly disabled while Core `0.7.0`
-is unpublished and registry locks are absent.
-`migration/scripts/verify_workflow_policy.py` pins the active read-only workflow
-and the exact disabled release-workflow inventory. It checks triggers, per-job
-disable guards, versions, the credentials boundary, the source-pair matrix, and
-required validation commands. Enabling publication requires public dependencies,
-authentic registry-only locks, a separate reviewed change, and explicit human
-authorization.
-Release automation and authentic registry locks require a separate reviewed
-post-Core-publication commit.
-The retained migration helpers are documented as inert local tools in
-`migration/scripts/RELEASE_TOOLING.md`; they are not CI release entry points.
+active workflow. The reviewed release-candidate and publication workflows
+remain manual-only and every job requires the unset-by-default repository
+variable `ADAM_ASSIST_RELEASES_ENABLED` to equal `true`.
+`migration/scripts/verify_workflow_policy.py` checks the exact workflow
+inventory, triggers, composed job conditions, versions, credentials boundary,
+source-pair matrix, and required validation commands. The variable is not
+configured. It may be enabled only after Core 0.7 is public, authentic
+registry-only locks are committed and reviewed, release-environment protections
+are verified, and separate publication authorization is granted.
+The retained migration helpers and gated workflows are documented in
+`migration/scripts/RELEASE_TOOLING.md`; they are not enabled release entry
+points during this transition.
 
 For reproducible local Rust validation, use one detached Core tree for all
 four Core crates. Patched Cargo commands create a temporary untracked lock;

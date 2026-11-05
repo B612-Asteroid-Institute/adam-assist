@@ -48,11 +48,11 @@ permissions:
   id-token: write
 
 jobs:
-  # Transition guard: preserve reviewed release infrastructure while Core 0.7
-  # and authentic registry-only locks are unavailable. A separately reviewed
-  # dependency-readiness commit must remove these per-job guards.
+  # Transition gate: ADAM_ASSIST_RELEASES_ENABLED is intentionally unset. Set it
+  # only after public Core 0.7 artifacts, authentic reviewed registry locks,
+  # verified environments, and separate publication authorization exist.
   compatibility-floor:
-    if: ${{ false }}
+    if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
     name: Block publish until propagator-v2 Core crate exists
     runs-on: ubuntu-latest
     steps:
@@ -64,7 +64,7 @@ jobs:
           exit 1
 
   publish:
-    if: ${{ false }}
+    if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
     needs: compatibility-floor
     runs-on: ubuntu-latest
     environment: ${{ inputs.release_channel == 'stable' && 'crates-io' || 'crates-io-preview' }}

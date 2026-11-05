@@ -2,8 +2,8 @@
 """Verify exact-source CI and preserved-but-disabled release workflows.
 
 Until Core 0.7 is public and authentic registry locks exist, exact-source CI is
-the only active workflow. Reviewed release infrastructure remains present but
-every release job is explicitly disabled and dispatch-only.
+the only active workflow. Reviewed release infrastructure remains manual-only,
+and every release job requires one unset-by-default repository variable.
 """
 
 from __future__ import annotations
@@ -27,7 +27,33 @@ RELEASE_WORKFLOWS = (
     "rust-crate-release-candidate.yml",
 )
 WORKFLOW_INVENTORY = (NORMAL, *RELEASE_WORKFLOWS)
-DISABLED_JOB_CONDITION = "${{ false }}"
+READINESS_VARIABLE = "ADAM_ASSIST_RELEASES_ENABLED"
+READINESS_CONDITION = "${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}"
+PUBLISH_PYPI_CONDITION = (
+    "${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' " "&& inputs.dry_run == false }}"
+)
+EXPECTED_RELEASE_JOB_CONDITIONS = {
+    "publish-rust-crate.yml": {
+        "compatibility-floor": READINESS_CONDITION,
+        "publish": READINESS_CONDITION,
+    },
+    "publish.yml": {
+        "compatibility-floor": READINESS_CONDITION,
+        "collect-tested-artifacts": READINESS_CONDITION,
+        "publish-pypi": PUBLISH_PYPI_CONDITION,
+    },
+    "release-candidate-wheel-matrix.yml": {
+        "compatibility-floor": READINESS_CONDITION,
+        "artifact-acceptance": READINESS_CONDITION,
+        "full-current-benchmark": READINESS_CONDITION,
+    },
+    "rust-crate-release-candidate.yml": {
+        "compatibility-floor": READINESS_CONDITION,
+        "package-and-test": READINESS_CONDITION,
+        "core-range-compatibility": READINESS_CONDITION,
+        "latest-stable-compatibility": READINESS_CONDITION,
+    },
+}
 RELEASE_AUTOMATION_STATE = "present-but-disabled-until-core-0.7.0-is-public-and-locked"
 CORE_REF = "0b49938eb0be04214a8d07b206227d31b248394a"
 CORE_REPOSITORY = "B612-Asteroid-Institute/adam_core"
@@ -388,32 +414,82 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
             _fail(NORMAL, "wheel-backed jobs must verify installed provenance and pins")
 
 
-def _verify_disabled_release_workflow(name: str, workflow: Mapping[str, Any]) -> None:
-    if _on(workflow) != {
-        "workflow_dispatch": workflow.get(True, workflow.get("on"))["workflow_dispatch"]
-    }:
+def _dispatch_inputs(workflow: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+    trigger = _on(workflow)
+    if not isinstance(trigger, Mapping) or set(trigger) != {"workflow_dispatch"}:
         _fail(name, "release workflows must be workflow_dispatch-only")
+    dispatch = trigger["workflow_dispatch"]
+    if not isinstance(dispatch, Mapping):
+        return {}
+    inputs = dispatch.get("inputs", {})
+    if not isinstance(inputs, Mapping):
+        _fail(name, "workflow_dispatch inputs must be a mapping")
+    return inputs
+
+
+def _input_default(inputs: Mapping[str, Any], name: str, workflow: str) -> Any:
+    entry = inputs.get(name)
+    if not isinstance(entry, Mapping):
+        _fail(workflow, f"missing workflow input {name!r}")
+    return entry.get("default")
+
+
+def _verify_disabled_release_workflow(name: str, workflow: Mapping[str, Any]) -> None:
+    inputs = _dispatch_inputs(workflow, name)
     jobs = workflow.get("jobs")
     if not isinstance(jobs, Mapping) or not jobs:
         _fail(name, "release workflow must retain its reviewed job inventory")
-    for job_id, job in jobs.items():
+    expected_conditions = EXPECTED_RELEASE_JOB_CONDITIONS[name]
+    if set(jobs) != set(expected_conditions):
+        _fail(name, "release job inventory drifted")
+    for job_id, expected_condition in expected_conditions.items():
+        job = jobs[job_id]
         if not isinstance(job, Mapping):
             _fail(f"{name}:{job_id}", "job must be a mapping")
-        if job.get("if") != DISABLED_JOB_CONDITION:
-            _fail(
-                f"{name}:{job_id}",
-                "every release job must remain explicitly disabled",
-            )
+        if job.get("if") != expected_condition:
+            _fail(f"{name}:{job_id}", "release readiness condition drifted")
+        if "continue-on-error" in job:
+            _fail(f"{name}:{job_id}", "continue-on-error is forbidden")
 
-    serialized = json.dumps(workflow)
-    for stale in ("0.5.0", "0.6.1", "f0f1aec8b3c059f0cc4af054b5ebe8ed7760da19"):
-        if stale in serialized:
-            _fail(name, f"stale release identity remains: {stale}")
-    for required in ("0.6.0", "0.7.0", "not yet public", "registry locks"):
-        if required not in serialized:
-            _fail(name, f"missing dependency-readiness marker: {required}")
-    if name == "release-candidate-wheel-matrix.yml" and CORE_REF not in serialized:
-        _fail(name, "wheel matrix must retain the exact reviewed Core ref")
+    for value in _walk(workflow):
+        if isinstance(value, str) and SECRET_IDENTIFIER.search(value):
+            _fail(name, "release workflows may not use repository secrets")
+
+    if name == "publish-rust-crate.yml":
+        expected = {
+            "expected_version": "0.6.0",
+            "expected_core_version": "0.7.0",
+            "expected_python_version": "0.6.0",
+        }
+        for input_name, default in expected.items():
+            if _input_default(inputs, input_name, name) != default:
+                _fail(name, f"{input_name} default must be {default}")
+    elif name == "publish.yml":
+        expected = {
+            "expected_version": "0.6.0",
+            "expected_rust_version": "0.6.0",
+            "expected_adam_core_version": "0.7.0",
+            "expected_adam_core_rust_version": "0.7.0",
+        }
+        for input_name, default in expected.items():
+            if _input_default(inputs, input_name, name) != default:
+                _fail(name, f"{input_name} default must be {default}")
+    elif name == "release-candidate-wheel-matrix.yml":
+        if workflow.get("env") != {
+            "PIP_ONLY_BINARY": ":all:",
+            "MATURIN_PEP517_ARGS": "--locked",
+            "ADAM_CORE_RELEASE_VERSION": "0.7.0",
+            "ADAM_CORE_ACCEPTANCE_REF": CORE_REF,
+            "ADAM_ASSIST_RELEASE_VERSION": "0.6.0",
+        }:
+            _fail(name, "wheel release identities drifted")
+    elif name == "rust-crate-release-candidate.yml":
+        if workflow.get("env") != {
+            "RUST_RELEASE_VERSION": "0.6.0",
+            "CORE_RUST_VERSION": "0.7.0",
+            "RELEASE_CHANNEL": "stable",
+        }:
+            _fail(name, "Rust release identities drifted")
 
 
 def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> None:
@@ -450,7 +526,7 @@ def verify(root: Path = ROOT) -> None:
     if contract.get("release_automation") != RELEASE_AUTOMATION_STATE:
         _fail(
             "source_pair_contract",
-            "release automation must be present but explicitly disabled",
+            "release automation must be present but gated by release readiness",
         )
     if contract.get("workflow_sha256") != WORKFLOW_SHA256:
         _fail("source_pair_contract", "canonical workflow digest drifted")
@@ -466,7 +542,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args()
     verify(args.root.resolve())
-    print("verified active CI and disabled release-workflow transition policy")
+    print("verified active CI and gated release-workflow transition policy")
 
 
 if __name__ == "__main__":

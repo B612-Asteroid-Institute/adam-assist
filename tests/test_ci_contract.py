@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from migration.scripts.verify_workflow_policy import (
-    DISABLED_JOB_CONDITION,
+    EXPECTED_RELEASE_JOB_CONDITIONS,
     NORMAL,
     RELEASE_WORKFLOWS,
     WORKFLOW_INVENTORY,
@@ -12,7 +12,7 @@ from migration.scripts.verify_workflow_policy import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_exact_workflow_inventory_and_disabled_release_jobs() -> None:
+def test_exact_workflow_inventory_and_gated_release_jobs() -> None:
     workflows = load_workflows()
     assert set(workflows) == set(WORKFLOW_INVENTORY)
     assert set(workflows[NORMAL]["jobs"]) == {
@@ -22,9 +22,9 @@ def test_exact_workflow_inventory_and_disabled_release_jobs() -> None:
     }
     for name in RELEASE_WORKFLOWS:
         assert workflows[name]["jobs"]
-        assert {job["if"] for job in workflows[name]["jobs"].values()} == {
-            DISABLED_JOB_CONDITION
-        }
+        assert {
+            job_id: job["if"] for job_id, job in workflows[name]["jobs"].items()
+        } == EXPECTED_RELEASE_JOB_CONDITIONS[name]
     verify()
 
 
