@@ -365,6 +365,7 @@ def test_capsule_batching_matches_singletons_mixed_nongrav_and_epochs() -> None:
         capsule, states, epochs, targets, nongrav
     )
     assert (status, error) == (0, "") and all(valid) and not any(codes)
+    assert np.isfinite(batch).all()
     for i in range(3):
         s, single, v, _c, e = _call(
             capsule,
@@ -374,18 +375,21 @@ def test_capsule_batching_matches_singletons_mixed_nongrav_and_epochs() -> None:
             [nongrav[i]],
         )
         assert (s, e) == (0, "")
+        assert np.isfinite(single).all()
         np.testing.assert_array_equal(
             batch[i * len(targets) : (i + 1) * len(targets)].view(np.uint64),
             single.view(np.uint64),
         )
     # NaN-row and zero-acceleration rows equal gravity-only (null pointer).
     s, gravity, _, _, _ = _call(capsule, states[1:3], epochs[1:3], targets)
+    assert s == 0 and np.isfinite(gravity).all()
     np.testing.assert_array_equal(batch[4:].view(np.uint64), gravity.view(np.uint64))
     # Pairwise mode: orbit i to target i.
     s, pairwise, v, _c, e = _call(
         capsule, states, epochs, targets[:3], nongrav, pairwise=True
     )
     assert (s, e) == (0, "") and all(v)
+    assert np.isfinite(pairwise).all()
     # Pairwise integrates each orbit to one target only, so IAS15 step
     # sequences differ from the multi-target cross product: compare closely.
     pair_diff = max(
@@ -420,6 +424,7 @@ def test_capsule_matches_public_propagate_orbits() -> None:
         orbit, Timestamp.from_mjd(targets, scale="tdb")
     )
     values = public.coordinates.values
+    assert np.isfinite(values).all() and np.isfinite(states).all()
     diff = float(np.max(np.abs(values - states)))
     RESULTS["capsule_vs_public_max_abs"] = diff
     print(
@@ -434,6 +439,7 @@ def test_stm_matches_finite_difference() -> None:
         capsule, TRUTH_STATE, [60020], CUSTOM
     )
     assert (status, valid, error) == (0, [1], "")
+    assert np.isfinite(stms).all()
     h = np.array([1e-7, 1e-7, 1e-7, 1e-9, 1e-9, 1e-9])
     fd = np.zeros((6, 6))
     for j in range(6):
@@ -443,8 +449,11 @@ def test_stm_matches_finite_difference() -> None:
         minus[j] -= h[j]
         _, sp, _, _, _ = _call(capsule, [plus], [60000], [60020], [CUSTOM])
         _, sm, _, _, _ = _call(capsule, [minus], [60000], [60020], [CUSTOM])
+        assert np.isfinite(sp).all() and np.isfinite(sm).all()
         fd[:, j] = (sp[0] - sm[0]) / (2 * h[j])
+    assert np.isfinite(fd).all()
     rel = np.max(np.abs(fd - stms[0]) / (np.abs(stms[0]) + 1e-12))
+    assert np.isfinite(rel)
     RESULTS["stm_fd_rel"] = float(rel)
     print("\nSTM vs central FD max rel", rel)
     assert rel < 1e-4

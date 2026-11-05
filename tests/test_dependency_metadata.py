@@ -155,11 +155,41 @@ def test_core_07_migration_inventory_is_complete() -> None:
         "Propagation, science, and runtime inventory",
         "Core-owned OD surface removal and adapter boundary",
         "Tests, workflows, documentation, and metadata",
+        "Current-main test disposition",
         "test_core_refine_preserves_physical_and_custom_nongrav_metadata",
         "test_core_refine_preserves_but_does_not_activate_source_only_nongrav",
         "No Windows or musllinux support",
     ):
         assert required in inventory
+
+
+def test_all_removed_current_main_tests_have_explicit_dispositions() -> None:
+    inventory = (ROOT / "MIGRATION.md").read_text()
+    removed = (
+        "test_fit_least_squares_evaluated_matches_composed_crossings",
+        "test_initial_orbit_determination_fused_batch_and_timing",
+        "test_native_od_timing_lanes",
+        "test_od_fit_below_min_obs_returns_empty",
+        "test_od_fit_matches_frozen_legacy_solution",
+        "test_public_fit_least_squares_dispatches_to_native",
+        "test_rust_od_recovers_truth",
+        "test_vallado_least_squares_matches_frozen_parity",
+        "test_every_rust_workflow_uses_the_msrv_toolchain_and_components",
+        "test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark",
+        "test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels",
+        "test_rust_crate_workflows_package_once_and_publish_tested_bytes",
+        "test_same_wheel_reports_accept_compatible_core_06_outputs",
+        "test_cargo_lock_uses_public_core_registry_artifacts",
+        "test_current_benchmark_ci_covers_product_and_core_od_backend_workloads",
+        "test_python_lock_uses_public_core_registry_artifacts",
+        "test_stable_dependencies_declare_core_06_compatibility",
+        "test_partial_constants_are_rejected_for_active_force",
+        "test_stable_version_module_is_preserved",
+    )
+    assert len(removed) == 19
+    assert len(set(removed)) == len(removed)
+    for test_name in removed:
+        assert inventory.count(test_name) == 1, test_name
 
 
 def test_stale_assist_owned_od_benchmark_is_retired() -> None:

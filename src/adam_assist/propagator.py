@@ -306,8 +306,12 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         The native descriptor includes immutable fingerprints of all IAS15
         settings and the exact planetary/small-body kernel contents. Kernel
         hashing is lazy on the first capsule request and cached on this
-        immutable provider instance with tamper checks. Core owns OD
-        orchestration and records those identities in workflow provenance.
+        immutable provider instance. Metadata-only changes rehash and refresh
+        when bytes match; changed bytes fail closed. A capsule already returned
+        keeps its original identity metadata, but its native callbacks recheck
+        the retained handles and reject tampering before propagation. A new
+        capsule request rejects the same change. Core owns OD orchestration and
+        records those identities in workflow provenance.
         """
         return self._native.propagator_capsule()
 

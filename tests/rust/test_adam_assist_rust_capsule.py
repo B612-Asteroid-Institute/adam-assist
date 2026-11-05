@@ -503,6 +503,9 @@ def test_capsule_propagation_preserves_order_nongrav_and_row_failures() -> None:
         [FAILURE_NONE, FAILURE_NONE],
         "",
     )
+    assert np.isfinite(custom_states).all()
+    assert np.isfinite(gravity_states).all()
+    assert np.isfinite(default_states).all()
     assert np.max(np.abs(custom_states - gravity_states)) > 1e-10
     assert np.max(np.abs(custom_states - default_states)) > 1e-12
     # The provider returns caller target order; no callback-local sorting leaks.
@@ -573,11 +576,13 @@ def test_capsule_stm_honors_custom_and_inactive_nongrav() -> None:
         capsule, TRUTH_STATE, [60020, 60010], custom
     )
     assert (status, valid, error) == (0, [1, 1], "")
+    assert np.isfinite(stm_states).all()
     assert np.isfinite(stms).all()
     status, propagated, valid, failures, error = _call_capsule_propagate(
         capsule, TRUTH_STATE, [60020, 60010], custom
     )
     assert (status, valid, failures, error) == (0, [1, 1], [0, 0], "")
+    assert np.isfinite(propagated).all()
     np.testing.assert_allclose(stm_states, propagated, rtol=0, atol=5e-15)
 
     inactive = [0.0, 0.0, 0.0] + custom[3:]

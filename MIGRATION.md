@@ -107,9 +107,10 @@ main had already advanced `spicekit` from `0.2.2`/`17c159ac…` to
 exact-source validation resolves `spicekit 0.2.3` through Core. The replay
 parent tree `6ef5c5a^{tree}` is exactly the accepted
 `00ec21e^{tree}` (`4b1ec10b63fd95e3c99e6ac565b20fb841afd468`), so the
-current-main lock correction is preserved without semantic drift. Every other
-file and behavior already present at the current-main base remains inherited;
-the replay does not reset, replace, or roll back later-main work.
+current-main lock correction is preserved without semantic drift. Except for
+the deliberate surface/workflow/test removals itemized below, every other file
+and behavior already present at the current-main base remains inherited; the
+replay does not reset, replace, or roll back later-main work.
 
 ### Propagation, science, and runtime inventory
 
@@ -134,16 +135,24 @@ Added or adapted for the exact Core source:
   bit pattern or enum value; kernel identity includes semantic slot, byte size,
   and SHA-256, not a filesystem path.
 - Explicit-path construction retains stable open handles and asks ASSIST to
-  load through aliases to those handles. Kernel hashing is lazy, thread-safe,
-  and cached per immutable `AssistData` instance. Every metadata acquisition
-  verifies size, device, inode, modification time, and change time on both the
-  retained handle and canonical path, so truncation, same-size rewrites,
-  restored-mtime rewrites, and path replacement fail closed instead of
-  returning stale provenance.
+  load through aliases to those handles. Every path-owned explicit, default,
+  and Python constructor shares one process-global lock around upstream
+  ASSIST/SPICE ephemeris parsing; propagation never holds that lock and remains
+  parallel. Kernel hashing is lazy, thread-safe, and cached per immutable
+  `AssistData` instance. Metadata includes size, device, inode, mode, link
+  count, modification time, and change time for the retained handle and path.
+  A metadata change atomically rehashes affected exact bytes: byte-identical
+  hard-link, chmod, touch, or replacement changes refresh the trusted snapshot,
+  while truncation and same-size/restored-mtime content rewrites fail closed
+  without destroying the prior trusted identity.
 - `AssistExternalPropagator` owns the raw ABI-v2 table and exposes only a
   lifetime-bound validated borrow. Callers never own a context pointer or
   manage capsule/table destruction. Python's capsule and standalone Rust use
-  the same `OwnedExternalPropagator<AssistPropagator>` implementation.
+  the same `OwnedExternalPropagator<AssistPropagator>` implementation. A table
+  already created before on-disk tampering keeps the immutable fingerprint of
+  the exact retained handle ASSIST loaded, while each callback revalidates the
+  handle/path and rejects changed bytes before dynamics; asking its owning
+  propagator for a new adapter fails the same verification.
 - `AssistData::new(Ephemeris)` remains valid for direct propagation but cannot
   claim unavailable kernel provenance; external-provider construction fails
   with the explicit `construct it from paths` error.
@@ -183,7 +192,11 @@ Repository validation covers:
   typed failure isolation, mixed-epoch/mixed-non-grav batching, public-vs-ABI
   propagation, and STM finite-difference behavior with a real ASSIST provider;
 - lazy fingerprint call count, concurrent first access, cache reuse,
-  same-size/restored-mtime mutation, replacement, and truncation;
+  metadata-only hard-link/chmod/touch/replacement refresh, concurrent refresh,
+  same-size/restored-mtime tamper rejection and restoration recovery, retained
+  capsule/new-adapter tamper behavior, and pre-hash truncation rejection;
+- repeated high-contention construction (64 providers per run), finite
+  massive-body dynamics, and bitwise agreement with a sequential reference;
 - default, all-feature, and no-default-feature `check`, warning-denied Clippy,
   tests, doctests, and warning-denied docs on Rust 1.87;
 - Python 3.11–3.13 source-pair wheels, lint, formatting, import compilation,
@@ -221,6 +234,35 @@ The accepted `00ec` capsule tests are accounted for as follows:
   covered through direct traits, ABI batching, STM/partial tests, and fresh
   canonical provider workflows; ASSIST does not bypass Core's immutable
   handoff identity.
+
+### Current-main test disposition
+
+The comparison from current-main base `a8ec6d22` to this propagation-only
+source line reports these 19 removed test node IDs. Each removal is deliberate
+and accounted for below; no test disappeared merely because it was
+inconvenient:
+
+| Removed current-main test | Disposition and current authority |
+|---|---|
+| `tests/rust/test_adam_assist_rust_od.py::test_fit_least_squares_evaluated_matches_composed_crossings` | Removed with Assist-owned fitting; Core `refine`/`evaluate_orbits` composition is covered by `tests/rust/test_provider_capsule_od.py`. |
+| `tests/rust/test_adam_assist_rust_od.py::test_initial_orbit_determination_fused_batch_and_timing` | Removed with Assist-owned IOD; canonical Core `run_iod` batching and one capsule acquisition are covered by `test_provider_capsule_od.py`. |
+| `tests/rust/test_adam_assist_rust_od.py::test_native_od_timing_lanes` | Removed with the obsolete Assist OD benchmark lane; the frozen artifact is historical only and current benchmarks are propagation-only. |
+| `tests/rust/test_adam_assist_rust_od.py::test_od_fit_below_min_obs_returns_empty` | Removed with `od_fit`; Core owns typed per-group insufficient-observation behavior and the provider test covers failure isolation. |
+| `tests/rust/test_adam_assist_rust_od.py::test_od_fit_matches_frozen_legacy_solution` | Removed with `od_fit`; frozen legacy parity remains evidence while canonical Core `run_od` is exercised with the real capsule. |
+| `tests/rust/test_adam_assist_rust_od.py::test_public_fit_least_squares_dispatches_to_native` | Removed because that public Assist method no longer exists; Python delegates to Core and the capsule contains propagation callbacks only. |
+| `tests/rust/test_adam_assist_rust_od.py::test_rust_od_recovers_truth` | Replaced by real-provider Core `run_iod`/`run_od`/`refine` truth, composition, determinism, and evaluation probes in `test_provider_capsule_od.py`. |
+| `tests/rust/test_adam_assist_rust_od.py::test_vallado_least_squares_matches_frozen_parity` | Removed with the noncanonical Vallado hook; the frozen oracle remains migration evidence and Core `refine` is the documented replacement. |
+| `tests/test_ci_contract.py::test_every_rust_workflow_uses_the_msrv_toolchain_and_components` | Adapted into the single read-only workflow policy plus default/all/no-default Rust 1.87 matrix checks. |
+| `tests/test_ci_contract.py::test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark` | Adapted into `test_only_exact_source_normal_ci_exists` and `test_critical_ci_commands_and_benchmark_evidence_are_pinned`. |
+| `tests/test_ci_contract.py::test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels` | Intentionally removed because no release workflow exists before authentic Core 0.7 registry artifacts; exact-source wheel cross-pairs replace it for this source state. |
+| `tests/test_ci_contract.py::test_rust_crate_workflows_package_once_and_publish_tested_bytes` | Intentionally removed with all publication workflows; crate packaging is validated locally without publishing. |
+| `tests/test_core_compatibility_gates.py::test_same_wheel_reports_accept_compatible_core_06_outputs` | Replaced by `test_same_wheel_reports_accept_compatible_core_07_outputs`; Core 0.6 is intentionally incompatible with ABI-v2 provenance. |
+| `tests/test_dependency_metadata.py::test_cargo_lock_uses_public_core_registry_artifacts` | Deferred until Core 0.7 is public; `test_prerelease_source_pair_has_no_stale_registry_locks` enforces honest absent-lock state. |
+| `tests/test_dependency_metadata.py::test_current_benchmark_ci_covers_product_and_core_od_backend_workloads` | Adapted to `test_current_benchmark_ci_covers_provider_product_workloads`; Assist-owned OD workloads are retired. |
+| `tests/test_dependency_metadata.py::test_python_lock_uses_public_core_registry_artifacts` | Deferred until Core 0.7 is public; source-pair and workflow policy tests reject fabricated lock state. |
+| `tests/test_dependency_metadata.py::test_stable_dependencies_declare_core_06_compatibility` | Replaced by `test_dependencies_declare_core_070_floor` and exact source-pair metadata assertions. |
+| `tests/test_nongrav.py::test_partial_constants_are_rejected_for_active_force` | Adapted to reviewed field-wise asteroid defaults in `test_partial_constants_fill_asteroid_defaults_per_field` and capsule/default-equivalence tests. |
+| `tests/test_public_surface_compatibility.py::test_stable_version_module_is_preserved` | Adapted to `test_next_source_version_module_is_preserved`, preserving the module while asserting the breaking-line version `0.6.0`. |
 
 ### Historical evidence and deliberate omissions
 

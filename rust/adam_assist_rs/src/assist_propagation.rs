@@ -33,9 +33,14 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
+
+// Upstream ASSIST/SPICE ephemeris construction mutates process-global parser
+// state. All constructors owned by this crate converge here; propagation does
+// not take this lock and remains parallel.
+static EPHEMERIS_CONSTRUCTION_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(feature = "kernel-data")]
 const DE440_SIZE_BYTES: u64 = 119_799_808;
@@ -61,6 +66,10 @@ struct StableFileIdentity {
     #[cfg(unix)]
     inode: u64,
     #[cfg(unix)]
+    mode: u32,
+    #[cfg(unix)]
+    hard_links: u64,
+    #[cfg(unix)]
     modified_seconds: i64,
     #[cfg(unix)]
     modified_nanoseconds: i64,
@@ -80,6 +89,10 @@ impl StableFileIdentity {
             #[cfg(unix)]
             inode: metadata.ino(),
             #[cfg(unix)]
+            mode: metadata.mode(),
+            #[cfg(unix)]
+            hard_links: metadata.nlink(),
+            #[cfg(unix)]
             modified_seconds: metadata.mtime(),
             #[cfg(unix)]
             modified_nanoseconds: metadata.mtime_nsec(),
@@ -89,13 +102,34 @@ impl StableFileIdentity {
             changed_nanoseconds: metadata.ctime_nsec(),
         }
     }
+
+    #[cfg(unix)]
+    fn same_file(&self, other: &Self) -> bool {
+        self.device == other.device && self.inode == other.inode
+    }
+
+    #[cfg(not(unix))]
+    fn same_file(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct KernelFileMetadata {
+    handle: StableFileIdentity,
+    path: StableFileIdentity,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct KernelPairMetadata {
+    planets: KernelFileMetadata,
+    asteroids: KernelFileMetadata,
 }
 
 struct KernelFile {
     label: &'static str,
     canonical_path: PathBuf,
     file: File,
-    identity: StableFileIdentity,
 }
 
 impl KernelFile {
@@ -108,15 +142,12 @@ impl KernelFile {
         })?;
         let file = File::open(&canonical_path)
             .map_err(|error| Error::Other(format!("failed to open {label} kernel: {error}")))?;
-        let identity =
-            StableFileIdentity::from_metadata(&file.metadata().map_err(|error| {
-                Error::Other(format!("failed to inspect {label} kernel: {error}"))
-            })?);
+        file.metadata()
+            .map_err(|error| Error::Other(format!("failed to inspect {label} kernel: {error}")))?;
         Ok(Self {
             label,
             canonical_path,
             file,
-            identity,
         })
     }
 
@@ -135,18 +166,11 @@ impl KernelFile {
         }
     }
 
-    fn verify_unchanged(&self) -> Result<()> {
-        let handle_identity =
-            StableFileIdentity::from_metadata(&self.file.metadata().map_err(|error| {
-                Error::Other(format!("failed to inspect {} kernel: {error}", self.label))
-            })?);
-        if handle_identity != self.identity {
-            return Err(Error::Other(format!(
-                "{} kernel changed after ASSIST loaded it",
-                self.label
-            )));
-        }
-        let path_identity = StableFileIdentity::from_metadata(
+    fn metadata(&self) -> Result<KernelFileMetadata> {
+        let handle = StableFileIdentity::from_metadata(&self.file.metadata().map_err(|error| {
+            Error::Other(format!("failed to inspect {} kernel: {error}", self.label))
+        })?);
+        let path = StableFileIdentity::from_metadata(
             &std::fs::metadata(&self.canonical_path).map_err(|error| {
                 Error::Other(format!(
                     "failed to re-inspect {} kernel {}: {error}",
@@ -155,42 +179,90 @@ impl KernelFile {
                 ))
             })?,
         );
-        if path_identity != self.identity {
+        Ok(KernelFileMetadata { handle, path })
+    }
+
+    fn hash_open_file(&self, file: &File, source: &str) -> Result<FileIdentity> {
+        let mut reader = BufReader::new(file.try_clone().map_err(|error| {
+            Error::Other(format!(
+                "failed to clone {} kernel {source}: {error}",
+                self.label
+            ))
+        })?);
+        reader.seek(SeekFrom::Start(0)).map_err(|error| {
+            Error::Other(format!(
+                "failed to rewind {} kernel {source}: {error}",
+                self.label
+            ))
+        })?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 1024 * 1024];
+        let mut size = 0_u64;
+        loop {
+            let count = reader.read(&mut buffer).map_err(|error| {
+                Error::Other(format!(
+                    "failed to read {} kernel {source}: {error}",
+                    self.label
+                ))
+            })?;
+            if count == 0 {
+                break;
+            }
+            size += count as u64;
+            hasher.update(&buffer[..count]);
+        }
+        Ok(FileIdentity {
+            size,
+            sha256: format!("{:x}", hasher.finalize()),
+        })
+    }
+
+    fn content_identity(&self, expected_metadata: &KernelFileMetadata) -> Result<FileIdentity> {
+        if self.metadata()? != *expected_metadata {
+            return Err(Error::Other(format!(
+                "{} kernel metadata changed during content verification",
+                self.label
+            )));
+        }
+        let handle_identity = self.hash_open_file(&self.file, "retained handle")?;
+        let path_file = File::open(&self.canonical_path).map_err(|error| {
+            Error::Other(format!(
+                "failed to reopen {} kernel {}: {error}",
+                self.label,
+                self.canonical_path.display()
+            ))
+        })?;
+        let opened_path_metadata =
+            StableFileIdentity::from_metadata(&path_file.metadata().map_err(|error| {
+                Error::Other(format!(
+                    "failed to inspect reopened {} kernel: {error}",
+                    self.label
+                ))
+            })?);
+        if opened_path_metadata != expected_metadata.path {
+            return Err(Error::Other(format!(
+                "{} kernel path changed during content verification",
+                self.label
+            )));
+        }
+        let path_identity = if expected_metadata.handle.same_file(&expected_metadata.path) {
+            handle_identity.clone()
+        } else {
+            self.hash_open_file(&path_file, "canonical path")?
+        };
+        if self.metadata()? != *expected_metadata {
+            return Err(Error::Other(format!(
+                "{} kernel metadata changed during content verification",
+                self.label
+            )));
+        }
+        if handle_identity != path_identity {
             return Err(Error::Other(format!(
                 "{} kernel path no longer identifies the bytes ASSIST loaded",
                 self.label
             )));
         }
-        Ok(())
-    }
-
-    fn content_identity(&self) -> Result<FileIdentity> {
-        self.verify_unchanged()?;
-        let mut reader = BufReader::new(self.file.try_clone().map_err(|error| {
-            Error::Other(format!(
-                "failed to clone {} kernel handle: {error}",
-                self.label
-            ))
-        })?);
-        reader.seek(SeekFrom::Start(0)).map_err(|error| {
-            Error::Other(format!("failed to rewind {} kernel: {error}", self.label))
-        })?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0_u8; 1024 * 1024];
-        loop {
-            let count = reader.read(&mut buffer).map_err(|error| {
-                Error::Other(format!("failed to read {} kernel: {error}", self.label))
-            })?;
-            if count == 0 {
-                break;
-            }
-            hasher.update(&buffer[..count]);
-        }
-        self.verify_unchanged()?;
-        Ok(FileIdentity {
-            size: self.identity.size,
-            sha256: format!("{:x}", hasher.finalize()),
-        })
+        Ok(handle_identity)
     }
 }
 
@@ -213,16 +285,24 @@ struct KernelFiles {
     planets: KernelFile,
     asteroids: KernelFile,
     identity: OnceLock<std::result::Result<KernelPairIdentity, String>>,
+    trusted_metadata: Mutex<KernelPairMetadata>,
     #[cfg(test)]
     compute_count: AtomicUsize,
 }
 
 impl KernelFiles {
     fn open(planets_path: &Path, asteroids_path: &Path) -> Result<Self> {
+        let planets = KernelFile::open(planets_path, "planetary")?;
+        let asteroids = KernelFile::open(asteroids_path, "small-body")?;
+        let trusted_metadata = KernelPairMetadata {
+            planets: planets.metadata()?,
+            asteroids: asteroids.metadata()?,
+        };
         Ok(Self {
-            planets: KernelFile::open(planets_path, "planetary")?,
-            asteroids: KernelFile::open(asteroids_path, "small-body")?,
+            planets,
+            asteroids,
             identity: OnceLock::new(),
+            trusted_metadata: Mutex::new(trusted_metadata),
             #[cfg(test)]
             compute_count: AtomicUsize::new(0),
         })
@@ -232,32 +312,125 @@ impl KernelFiles {
         (self.planets.loader_path(), self.asteroids.loader_path())
     }
 
-    fn verify_unchanged(&self) -> Result<()> {
-        self.planets.verify_unchanged()?;
-        self.asteroids.verify_unchanged()
+    fn metadata(&self) -> Result<KernelPairMetadata> {
+        Ok(KernelPairMetadata {
+            planets: self.planets.metadata()?,
+            asteroids: self.asteroids.metadata()?,
+        })
+    }
+
+    fn verified_identity(
+        &self,
+        trusted_metadata: &KernelPairMetadata,
+        trusted_identity: Option<&KernelPairIdentity>,
+    ) -> Result<(KernelPairIdentity, KernelPairMetadata)> {
+        const MAX_STABLE_METADATA_ATTEMPTS: usize = 3;
+        for _ in 0..MAX_STABLE_METADATA_ATTEMPTS {
+            let before = self.metadata()?;
+            #[cfg(test)]
+            self.compute_count.fetch_add(1, AtomicOrdering::SeqCst);
+            let planets = match trusted_identity {
+                Some(identity) if before.planets == trusted_metadata.planets => {
+                    identity.planets.clone()
+                }
+                _ => self.planets.content_identity(&before.planets)?,
+            };
+            let asteroids = match trusted_identity {
+                Some(identity) if before.asteroids == trusted_metadata.asteroids => {
+                    identity.asteroids.clone()
+                }
+                _ => self.asteroids.content_identity(&before.asteroids)?,
+            };
+            let after = self.metadata()?;
+            if after != before {
+                continue;
+            }
+            let fingerprint = kernel_pair_fingerprint(&planets, &asteroids);
+            let observed = KernelPairIdentity {
+                planets,
+                asteroids,
+                fingerprint,
+            };
+            if let Some(identity) = trusted_identity {
+                if observed != *identity {
+                    return Err(Error::Other(
+                        "ASSIST kernel bytes changed after provenance was established".to_string(),
+                    ));
+                }
+            }
+            return Ok((observed, after));
+        }
+        Err(Error::Other(
+            "ASSIST kernel metadata did not remain stable during content verification".to_string(),
+        ))
     }
 
     fn identity(&self) -> Result<&KernelPairIdentity> {
-        self.verify_unchanged()?;
-        let identity = self.identity.get_or_init(|| {
-            #[cfg(test)]
-            self.compute_count.fetch_add(1, AtomicOrdering::SeqCst);
-            (|| {
-                let planets = self.planets.content_identity()?;
-                let asteroids = self.asteroids.content_identity()?;
-                let fingerprint = kernel_pair_fingerprint(&planets, &asteroids);
-                Ok(KernelPairIdentity {
-                    planets,
-                    asteroids,
-                    fingerprint,
-                })
-            })()
-            .map_err(|error: Error| error.to_string())
-        });
-        self.verify_unchanged()?;
-        identity
+        let mut trusted_metadata = self
+            .trusted_metadata
+            .lock()
+            .map_err(|_| Error::Other("ASSIST kernel provenance lock was poisoned".to_string()))?;
+        let current_metadata = self.metadata()?;
+        if let Some(identity) = self.identity.get() {
+            let identity = identity
+                .as_ref()
+                .map_err(|message| Error::Other(message.clone()))?;
+            if current_metadata != *trusted_metadata {
+                let (_, refreshed_metadata) =
+                    self.verified_identity(&trusted_metadata, Some(identity))?;
+                *trusted_metadata = refreshed_metadata;
+            }
+            return Ok(identity);
+        }
+
+        // Before the first content hash there is no trusted digest against
+        // which changed bytes could be checked. Reject any post-load metadata
+        // change rather than blessing an unknown replacement or truncation.
+        if current_metadata != *trusted_metadata {
+            let message =
+                "ASSIST kernel changed after it was loaded and before provenance was established"
+                    .to_string();
+            return match self.identity.get_or_init(|| Err(message)) {
+                Ok(_) => unreachable!("initial metadata mismatch cannot establish identity"),
+                Err(message) => Err(Error::Other(message.clone())),
+            };
+        }
+        let (computed, refreshed_metadata) = match self.verified_identity(&trusted_metadata, None) {
+            Ok(computed) => computed,
+            Err(error) => {
+                return match self.identity.get_or_init(|| Err(error.to_string())) {
+                    Ok(_) => unreachable!("failed initial hash cannot establish identity"),
+                    Err(message) => Err(Error::Other(message.clone())),
+                };
+            }
+        };
+        let identity = self.identity.get_or_init(|| Ok(computed));
+        let identity = identity
             .as_ref()
-            .map_err(|message| Error::Other(message.clone()))
+            .map_err(|message| Error::Other(message.clone()))?;
+        *trusted_metadata = refreshed_metadata;
+        Ok(identity)
+    }
+
+    fn verify_loaded_snapshot(&self) -> Result<()> {
+        let trusted_metadata = self
+            .trusted_metadata
+            .lock()
+            .map_err(|_| Error::Other("ASSIST kernel provenance lock was poisoned".to_string()))?;
+        if self.metadata()? != *trusted_metadata {
+            return Err(Error::Other(
+                "ASSIST kernel changed while its ephemeris was being loaded".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_cached_identity(&self) -> Result<()> {
+        if self.identity.get().is_some() {
+            self.identity().map(|_| ())
+        } else {
+            Ok(())
+        }
     }
 
     #[cfg(test)]
@@ -306,6 +479,9 @@ impl AssistData {
     /// The original kernel bytes are unavailable on this route, so this value
     /// cannot be exported as a provenance-complete external OD provider. Use
     /// [`Self::from_paths`] when a capsule data fingerprint is required.
+    /// Callers that construct the raw [`Ephemeris`] themselves are also
+    /// responsible for serializing that upstream operation; every path-owned
+    /// constructor in this crate shares one process-global construction lock.
     pub fn new(ephem: Ephemeris) -> Self {
         Self {
             ephem,
@@ -326,8 +502,13 @@ impl AssistData {
     ) -> Result<Self> {
         let kernel_files = KernelFiles::open(planets_path.as_ref(), asteroids_path.as_ref())?;
         let (planets_loader, asteroids_loader) = kernel_files.loader_paths();
-        let ephem = Ephemeris::from_paths(&planets_loader, &asteroids_loader)?;
-        kernel_files.verify_unchanged()?;
+        let ephem = {
+            let _construction = EPHEMERIS_CONSTRUCTION_LOCK.lock().map_err(|_| {
+                Error::Other("ASSIST ephemeris construction lock was poisoned".to_string())
+            })?;
+            Ephemeris::from_paths(&planets_loader, &asteroids_loader)?
+        };
+        kernel_files.verify_loaded_snapshot()?;
         Ok(Self {
             ephem,
             kernel_files: Some(kernel_files),
@@ -335,6 +516,14 @@ impl AssistData {
     }
 
     /// Return the lazily computed immutable identity for both loaded kernels.
+    ///
+    /// Once established, benign metadata changes cause an atomic rehash of
+    /// affected retained handles (and a replaced canonical path) before the
+    /// cached digest is reused. Equal bytes refresh the trusted metadata
+    /// snapshot; different bytes fail closed without replacing the last
+    /// trusted snapshot. A metadata change before the first hash has no known
+    /// digest to compare and therefore taints that provider fail-closed; build
+    /// a new path-backed value after restoring the file.
     pub fn data_fingerprint(&self) -> Result<&str> {
         self.kernel_files
             .as_ref()
@@ -346,6 +535,13 @@ impl AssistData {
             })?
             .identity()
             .map(|identity| identity.fingerprint.as_str())
+    }
+
+    pub(crate) fn verify_claimed_kernel_identity(&self) -> Result<()> {
+        match &self.kernel_files {
+            Some(files) => files.verify_cached_identity(),
+            None => Ok(()),
+        }
     }
 
     /// Resolve DE440 plus SB441-n16 using adam-core's pure-Rust override ->
@@ -1404,10 +1600,10 @@ mod tests {
     }
 
     #[test]
-    fn cached_kernel_fingerprint_rejects_same_size_rewrite_with_restored_mtime() {
+    fn cached_kernel_fingerprint_rejects_tamper_retains_trust_and_recovers() {
         let (planets, asteroids) = temporary_kernel_pair("fingerprint-rewrite");
         let files = KernelFiles::open(&planets, &asteroids).unwrap();
-        let _ = files.identity().unwrap();
+        let fingerprint = files.identity().unwrap().fingerprint.clone();
         assert_eq!(files.compute_count(), 1);
 
         let original_mtime =
@@ -1415,32 +1611,106 @@ mod tests {
         std::fs::write(&planets, b"planet-kernel-b").unwrap();
         filetime::set_file_mtime(&planets, original_mtime).unwrap();
         let error = files.identity().unwrap_err().to_string();
-        assert!(error.contains("changed after ASSIST loaded it"), "{error}");
-        assert_eq!(files.compute_count(), 1);
+        assert!(error.contains("kernel bytes changed"), "{error}");
+        assert_eq!(files.compute_count(), 2);
+
+        // A failed verification must not replace the last trusted digest or
+        // metadata. Restoring the exact bytes can therefore recover safely.
+        std::fs::write(&planets, b"planet-kernel-a").unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 3);
 
         drop(files);
         remove_temporary_kernel_pair(&planets, &asteroids);
     }
 
     #[test]
-    fn cached_kernel_fingerprint_rejects_path_replacement() {
+    fn cached_kernel_fingerprint_accepts_identical_path_replacement() {
         let (planets, asteroids) = temporary_kernel_pair("fingerprint-replace");
         let files = KernelFiles::open(&planets, &asteroids).unwrap();
-        let _ = files.identity().unwrap();
+        let fingerprint = files.identity().unwrap().fingerprint.clone();
         let original = planets.with_extension("original");
         std::fs::rename(&planets, &original).unwrap();
         std::fs::write(&planets, b"planet-kernel-a").unwrap();
 
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 2);
+
+        std::fs::write(&planets, b"planet-kernel-b").unwrap();
         let error = files.identity().unwrap_err().to_string();
         assert!(
-            error.contains("path no longer identifies the bytes ASSIST loaded")
-                || error.contains("changed after ASSIST loaded it"),
+            error.contains("kernel bytes changed")
+                || error.contains("path no longer identifies the bytes ASSIST loaded"),
             "{error}"
         );
-        assert_eq!(files.compute_count(), 1);
+        assert_eq!(files.compute_count(), 3);
+
+        std::fs::write(&planets, b"planet-kernel-a").unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 4);
 
         drop(files);
         std::fs::remove_file(original).unwrap();
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_kernel_fingerprint_rehashes_metadata_only_changes_once() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-metadata");
+        let files = std::sync::Arc::new(KernelFiles::open(&planets, &asteroids).unwrap());
+        let fingerprint = files.identity().unwrap().fingerprint.clone();
+        assert_eq!(files.compute_count(), 1);
+
+        let hard_link = planets.with_extension("hardlink");
+        std::fs::hard_link(&planets, &hard_link).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 2);
+        std::fs::remove_file(&hard_link).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 3);
+
+        let original_mode = std::fs::metadata(&planets).unwrap().permissions().mode();
+        let mut permissions = std::fs::metadata(&planets).unwrap().permissions();
+        permissions.set_mode(original_mode & !0o222);
+        std::fs::set_permissions(&planets, permissions).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 4);
+        let mut permissions = std::fs::metadata(&planets).unwrap().permissions();
+        permissions.set_mode(original_mode);
+        std::fs::set_permissions(&planets, permissions).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 5);
+
+        let original_mtime =
+            filetime::FileTime::from_last_modification_time(&std::fs::metadata(&planets).unwrap());
+        let touched = filetime::FileTime::from_unix_time(
+            original_mtime.unix_seconds() + 10,
+            original_mtime.nanoseconds(),
+        );
+        filetime::set_file_mtime(&planets, touched).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprint);
+        assert_eq!(files.compute_count(), 6);
+
+        let touched_again = filetime::FileTime::from_unix_time(
+            original_mtime.unix_seconds() + 20,
+            original_mtime.nanoseconds(),
+        );
+        filetime::set_file_mtime(&planets, touched_again).unwrap();
+        let workers = (0..8)
+            .map(|_| {
+                let files = std::sync::Arc::clone(&files);
+                std::thread::spawn(move || files.identity().unwrap().fingerprint.clone())
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            assert_eq!(worker.join().unwrap(), fingerprint);
+        }
+        assert_eq!(files.compute_count(), 7);
+
+        drop(files);
         remove_temporary_kernel_pair(&planets, &asteroids);
     }
 
@@ -1457,8 +1727,16 @@ mod tests {
             .unwrap();
 
         let error = files.identity().unwrap_err().to_string();
-        assert!(error.contains("changed after ASSIST loaded it"), "{error}");
+        assert!(
+            error.contains("before provenance was established"),
+            "{error}"
+        );
         assert_eq!(files.compute_count(), 0);
+        let cached_error = files.verify_cached_identity().unwrap_err().to_string();
+        assert!(
+            cached_error.contains("before provenance was established"),
+            "{cached_error}"
+        );
 
         drop(files);
         remove_temporary_kernel_pair(&planets, &asteroids);

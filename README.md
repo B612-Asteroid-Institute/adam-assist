@@ -61,9 +61,10 @@ The retained migration helpers are documented as inert local tools in
 For reproducible local Rust validation, use one detached Core tree for all
 four Core crates. Patched Cargo commands create a temporary untracked lock;
 remove it afterward and verify that no tracked or untracked changes remain.
-The command below shows the all-feature lane; the authoritative CI also runs
-`check`, warning-denied Clippy, tests, doctests, and warning-denied docs with
-default, all, and no-default features:
+The command below runs only the all-feature `cargo test --all-targets` lane.
+It does not run formatting, Clippy, doctests, or docs. The authoritative CI
+invokes separate `fmt`, `check`, warning-denied Clippy, test, doctest, and
+warning-denied doc commands across default, all, and no-default features:
 
 ```console
 git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-0b49938e

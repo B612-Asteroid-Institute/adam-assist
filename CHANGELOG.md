@@ -26,9 +26,14 @@
   apply full PEP 503 normalization.
 - Deferred the 765 MiB kernel content hash from ordinary provider construction
   to the first metadata request. The digest is cached once per immutable
-  provider over retained handles, while device/inode/change-time/path checks
-  reject rewrites, replacement, or truncation before cached provenance can be
-  returned.
+  provider over retained handles. Metadata-only hard-link, chmod, touch, and
+  replacement changes rehash affected exact bytes and atomically refresh only
+  when content matches; rewrites or truncation fail closed while preserving
+  recovery state. Existing capsule metadata remains the loaded-handle snapshot,
+  while callbacks and new capsule requests reject changed bytes.
+- Serialized all crate-owned ASSIST/SPICE ephemeris construction through one
+  process-global lock while leaving propagation parallel; added repeated
+  high-contention finite and bitwise-agreement coverage.
 - Expanded exact-source validation to default/all/no-default Rust checks,
   warning-denied Clippy, tests, doctests, docs, packaged-crate tests, and
   independent capsule tamper/composition/batching/STM probes. Packaged unit

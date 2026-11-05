@@ -43,8 +43,12 @@ fn main() {}
 
 For explicit data ownership or offline deployments, call
 `AssistData::from_paths` or `AssistPropagator::from_paths` with DE440 and
-SB441-n16 paths. Disable the default resolver with
-`default-features = false`.
+SB441-n16 paths. Every path-owned explicit, default, and Python constructor
+shares one process-global lock around upstream ASSIST/SPICE ephemeris parsing;
+propagation does not hold that lock and remains parallel. Callers that instead
+wrap a self-constructed `Ephemeris` with `AssistData::new` are responsible for
+serializing that raw upstream construction and cannot export kernel
+provenance. Disable the default resolver with `default-features = false`.
 
 Core's canonical standalone workflows accept `OdPropagator`, not arbitrary
 predictor callbacks. Convert ASSIST to its owned, provenance-complete ABI-v2
@@ -72,6 +76,18 @@ The same provider works with Core-owned `run_iod`, `refine`, and
 `evaluate_orbits`. ASSIST supplies propagation, non-gravitational dynamics,
 STMs, and immutable configuration/data fingerprints only.
 
+A created adapter retains immutable metadata for the exact kernel handles that
+ASSIST loaded. If filesystem metadata later changes, the owner rehashes the
+affected retained handle (and a replaced path) under a per-provider lock.
+Byte-identical changes after the first fingerprint refresh the metadata
+snapshot; changed bytes fail closed while preserving the last trusted state.
+A pre-fingerprint metadata change has no trusted digest to compare and requires
+reconstructing the provider after restoring the file. An already-created adapter
+continues to report its original fingerprint, but its propagation callbacks
+revalidate provenance and reject changed bytes before dynamics. Creating a new
+adapter from that owner also rejects the change. Restoring the exact bytes
+allows a fresh verification to recover.
+
 ## Public Rust surface
 
 - `AssistPropagator` implements adam-core's typed `Propagator` contract.
@@ -96,9 +112,11 @@ Rust consumers.
 
 ## Validation
 
-Until Core `0.7.0` is public, run these gates from the repository's exact
-source-pair checkout rather than inventing a registry lock. The root README
-shows the complete four-crate path-patch command used by CI. That command runs
-Rust 1.87 formatting, strict Clippy, all targets, tests, doctests, and this
-compiled standalone example. Registry package verification remains blocked
-until authentic Core artifacts exist.
+Until Core `0.7.0` is public, validate against a detached checkout of exact
+reviewed Core commit `0b49938eb0be04214a8d07b206227d31b248394a` rather than
+inventing registry state. The root README shows the four-crate path patch for
+one all-feature `cargo test --all-targets` lane. That command does **not** run
+formatting, Clippy, doctests, or docs; CI invokes separate Rust 1.87 commands
+for default, all-feature, and no-default-feature `check`, strict Clippy, tests,
+doctests, and warning-denied docs. Registry package verification remains
+blocked until authentic Core artifacts exist.
