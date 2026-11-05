@@ -307,26 +307,45 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
     assert ".legacy-assist-venv" not in source
 
 
-def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
+def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     core_ref = "0b49938eb0be04214a8d07b206227d31b248394a"
     readme = (ROOT / "README.md").read_text()
+    crate_readme = (
+        ROOT / "rust" / "adam_assist_rs" / "README.md"
+    ).read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
+    release_tooling = (
+        ROOT / "migration" / "scripts" / "RELEASE_TOOLING.md"
+    ).read_text()
     normal_ci = (
         ROOT / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
     ).read_text()
-    assert core_ref in readme and core_ref in migration and core_ref in normal_ci
-    assert "adam-core>=0.7.0,<0.8.0" in readme
-    assert readme.index("Core `0.7.0` is not yet available") < readme.index(
-        "### Pure Rust"
-    )
-    for crate in (
-        "adam_core",
-        "adam_core_rs_coords",
-        "adam_core_rs_spice",
-        "adam_core_rs_kernel_data",
+
+    ordinary_docs = f"{readme}\n{crate_readme}".lower()
+    for transition_detail in (
+        core_ref,
+        "adam_assist_releases_enabled",
+        "exact-source",
+        "source-pair",
+        "registry lock",
+        "authentic lock",
+        "not yet available",
+        "not yet on crates.io",
+        "release candidate",
+        "reviewed core",
+        "reviewed source",
     ):
-        assert f"patch.crates-io.{crate}.path" in readme
-        assert f"patch.crates-io.{crate}.path" in normal_ci
+        assert transition_detail not in ordinary_docs
+
+    assert "`pyproject.toml`" in readme
+    assert "`rust/adam_assist_rs/Cargo.toml`" in readme
+    assert "`Cargo.toml` is" in crate_readme
+    assert "the authority for compatible adam-core crate versions" in crate_readme
+    assert "adam-core>=0.7.0,<0.8.0" in _project_dependencies()
+    assert _cargo_manifest()["dependencies"]["adam_core_rs_coords"] == "0.7"
+
+    assert core_ref in migration and core_ref in normal_ci
+    assert "ADAM_ASSIST_RELEASES_ENABLED" in release_tooling
     assert "Exact Core source pair" in normal_ci
     assert "exit 1" not in normal_ci
     workflows = sorted(
@@ -339,4 +358,3 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
         "release-candidate-wheel-matrix.yml",
         "rust-crate-release-candidate.yml",
     ]
-    assert "every job requires the unset-by-default repository" in readme

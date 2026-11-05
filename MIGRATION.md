@@ -38,8 +38,8 @@ exact-pins `adam-core==0.5.7`.
 ## Orbit-determination API migration
 
 This breaking removal starts the adam-assist `0.6.0` source line. Released
-`0.5.0` artifacts retain their historical methods; this candidate does not
-report itself as `0.5.0`-compatible.
+`0.5.0` artifacts retain their historical methods; the `0.6` line is not
+`0.5`-compatible.
 
 This line exports only `adam_core.propagator.v2`, declares Python
 `adam-core>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements, and is validated

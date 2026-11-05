@@ -9,13 +9,13 @@ requiring Python, PyO3, NumPy, or a Python runtime. Linux and macOS are
 supported; Windows is currently unavailable because upstream ASSIST uses POSIX
 memory mapping through `libassist-sys`.
 
-## Integration status
+## Integration boundary
 
-The `0.6.0` source line requires the coherent adam-core `0.7` crate line and
-its private propagator-v2 contract. It is source-pair validated against exact
-Core commit `0b49938eb0be04214a8d07b206227d31b248394a` (version `0.7.0`).
-Core `0.7.0` is not yet on crates.io, so the active registry lock is
-intentionally absent and crate release remains blocked until publication.
+`adam_assist` implements adam-core's typed propagation contracts and provides
+an owned external-provider view for Core's canonical orbit-determination
+workflows. It owns ASSIST dynamics, STMs, and provider provenance, but no
+orbit-determination, fitting, rejection, or linkage behavior. `Cargo.toml` is
+the authority for compatible adam-core crate versions and feature selection.
 
 ## Kernel setup
 
@@ -25,7 +25,7 @@ checksummed wheel fetch. Set `ADAM_CORE_KERNEL_DE440` and
 `ADAM_CORE_KERNEL_SB441_N16` to use specific DE440 and SB441-n16 files.
 `ADAM_CORE_KERNEL_OFFLINE=1` disables downloads. Regardless of which source
 wins, `from_default_kernels` loads through retained handles, hashes those exact
-bytes, and verifies the reviewed file size and SHA-256 before returning.
+bytes, and verifies the pinned file size and SHA-256 before returning.
 
 ```no_run
 use adam_assist::{AssistPropagator, AssistResult};
@@ -112,13 +112,13 @@ outside this guarantee.
 - `AssistData` owns the shared ASSIST ephemeris and its content fingerprint.
 - `assist_propagation` exposes lower-level orbit, nongravitational,
   covariance/STM, and pooling operations.
-- Collision and ephemeris helpers preserve the Python package's reviewed
-  scientific semantics.
+- Collision and ephemeris helpers preserve the Python package's scientific
+  semantics.
 
 `libassist-sys` and `librebound-sys` provide the versioned FFI and RAII layers.
 The adam-core dependencies provide generic coordinate, propagation, SPICE,
-and kernel-data contracts. The manifest declares the coherent Core `0.7` line; exact reviewed-source
-validation is pinned to the commit above; public registry locking remains deferred.
+and kernel-data contracts. The crate manifest is authoritative for dependency
+requirements.
 
 ## Optional Python extension
 
@@ -128,11 +128,17 @@ Rust consumers.
 
 ## Validation
 
-Until Core `0.7.0` is public, validate against a detached checkout of exact
-reviewed Core commit `0b49938eb0be04214a8d07b206227d31b248394a` rather than
-inventing registry state. The root README shows the four-crate path patch for
-one all-feature `cargo test --all-targets` lane. That command does **not** run
-formatting, Clippy, doctests, or docs; CI invokes separate Rust 1.87 commands
-for default, all-feature, and no-default-feature `check`, strict Clippy, tests,
-doctests, and warning-denied docs. Registry package verification remains
-blocked until authentic Core artifacts exist.
+From a source checkout with declared dependencies resolved, run the standard
+Rust quality lanes separately:
+
+```console
+cargo fmt --all -- --check
+cargo check --all-targets
+cargo clippy --all-targets -- -D warnings
+cargo test --all-targets
+cargo test --doc
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+```
+
+Repository CI additionally exercises the declared feature combinations,
+packaged-crate consumers, and kernel-backed integration tests.
