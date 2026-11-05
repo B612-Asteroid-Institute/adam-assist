@@ -24,16 +24,19 @@
   its full Python matrix, Rust source-pair gates, read-only execution boundary,
   and benchmark artifacts on every trigger. Python dependency-name checks now
   apply full PEP 503 normalization.
-- Deferred the 765 MiB kernel content hash from ordinary provider construction
-  to the first metadata request. The digest is cached once per immutable
-  provider over retained handles. Metadata-only hard-link, chmod, touch, and
-  replacement changes rehash affected exact bytes and atomically refresh only
-  when content matches; rewrites or truncation fail closed while preserving
-  recovery state. Existing capsule metadata remains the loaded-handle snapshot,
-  while callbacks and new capsule requests reject changed bytes.
-- Serialized all crate-owned ASSIST/SPICE ephemeris construction through one
-  process-global lock while leaving propagation parallel; added repeated
-  high-contention finite and bitwise-agreement coverage.
+- Deferred the 765 MiB kernel content hash from provider construction to the
+  first actual kernel use (direct propagation, shard execution, or provider
+  metadata), without recording a construction-time metadata trust baseline.
+  Benign pre-use hard-link, chmod, and touch changes are accepted; transient
+  first-hash races leave state uninitialized for retry. After trust is
+  established, metadata changes rehash affected exact bytes and atomically
+  refresh only when content matches; changed bytes fail closed without
+  replacing recovery state. Existing capsule metadata remains the trusted
+  loaded-handle snapshot, while callbacks and new capsules reject tampering.
+- Moved process-global ASSIST SPK-parser construction serialization into the
+  exported raw `Ephemeris::from_paths` constructor, so raw and provider paths
+  share one lock without outer double-locking while propagation remains
+  parallel; added repeated mixed-constructor finite and bitwise coverage.
 - Expanded exact-source validation to default/all/no-default Rust checks,
   warning-denied Clippy, tests, doctests, docs, packaged-crate tests, and
   independent capsule tamper/composition/batching/STM probes. Packaged unit

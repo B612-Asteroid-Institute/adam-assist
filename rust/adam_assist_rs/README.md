@@ -24,8 +24,8 @@ chain: environment override, installed Python data package, local cache, then a
 checksummed wheel fetch. Set `ADAM_CORE_KERNEL_DE440` and
 `ADAM_CORE_KERNEL_SB441_N16` to use specific DE440 and SB441-n16 files.
 `ADAM_CORE_KERNEL_OFFLINE=1` disables downloads. Regardless of which source
-wins, `from_default_kernels` verifies the reviewed file size and SHA-256 before
-ASSIST opens either ephemeris.
+wins, `from_default_kernels` loads through retained handles, hashes those exact
+bytes, and verifies the reviewed file size and SHA-256 before returning.
 
 ```no_run
 use adam_assist::{AssistPropagator, AssistResult};
@@ -43,11 +43,11 @@ fn main() {}
 
 For explicit data ownership or offline deployments, call
 `AssistData::from_paths` or `AssistPropagator::from_paths` with DE440 and
-SB441-n16 paths. Every path-owned explicit, default, and Python constructor
-shares one process-global lock around upstream ASSIST/SPICE ephemeris parsing;
-propagation does not hold that lock and remains parallel. Callers that instead
-wrap a self-constructed `Ephemeris` with `AssistData::new` are responsible for
-serializing that raw upstream construction and cannot export kernel
+SB441-n16 paths. Every path-owned explicit, default, Python, and raw
+`adam_assist::Ephemeris::from_paths` constructor shares one process-global lock
+at the lowest exported raw construction entry point. There is no outer double
+lock; propagation does not hold the lock and remains parallel. Callers that
+wrap a self-constructed `Ephemeris` with `AssistData::new` cannot export kernel
 provenance. Disable the default resolver with `default-features = false`.
 
 Core's canonical standalone workflows accept `OdPropagator`, not arbitrary
@@ -76,17 +76,18 @@ The same provider works with Core-owned `run_iod`, `refine`, and
 `evaluate_orbits`. ASSIST supplies propagation, non-gravitational dynamics,
 STMs, and immutable configuration/data fingerprints only.
 
-A created adapter retains immutable metadata for the exact kernel handles that
-ASSIST loaded. If filesystem metadata later changes, the owner rehashes the
-affected retained handle (and a replaced path) under a per-provider lock.
-Byte-identical changes after the first fingerprint refresh the metadata
-snapshot; changed bytes fail closed while preserving the last trusted state.
-A pre-fingerprint metadata change has no trusted digest to compare and requires
-reconstructing the provider after restoring the file. An already-created adapter
-continues to report its original fingerprint, but its propagation callbacks
-revalidate provenance and reject changed bytes before dynamics. Creating a new
-adapter from that owner also rejects the change. Restoring the exact bytes
-allows a fresh verification to recover.
+Construction retains the exact kernel handles ASSIST loaded but captures no
+metadata trust baseline. The first actual kernel use—direct propagation, shard
+execution, or adapter/capsule metadata—hashes a stable snapshot and establishes
+trust in those current bytes. Benign hard-link, chmod, or touch changes before
+first use therefore work. A metadata race is retried a bounded number of times;
+a failed first observation remains uninitialized so the next call can retry.
+After trust exists, metadata changes rehash the affected retained handle (and a
+replaced path) under a per-provider lock. Byte-identical changes refresh the
+snapshot; changed bytes fail closed without replacing the trusted identity, and
+exact restoration recovers. An already-created adapter retains its immutable
+original fingerprint, but callbacks revalidate before dynamics; a new adapter
+rejects the same tamper.
 
 ## Public Rust surface
 

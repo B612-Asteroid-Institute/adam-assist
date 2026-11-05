@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 from adam_core.coordinates import CartesianCoordinates, Origin
 from adam_core.orbits import Orbits
@@ -100,5 +101,12 @@ def test_propagation_with_different_settings(basic_orbit):
     restrictive_pos = result_restrictive.coordinates.values[0, :3]
     loose_pos = result_loose.coordinates.values[0, :3]
 
-    assert abs(default_pos - restrictive_pos).max() < tolerance
-    assert abs(default_pos - loose_pos).max() < tolerance
+    assert np.isfinite(default_pos).all()
+    assert np.isfinite(restrictive_pos).all()
+    assert np.isfinite(loose_pos).all()
+    restrictive_residual = abs(default_pos - restrictive_pos)
+    loose_residual = abs(default_pos - loose_pos)
+    assert np.isfinite(restrictive_residual).all()
+    assert np.isfinite(loose_residual).all()
+    assert restrictive_residual.max() < tolerance
+    assert loose_residual.max() < tolerance

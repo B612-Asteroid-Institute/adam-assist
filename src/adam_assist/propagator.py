@@ -304,14 +304,19 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         """Return Core's private propagation-only ABI-v2 capsule.
 
         The native descriptor includes immutable fingerprints of all IAS15
-        settings and the exact planetary/small-body kernel contents. Kernel
-        hashing is lazy on the first capsule request and cached on this
-        immutable provider instance. Metadata-only changes rehash and refresh
-        when bytes match; changed bytes fail closed. A capsule already returned
-        keeps its original identity metadata, but its native callbacks recheck
-        the retained handles and reject tampering before propagation. A new
-        capsule request rejects the same change. Core owns OD orchestration and
-        records those identities in workflow provenance.
+        settings and the exact planetary/small-body kernel contents.
+        Construction records no metadata trust baseline. The first actual
+        kernel use—ordinary propagation or this capsule request—hashes a stable
+        snapshot of the current retained bytes. Benign hard-link, chmod, or
+        touch changes before first use work; a transient first-hash race leaves
+        the provider uninitialized so a later call can retry. After trust is
+        established, metadata changes rehash and refresh only when bytes match;
+        changed bytes fail closed without replacing trust, and exact restoration
+        recovers. A capsule already returned keeps its original identity
+        metadata, but its callbacks recheck the retained handles and reject
+        tampering before propagation. New capsule requests reject the same
+        change. Core owns OD orchestration and records these identities in
+        workflow provenance.
         """
         return self._native.propagator_capsule()
 

@@ -392,10 +392,12 @@ def test_capsule_batching_matches_singletons_mixed_nongrav_and_epochs() -> None:
     assert np.isfinite(pairwise).all()
     # Pairwise integrates each orbit to one target only, so IAS15 step
     # sequences differ from the multi-target cross product: compare closely.
-    pair_diff = max(
-        float(np.max(np.abs(pairwise[i] - batch[i * len(targets) + i])))
-        for i in range(3)
-    )
+    pair_residuals = [
+        np.abs(pairwise[i] - batch[i * len(targets) + i]) for i in range(3)
+    ]
+    assert all(np.isfinite(residual).all() for residual in pair_residuals)
+    pair_diff = max(float(np.max(residual)) for residual in pair_residuals)
+    assert np.isfinite(pair_diff)
     RESULTS["pairwise_vs_cross_product_max_abs"] = pair_diff
     print("\nPAIRWISE vs CROSS-PRODUCT max abs", pair_diff)
     assert pair_diff < 1e-12
@@ -459,6 +461,51 @@ def test_stm_matches_finite_difference() -> None:
     assert rel < 1e-4
 
 
+def test_benign_hardlink_change_before_first_use_establishes_current_bytes() -> None:
+    base = ASSISTPropagator()
+    # Keep the temporary directory beside the installed kernels so this remains
+    # a real hard-link test when /tmp is mounted on another filesystem.
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(base.planets_path)) as tmp:
+        planets = os.path.join(tmp, "planets.bsp")
+        asteroids = os.path.join(tmp, "asteroids.bsp")
+        os.link(base.planets_path, planets)
+        os.link(base.asteroids_path, asteroids)
+        direct = ASSISTPropagator(planets_path=planets, asteroids_path=asteroids)
+        capsule_first = ASSISTPropagator(planets_path=planets, asteroids_path=asteroids)
+
+        # Reproduce uv's hardlink install after provider construction but
+        # before either provider establishes content trust.
+        os.link(planets, os.path.join(tmp, "planets-extra.bsp"))
+        os.link(asteroids, os.path.join(tmp, "asteroids-extra.bsp"))
+
+        orbit = Orbits.from_kwargs(
+            orbit_id=["pretrust-hardlink"],
+            coordinates=CartesianCoordinates.from_kwargs(
+                x=[TRUTH_STATE[0]],
+                y=[TRUTH_STATE[1]],
+                z=[TRUTH_STATE[2]],
+                vx=[TRUTH_STATE[3]],
+                vy=[TRUTH_STATE[4]],
+                vz=[TRUTH_STATE[5]],
+                time=Timestamp.from_mjd([60000], scale="tdb"),
+                origin=Origin.from_kwargs(code=["SUN"]),
+                frame="ecliptic",
+            ),
+        )
+        propagated = direct.propagate_orbits(
+            orbit, Timestamp.from_mjd([60010], scale="tdb")
+        )
+        assert np.isfinite(propagated.coordinates.values).all()
+        assert (
+            _capsule_table(capsule_first.propagator_capsule()).data_fingerprint
+            == DATA_FP.encode()
+        )
+        assert (
+            _capsule_table(direct.propagator_capsule()).data_fingerprint
+            == DATA_FP.encode()
+        )
+
+
 def test_data_fingerprint_is_content_identity_lazy_and_cached() -> None:
     base = ASSISTPropagator()
     with tempfile.TemporaryDirectory() as tmp:
@@ -477,8 +524,9 @@ def test_data_fingerprint_is_content_identity_lazy_and_cached() -> None:
             == DATA_FP.encode()
         )
 
-    # Construction must only load ASSIST/SPICE. The first capsule request does
-    # the intentionally expensive content hash; the next request reuses it.
+    # Construction must only load ASSIST/SPICE. In this fresh process the first
+    # actual use is a capsule request, which performs the intentionally
+    # expensive content hash; the next request reuses it.
     code = (
         "import json,time;from adam_assist import ASSISTPropagator;"
         "t=time.perf_counter();p=ASSISTPropagator();t1=time.perf_counter();"

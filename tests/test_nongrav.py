@@ -81,10 +81,12 @@ def test_non_gravitational_coefficients_change_trajectory_and_survive_output():
     propagated = _propagate(active)
     control = _propagate(gravity_only)
 
-    assert (
-        np.max(np.abs(propagated.coordinates.values - control.coordinates.values))
-        > 1e-8
-    )
+    actual = propagated.coordinates.values
+    expected = control.coordinates.values
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    residual = np.abs(actual - expected)
+    assert np.isfinite(residual).all()
+    assert np.max(residual) > 1e-8
     assert propagated.non_gravitational_parameters.source.to_pylist() == [
         "SBDB",
         "NEOCC",
@@ -132,9 +134,11 @@ def test_explicit_marsden_constants_change_force_law():
         ),
     )
 
-    delta = (
-        _propagate(comet).coordinates.values - _propagate(default).coordinates.values
-    )
+    actual = _propagate(comet).coordinates.values
+    expected = _propagate(default).coordinates.values
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    delta = actual - expected
+    assert np.isfinite(delta).all()
     assert np.max(np.abs(delta)) > 1e-8
 
 
@@ -152,9 +156,13 @@ def test_same_model_nongrav_batch_matches_solo_propagations():
         [_propagate(batched_input[i : i + 1], mjd=60150.0) for i in range(2)]
     ).sort_by(["orbit_id", "coordinates.time.days", "coordinates.time.nanos"])
 
-    position_residual_km = (
-        np.max(np.abs(batched.coordinates.r - solos.coordinates.r)) * 149597870.7
-    )
+    actual = batched.coordinates.r
+    expected = solos.coordinates.r
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    residual = np.abs(actual - expected)
+    assert np.isfinite(residual).all()
+    position_residual_km = np.max(residual) * 149597870.7
+    assert np.isfinite(position_residual_km)
     assert position_residual_km < 1e-4
 
 

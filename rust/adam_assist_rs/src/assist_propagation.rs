@@ -20,8 +20,8 @@
 // index correspondence in the 6x6/6x9 covariance products.
 #![allow(clippy::needless_range_loop)]
 
-use crate::{AssistError as Error, AssistResult as Result};
-use libassist_sys::{ffi, AssistSim, Ephemeris};
+use crate::{AssistError as Error, AssistResult as Result, Ephemeris};
+use libassist_sys::{ffi, AssistSim};
 use librebound_sys::{IntegratorConfig, Simulation};
 use sha2::{Digest, Sha256};
 use std::fs::{File, Metadata};
@@ -36,11 +36,6 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Mutex, OnceLock};
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
-
-// Upstream ASSIST/SPICE ephemeris construction mutates process-global parser
-// state. All constructors owned by this crate converge here; propagation does
-// not take this lock and remains parallel.
-static EPHEMERIS_CONSTRUCTION_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(feature = "kernel-data")]
 const DE440_SIZE_BYTES: u64 = 119_799_808;
@@ -217,12 +212,15 @@ impl KernelFile {
         })
     }
 
-    fn content_identity(&self, expected_metadata: &KernelFileMetadata) -> Result<FileIdentity> {
+    fn content_identity(
+        &self,
+        expected_metadata: &KernelFileMetadata,
+    ) -> Result<Option<FileIdentity>> {
+        // Metadata movement is not a content failure. Tell the bounded outer
+        // loop to take another complete snapshot instead of poisoning the
+        // provider with a transient first-hash race.
         if self.metadata()? != *expected_metadata {
-            return Err(Error::Other(format!(
-                "{} kernel metadata changed during content verification",
-                self.label
-            )));
+            return Ok(None);
         }
         let handle_identity = self.hash_open_file(&self.file, "retained handle")?;
         let path_file = File::open(&self.canonical_path).map_err(|error| {
@@ -240,10 +238,7 @@ impl KernelFile {
                 ))
             })?);
         if opened_path_metadata != expected_metadata.path {
-            return Err(Error::Other(format!(
-                "{} kernel path changed during content verification",
-                self.label
-            )));
+            return Ok(None);
         }
         let path_identity = if expected_metadata.handle.same_file(&expected_metadata.path) {
             handle_identity.clone()
@@ -251,10 +246,7 @@ impl KernelFile {
             self.hash_open_file(&path_file, "canonical path")?
         };
         if self.metadata()? != *expected_metadata {
-            return Err(Error::Other(format!(
-                "{} kernel metadata changed during content verification",
-                self.label
-            )));
+            return Ok(None);
         }
         if handle_identity != path_identity {
             return Err(Error::Other(format!(
@@ -262,7 +254,7 @@ impl KernelFile {
                 self.label
             )));
         }
-        Ok(handle_identity)
+        Ok(Some(handle_identity))
     }
 }
 
@@ -284,8 +276,8 @@ struct KernelPairIdentity {
 struct KernelFiles {
     planets: KernelFile,
     asteroids: KernelFile,
-    identity: OnceLock<std::result::Result<KernelPairIdentity, String>>,
-    trusted_metadata: Mutex<KernelPairMetadata>,
+    identity: OnceLock<KernelPairIdentity>,
+    trusted_metadata: Mutex<Option<KernelPairMetadata>>,
     #[cfg(test)]
     compute_count: AtomicUsize,
 }
@@ -294,15 +286,14 @@ impl KernelFiles {
     fn open(planets_path: &Path, asteroids_path: &Path) -> Result<Self> {
         let planets = KernelFile::open(planets_path, "planetary")?;
         let asteroids = KernelFile::open(asteroids_path, "small-body")?;
-        let trusted_metadata = KernelPairMetadata {
-            planets: planets.metadata()?,
-            asteroids: asteroids.metadata()?,
-        };
         Ok(Self {
             planets,
             asteroids,
             identity: OnceLock::new(),
-            trusted_metadata: Mutex::new(trusted_metadata),
+            // Construction records no metadata trust baseline. The first
+            // actual propagation or metadata request establishes trust from a
+            // stable snapshot of the current bytes.
+            trusted_metadata: Mutex::new(None),
             #[cfg(test)]
             compute_count: AtomicUsize::new(0),
         })
@@ -321,7 +312,7 @@ impl KernelFiles {
 
     fn verified_identity(
         &self,
-        trusted_metadata: &KernelPairMetadata,
+        trusted_metadata: Option<&KernelPairMetadata>,
         trusted_identity: Option<&KernelPairIdentity>,
     ) -> Result<(KernelPairIdentity, KernelPairMetadata)> {
         const MAX_STABLE_METADATA_ATTEMPTS: usize = 3;
@@ -329,17 +320,23 @@ impl KernelFiles {
             let before = self.metadata()?;
             #[cfg(test)]
             self.compute_count.fetch_add(1, AtomicOrdering::SeqCst);
-            let planets = match trusted_identity {
-                Some(identity) if before.planets == trusted_metadata.planets => {
+            let planets = match (trusted_identity, trusted_metadata) {
+                (Some(identity), Some(metadata)) if before.planets == metadata.planets => {
                     identity.planets.clone()
                 }
-                _ => self.planets.content_identity(&before.planets)?,
+                _ => match self.planets.content_identity(&before.planets)? {
+                    Some(identity) => identity,
+                    None => continue,
+                },
             };
-            let asteroids = match trusted_identity {
-                Some(identity) if before.asteroids == trusted_metadata.asteroids => {
+            let asteroids = match (trusted_identity, trusted_metadata) {
+                (Some(identity), Some(metadata)) if before.asteroids == metadata.asteroids => {
                     identity.asteroids.clone()
                 }
-                _ => self.asteroids.content_identity(&before.asteroids)?,
+                _ => match self.asteroids.content_identity(&before.asteroids)? {
+                    Some(identity) => identity,
+                    None => continue,
+                },
             };
             let after = self.metadata()?;
             if after != before {
@@ -370,67 +367,33 @@ impl KernelFiles {
             .trusted_metadata
             .lock()
             .map_err(|_| Error::Other("ASSIST kernel provenance lock was poisoned".to_string()))?;
-        let current_metadata = self.metadata()?;
         if let Some(identity) = self.identity.get() {
-            let identity = identity
-                .as_ref()
-                .map_err(|message| Error::Other(message.clone()))?;
-            if current_metadata != *trusted_metadata {
+            let current_metadata = self.metadata()?;
+            if trusted_metadata.as_ref() != Some(&current_metadata) {
                 let (_, refreshed_metadata) =
-                    self.verified_identity(&trusted_metadata, Some(identity))?;
-                *trusted_metadata = refreshed_metadata;
+                    self.verified_identity(trusted_metadata.as_ref(), Some(identity))?;
+                *trusted_metadata = Some(refreshed_metadata);
             }
             return Ok(identity);
         }
 
-        // Before the first content hash there is no trusted digest against
-        // which changed bytes could be checked. Reject any post-load metadata
-        // change rather than blessing an unknown replacement or truncation.
-        if current_metadata != *trusted_metadata {
-            let message =
-                "ASSIST kernel changed after it was loaded and before provenance was established"
-                    .to_string();
-            return match self.identity.get_or_init(|| Err(message)) {
-                Ok(_) => unreachable!("initial metadata mismatch cannot establish identity"),
-                Err(message) => Err(Error::Other(message.clone())),
-            };
-        }
-        let (computed, refreshed_metadata) = match self.verified_identity(&trusted_metadata, None) {
-            Ok(computed) => computed,
-            Err(error) => {
-                return match self.identity.get_or_init(|| Err(error.to_string())) {
-                    Ok(_) => unreachable!("failed initial hash cannot establish identity"),
-                    Err(message) => Err(Error::Other(message.clone())),
-                };
-            }
-        };
-        let identity = self.identity.get_or_init(|| Ok(computed));
-        let identity = identity
-            .as_ref()
-            .map_err(|message| Error::Other(message.clone()))?;
-        *trusted_metadata = refreshed_metadata;
-        Ok(identity)
+        // Trust begins only after a complete stable content observation. A
+        // failed or racing first hash leaves both cells uninitialized, so a
+        // later call can retry rather than inheriting a permanently cached
+        // transient error.
+        let (computed, refreshed_metadata) = self.verified_identity(None, None)?;
+        self.identity
+            .set(computed)
+            .map_err(|_| Error::Other("ASSIST kernel identity initialization raced".to_string()))?;
+        *trusted_metadata = Some(refreshed_metadata);
+        Ok(self
+            .identity
+            .get()
+            .expect("successful identity initialization must populate OnceLock"))
     }
 
-    fn verify_loaded_snapshot(&self) -> Result<()> {
-        let trusted_metadata = self
-            .trusted_metadata
-            .lock()
-            .map_err(|_| Error::Other("ASSIST kernel provenance lock was poisoned".to_string()))?;
-        if self.metadata()? != *trusted_metadata {
-            return Err(Error::Other(
-                "ASSIST kernel changed while its ephemeris was being loaded".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn verify_cached_identity(&self) -> Result<()> {
-        if self.identity.get().is_some() {
-            self.identity().map(|_| ())
-        } else {
-            Ok(())
-        }
+    fn verify_identity(&self) -> Result<()> {
+        self.identity().map(|_| ())
     }
 
     #[cfg(test)]
@@ -479,9 +442,9 @@ impl AssistData {
     /// The original kernel bytes are unavailable on this route, so this value
     /// cannot be exported as a provenance-complete external OD provider. Use
     /// [`Self::from_paths`] when a capsule data fingerprint is required.
-    /// Callers that construct the raw [`Ephemeris`] themselves are also
-    /// responsible for serializing that upstream operation; every path-owned
-    /// constructor in this crate shares one process-global construction lock.
+    /// The exported raw [`Ephemeris::from_paths`] constructor and every
+    /// path-owned provider constructor share the same process-global parser
+    /// lock, so wrapping a raw ephemeris here cannot race provider creation.
     pub fn new(ephem: Ephemeris) -> Self {
         Self {
             ephem,
@@ -492,23 +455,18 @@ impl AssistData {
     /// Load the planetary and small-body ASSIST ephemeris kernels explicitly.
     ///
     /// Construction opens stable file handles and loads ASSIST from aliases to
-    /// those exact handles. Content hashing stays lazy until provenance is
-    /// requested by [`AssistPropagator::external_propagator`](crate::AssistPropagator::external_propagator)
-    /// or the Python capsule. Later path replacement or in-place mutation is
-    /// detected before cached metadata can be returned.
+    /// those exact handles. It records no metadata trust baseline. Content
+    /// trust is established from a complete stable snapshot at the first
+    /// actual kernel use: direct propagation, shard execution, external-provider
+    /// construction, or Python capsule metadata. Later path replacement or
+    /// in-place mutation is detected before cached metadata can be returned.
     pub fn from_paths(
         planets_path: impl AsRef<Path>,
         asteroids_path: impl AsRef<Path>,
     ) -> Result<Self> {
         let kernel_files = KernelFiles::open(planets_path.as_ref(), asteroids_path.as_ref())?;
         let (planets_loader, asteroids_loader) = kernel_files.loader_paths();
-        let ephem = {
-            let _construction = EPHEMERIS_CONSTRUCTION_LOCK.lock().map_err(|_| {
-                Error::Other("ASSIST ephemeris construction lock was poisoned".to_string())
-            })?;
-            Ephemeris::from_paths(&planets_loader, &asteroids_loader)?
-        };
-        kernel_files.verify_loaded_snapshot()?;
+        let ephem = Ephemeris::from_paths(&planets_loader, &asteroids_loader)?;
         Ok(Self {
             ephem,
             kernel_files: Some(kernel_files),
@@ -517,13 +475,14 @@ impl AssistData {
 
     /// Return the lazily computed immutable identity for both loaded kernels.
     ///
-    /// Once established, benign metadata changes cause an atomic rehash of
-    /// affected retained handles (and a replaced canonical path) before the
-    /// cached digest is reused. Equal bytes refresh the trusted metadata
-    /// snapshot; different bytes fail closed without replacing the last
-    /// trusted snapshot. A metadata change before the first hash has no known
-    /// digest to compare and therefore taints that provider fail-closed; build
-    /// a new path-backed value after restoring the file.
+    /// The first actual kernel use hashes a stable snapshot of the current
+    /// retained handles and matching paths. Benign hard-link, chmod, or touch
+    /// changes before that use are therefore accepted without trusting stale
+    /// construction metadata. A metadata race during the first hash is retried
+    /// within the call and leaves the provider uninitialized on failure, so a
+    /// later call can retry. Once established, metadata changes rehash affected
+    /// exact bytes: equal bytes refresh the trusted snapshot, while different
+    /// bytes fail closed without replacing it and exact restoration recovers.
     pub fn data_fingerprint(&self) -> Result<&str> {
         self.kernel_files
             .as_ref()
@@ -539,7 +498,7 @@ impl AssistData {
 
     pub(crate) fn verify_claimed_kernel_identity(&self) -> Result<()> {
         match &self.kernel_files {
-            Some(files) => files.verify_cached_identity(),
+            Some(files) => files.verify_identity(),
             None => Ok(()),
         }
     }
@@ -874,6 +833,7 @@ pub fn assist_propagate_single(
     if target_epochs.is_empty() {
         return Ok(vec![]);
     }
+    data.verify_claimed_kernel_identity()?;
 
     let ephem = &data.ephem;
     let jd_ref = ephem.jd_ref();
@@ -997,6 +957,7 @@ pub fn assist_propagate_orbits_same_epoch(
             "same-epoch ASSIST propagation received multiple Marsden models".into(),
         ));
     }
+    data.verify_claimed_kernel_identity()?;
 
     let ephem = &data.ephem;
     let jd_ref = ephem.jd_ref();
@@ -1138,6 +1099,7 @@ impl PropagatorConfig {
 /// so build one pool per worker thread over a shared ephemeris.
 pub struct PropagatorPool<'a> {
     asim: AssistSim,
+    data: &'a AssistData,
     ephem: &'a Ephemeris,
     jd_ref: f64,
     config: PropagatorConfig,
@@ -1152,6 +1114,7 @@ impl<'a> PropagatorPool<'a> {
         config: PropagatorConfig,
         integrator: &IntegratorConfig,
     ) -> Result<Self> {
+        data.verify_claimed_kernel_identity()?;
         let ephem = &data.ephem;
         let jd_ref = ephem.jd_ref();
         let mut sim = Simulation::new()?;
@@ -1177,6 +1140,7 @@ impl<'a> PropagatorPool<'a> {
 
         Ok(Self {
             asim,
+            data,
             ephem,
             jd_ref,
             config,
@@ -1214,6 +1178,7 @@ impl<'a> PropagatorPool<'a> {
                 self.config.has_nongrav,
             )));
         }
+        self.data.verify_claimed_kernel_identity()?;
 
         let want_nongrav_partials = self.config.compute_stm && self.config.has_nongrav;
         let t0 = mjd_to_assist_time(orbit.epoch, self.jd_ref);
@@ -1501,6 +1466,31 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires the reviewed ASSIST kernel pair"]
+    fn direct_propagation_establishes_kernel_provenance_on_first_use() {
+        let planets = std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH").unwrap();
+        let asteroids = std::env::var("ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH").unwrap();
+        let data = AssistData::from_paths(planets, asteroids).unwrap();
+        let kernel_files = data.kernel_files.as_ref().unwrap();
+        assert!(kernel_files.identity.get().is_none());
+
+        let orbit = Orbit::new([1.2, 0.1, 0.05, -0.002, 0.016, 0.001], 60_000.0);
+        let propagated = assist_propagate_single(
+            &data,
+            &orbit,
+            &[60_001.0],
+            false,
+            &IntegratorConfig::default(),
+        )
+        .unwrap();
+        assert!(propagated
+            .iter()
+            .flat_map(|row| row.state)
+            .all(f64::is_finite));
+        assert!(kernel_files.identity.get().is_some());
+    }
+
+    #[test]
     fn kernel_pair_fingerprint_is_slot_aware_and_content_pinned() {
         let planets = FileIdentity {
             size: 119_799_808,
@@ -1714,29 +1704,109 @@ mod tests {
         remove_temporary_kernel_pair(&planets, &asteroids);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn lazy_kernel_fingerprint_rejects_truncation_before_hashing() {
-        let (planets, asteroids) = temporary_kernel_pair("fingerprint-truncate");
+    fn first_kernel_use_accepts_benign_pretrust_metadata_changes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-first-use-metadata");
         let files = KernelFiles::open(&planets, &asteroids).unwrap();
         assert_eq!(files.compute_count(), 0);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&asteroids)
-            .unwrap()
-            .set_len(3)
-            .unwrap();
+
+        let hard_link = planets.with_extension("hardlink");
+        std::fs::hard_link(&planets, &hard_link).unwrap();
+        let original_mode = std::fs::metadata(&planets).unwrap().permissions().mode();
+        let mut permissions = std::fs::metadata(&planets).unwrap().permissions();
+        permissions.set_mode(original_mode & !0o222);
+        std::fs::set_permissions(&planets, permissions).unwrap();
+        let original_mtime =
+            filetime::FileTime::from_last_modification_time(&std::fs::metadata(&planets).unwrap());
+        filetime::set_file_mtime(
+            &planets,
+            filetime::FileTime::from_unix_time(
+                original_mtime.unix_seconds() + 10,
+                original_mtime.nanoseconds(),
+            ),
+        )
+        .unwrap();
+
+        let fingerprint = files.identity().unwrap().fingerprint.clone();
+        assert_eq!(fingerprint.len(), 64);
+        assert_eq!(files.compute_count(), 1);
+
+        let mut permissions = std::fs::metadata(&planets).unwrap().permissions();
+        permissions.set_mode(original_mode);
+        std::fs::set_permissions(&planets, permissions).unwrap();
+        std::fs::remove_file(hard_link).unwrap();
+        drop(files);
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[test]
+    fn failed_first_identity_observation_is_retryable() {
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-first-use-retry");
+        let files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let moved = asteroids.with_extension("moved");
+        std::fs::rename(&asteroids, &moved).unwrap();
 
         let error = files.identity().unwrap_err().to_string();
         assert!(
-            error.contains("before provenance was established"),
+            error.contains("failed to re-inspect small-body kernel"),
             "{error}"
         );
+        assert!(files.identity.get().is_none());
         assert_eq!(files.compute_count(), 0);
-        let cached_error = files.verify_cached_identity().unwrap_err().to_string();
-        assert!(
-            cached_error.contains("before provenance was established"),
-            "{cached_error}"
-        );
+
+        std::fs::rename(&moved, &asteroids).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint.len(), 64);
+        assert_eq!(files.compute_count(), 1);
+
+        drop(files);
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[test]
+    fn metadata_race_during_first_hash_does_not_poison_retry() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-first-use-race");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&planets)
+            .unwrap()
+            .set_len(32 * 1024 * 1024)
+            .unwrap();
+        let files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let running = std::sync::Arc::new(AtomicBool::new(true));
+        let changes = std::sync::Arc::new(AtomicUsize::new(0));
+        let mutator = {
+            let planets = planets.clone();
+            let running = std::sync::Arc::clone(&running);
+            let changes = std::sync::Arc::clone(&changes);
+            std::thread::spawn(move || {
+                while running.load(Ordering::SeqCst) {
+                    let sequence = changes.fetch_add(1, AtomicOrdering::SeqCst) as i64;
+                    filetime::set_file_mtime(
+                        &planets,
+                        filetime::FileTime::from_unix_time(2_000_000_000 + sequence, 0),
+                    )
+                    .unwrap();
+                    std::thread::yield_now();
+                }
+            })
+        };
+        while changes.load(AtomicOrdering::SeqCst) < 10 {
+            std::thread::yield_now();
+        }
+
+        let error = files.identity().unwrap_err().to_string();
+        assert!(error.contains("did not remain stable"), "{error}");
+        assert!(files.identity.get().is_none());
+        running.store(false, Ordering::SeqCst);
+        mutator.join().unwrap();
+
+        assert_eq!(files.identity().unwrap().fingerprint.len(), 64);
+        assert!(files.compute_count() >= 4);
 
         drop(files);
         remove_temporary_kernel_pair(&planets, &asteroids);

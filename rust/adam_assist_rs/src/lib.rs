@@ -22,7 +22,6 @@ use adam_core_rs_coords::{
     OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider, TimeArray, TimeScale,
     TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
 };
-pub use libassist_sys::Ephemeris;
 use libassist_sys::{ffi, AssistSim};
 use librebound_sys::Simulation;
 pub use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
@@ -33,6 +32,8 @@ use std::sync::Arc;
 
 mod assist_error;
 pub use assist_error::{AssistError, AssistResult};
+mod ephemeris;
+pub use ephemeris::Ephemeris;
 
 pub mod assist_propagation;
 pub use assist_propagation::AssistData;
@@ -129,9 +130,11 @@ impl AssistPropagator {
 
     /// Return the lazily computed content identity of the loaded kernel bytes.
     ///
-    /// The first call hashes both stable file handles. Later calls reuse that
-    /// digest after metadata checks; if metadata changed, affected exact bytes
-    /// are rehashed and the snapshot refreshes only when content still matches.
+    /// The first actual propagation, shard call, or explicit fingerprint
+    /// request hashes a stable snapshot of both retained handles and matching
+    /// paths. Later calls reuse that digest after metadata checks; changed
+    /// metadata rehashes affected exact bytes and refreshes only when content
+    /// still matches.
     pub fn data_fingerprint(&self) -> AssistResult<&str> {
         self.data.data_fingerprint()
     }
@@ -2712,6 +2715,42 @@ mod tests {
             .collect()
     }
 
+    fn finite_spherical_residual(
+        actual_states: &[[f64; 6]],
+        expected_states: &[[f64; 6]],
+        case_id: &str,
+    ) -> (f64, [f64; 6]) {
+        assert_eq!(actual_states.len(), expected_states.len(), "{case_id} rows");
+        let mut max_abs = 0.0_f64;
+        let mut per_axis = [0.0_f64; 6];
+        for (actual, expected) in actual_states.iter().zip(expected_states.iter()) {
+            assert!(
+                actual.iter().all(|value| value.is_finite()),
+                "{case_id} actual spherical state is non-finite: {actual:?}"
+            );
+            assert!(
+                expected.iter().all(|value| value.is_finite()),
+                "{case_id} expected spherical state is non-finite: {expected:?}"
+            );
+            for axis in 0..6 {
+                let diff = (actual[axis] - expected[axis]).abs();
+                assert!(
+                    diff.is_finite(),
+                    "{case_id} spherical residual axis {axis} is non-finite"
+                );
+                per_axis[axis] = per_axis[axis].max(diff);
+                max_abs = max_abs.max(diff);
+            }
+        }
+        (max_abs, per_axis)
+    }
+
+    #[test]
+    #[should_panic(expected = "actual spherical state is non-finite")]
+    fn all_nan_ephemeris_output_cannot_pass_residual_gate() {
+        finite_spherical_residual(&[[f64::NAN; 6]], &[[0.0; 6]], "all-nan-control");
+    }
+
     fn json_cartesian_coordinates(value: &Value) -> CoordinateBatch {
         let frame = Frame::parse(
             value
@@ -3241,15 +3280,8 @@ mod tests {
                 &expected_times,
                 "{case_id} times"
             );
-            let mut max_abs = 0.0_f64;
-            let mut per_axis = [0.0_f64; 6];
-            for (actual, expected) in actual_states.iter().zip(expected_states.iter()) {
-                for axis in 0..6 {
-                    let diff = (actual[axis] - expected[axis]).abs();
-                    per_axis[axis] = per_axis[axis].max(diff);
-                    max_abs = max_abs.max(diff);
-                }
-            }
+            let (max_abs, per_axis) =
+                finite_spherical_residual(actual_states, &expected_states, case_id);
             println!(
                 "{case_id}: ephemeris max abs spherical residual = {max_abs:e}; per-axis [rho,lon,lat,vrho,vlon,vlat] = {per_axis:?}"
             );

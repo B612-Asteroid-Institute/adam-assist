@@ -103,10 +103,15 @@ The default resolver loads DE440 and SB441-n16 through adam-core's environment,
 installed-package, cache, and checksummed-fetch policy. Explicit/offline users
 can call `AssistPropagator::from_paths` and can disable default resolver support
 with `default-features = false`. Explicit-path construction loads the ephemeris
-without hashing the 765 MiB kernel pair. The content fingerprint is computed
-once, lazily, when external-provider metadata is requested; cached metadata is
-returned only while the retained handles and canonical paths still identify
-unchanged bytes.
+without hashing the 765 MiB kernel pair or capturing a metadata trust baseline.
+The first actual kernel use—ordinary propagation or external-provider
+metadata—hashes a stable snapshot of the current retained bytes. Benign
+hard-link, chmod, or touch changes before first use are accepted; transient
+first-hash races leave the provider uninitialized for retry. After trust is
+established, cached metadata is returned only while retained handles and
+canonical paths identify the trusted bytes. Byte-identical metadata changes
+refresh the snapshot, changed bytes fail closed without replacing trust, and
+exact restoration recovers.
 
 ## Usage
 

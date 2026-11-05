@@ -135,16 +135,17 @@ Added or adapted for the exact Core source:
   bit pattern or enum value; kernel identity includes semantic slot, byte size,
   and SHA-256, not a filesystem path.
 - Explicit-path construction retains stable open handles and asks ASSIST to
-  load through aliases to those handles. Every path-owned explicit, default,
-  and Python constructor shares one process-global lock around upstream
-  ASSIST/SPICE ephemeris parsing; propagation never holds that lock and remains
-  parallel. Kernel hashing is lazy, thread-safe, and cached per immutable
-  `AssistData` instance. Metadata includes size, device, inode, mode, link
-  count, modification time, and change time for the retained handle and path.
-  A metadata change atomically rehashes affected exact bytes: byte-identical
-  hard-link, chmod, touch, or replacement changes refresh the trusted snapshot,
-  while truncation and same-size/restored-mtime content rewrites fail closed
-  without destroying the prior trusted identity.
+  load through aliases to those handles. The exported raw
+  `Ephemeris::from_paths`, explicit/default provider, and Python constructors
+  share one process-global lock at the lowest construction entry point;
+  propagation never holds it and remains parallel. Construction records no
+  metadata trust baseline. The first actual kernel use hashes a stable snapshot
+  of the current retained bytes, so benign pre-use hard-link, chmod, or touch
+  changes work. A metadata race is retried within a bounded observation and a
+  failed first hash leaves state uninitialized for the next call. Once trust is
+  established, metadata changes atomically rehash affected exact bytes:
+  byte-identical changes refresh the snapshot, while changed bytes fail closed
+  without destroying the trusted identity and exact restoration recovers.
 - `AssistExternalPropagator` owns the raw ABI-v2 table and exposes only a
   lifetime-bound validated borrow. Callers never own a context pointer or
   manage capsule/table destruction. Python's capsule and standalone Rust use
@@ -191,12 +192,16 @@ Repository validation covers:
   Jacobians, deterministic repeats, evaluate parity, two-group ordering,
   typed failure isolation, mixed-epoch/mixed-non-grav batching, public-vs-ABI
   propagation, and STM finite-difference behavior with a real ASSIST provider;
-- lazy fingerprint call count, concurrent first access, cache reuse,
-  metadata-only hard-link/chmod/touch/replacement refresh, concurrent refresh,
-  same-size/restored-mtime tamper rejection and restoration recovery, retained
-  capsule/new-adapter tamper behavior, and pre-hash truncation rejection;
-- repeated high-contention construction (64 providers per run), finite
-  massive-body dynamics, and bitwise agreement with a sequential reference;
+- lazy fingerprint call count, concurrent first access, cache reuse, benign
+  hard-link/chmod/touch changes before first use, retry after transient initial
+  failure and first-hash metadata races, metadata-only post-trust refresh,
+  same-size/restored-mtime tamper rejection and restoration recovery, and
+  retained capsule/new-adapter tamper behavior;
+- repeated high-contention mixed raw/provider construction (64 constructors per
+  run), finite massive-body dynamics, and bitwise agreement with a sequential
+  reference;
+- finite actual, expected, and residual values before every live propagation or
+  ephemeris maximum/tolerance, including an all-NaN control that must fail;
 - default, all-feature, and no-default-feature `check`, warning-denied Clippy,
   tests, doctests, and warning-denied docs on Rust 1.87;
 - Python 3.11–3.13 source-pair wheels, lint, formatting, import compilation,
