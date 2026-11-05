@@ -139,13 +139,17 @@ Added or adapted for the exact Core source:
   `Ephemeris::from_paths`, explicit/default provider, and Python constructors
   share one process-global lock at the lowest construction entry point;
   propagation never holds it and remains parallel. Construction records no
-  metadata trust baseline. The first actual kernel use hashes a stable snapshot
-  of the current retained bytes, so benign pre-use hard-link, chmod, or touch
-  changes work. A metadata race is retried within a bounded observation and a
-  failed first hash leaves state uninitialized for the next call. Once trust is
-  established, metadata changes atomically rehash affected exact bytes:
-  byte-identical changes refresh the snapshot, while changed bytes fail closed
-  without destroying the trusted identity and exact restoration recovers.
+  mutable metadata trust baseline, but binds the DAF file record, comments,
+  complete summary chain, mapped length, and retained identity immediately
+  around parsing. The first actual kernel use verifies that binding and hashes a
+  stable snapshot of the complete retained bytes, so benign pre-use hard-link,
+  chmod, or touch changes work while changed parsed bytes, truncation, and path
+  replacement fail closed. A metadata race is retried within a bounded
+  observation and a failed first hash leaves state uninitialized for the next
+  call. Once trust is established, metadata changes atomically rehash affected
+  exact bytes: byte-identical changes refresh the snapshot, while changed bytes
+  fail closed without destroying the trusted identity and exact restoration
+  recovers.
 - `AssistExternalPropagator` owns the raw ABI-v2 table and exposes only a
   lifetime-bound validated borrow. Callers never own a context pointer or
   manage capsule/table destruction. Python's capsule and standalone Rust use
@@ -197,11 +201,16 @@ Repository validation covers:
   failure and first-hash metadata races, metadata-only post-trust refresh,
   same-size/restored-mtime tamper rejection and restoration recovery, and
   retained capsule/new-adapter tamper behavior;
-- repeated high-contention mixed raw/provider construction (64 constructors per
-  run), finite massive-body dynamics, and bitwise agreement with a sequential
-  reference;
-- finite actual, expected, and residual values before every live propagation or
-  ephemeris maximum/tolerance, including an all-NaN control that must fail;
+- load-time binding of eagerly parsed constants/summary records, construction
+  races, truncation/SIGBUS prevention, constant-byte tamper, inode replacement,
+  no-cache failure, exact restoration, and Python entry-point behavior;
+- repeated high-contention mixed raw/provider construction (64 constructors in
+  one synchronized burst), direct finite constant/mass/segment queries at two
+  epochs, a long-horizon finite massive-body control, and bitwise agreement with
+  a sequential reference; a lock-removal mutation must fail this stress;
+- finite actual, expected, residual, capsule state, STM, and Marsden-partial
+  values before every live propagation or ephemeris maximum/tolerance,
+  including an all-NaN capsule control that must fail;
 - default, all-feature, and no-default-feature `check`, warning-denied Clippy,
   tests, doctests, and warning-denied docs on Rust 1.87;
 - Python 3.11–3.13 source-pair wheels, lint, formatting, import compilation,
@@ -218,6 +227,17 @@ The machine-readable source-pair state is `exact-reviewed-source`, while
 exact-source validation checkout. Package manifests contain registry-version
 requirements only and intentionally contain no lock, path, Git, or fabricated
 checksum state.
+
+### Upstream parser follow-up
+
+The crate lock is a containment measure for the non-reentrant global state in
+upstream ASSIST's SPK parser. A separate upstream change should make parser
+construction reentrant (or expose an upstream-owned process-global guard), add
+an upstream mixed-constructor race test, and then permit this wrapper lock to be
+removed only after the lock-removal mutation passes there. Until that work is
+released and reviewed, all crate-owned raw and provider construction remains on
+the single wrapper lock. Direct `libassist_sys`, separately linked copies, and
+external C/FFI construction remain explicitly outside that guarantee.
 
 ### Accepted-test disposition
 

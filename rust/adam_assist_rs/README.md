@@ -44,11 +44,14 @@ fn main() {}
 For explicit data ownership or offline deployments, call
 `AssistData::from_paths` or `AssistPropagator::from_paths` with DE440 and
 SB441-n16 paths. Every path-owned explicit, default, Python, and raw
-`adam_assist::Ephemeris::from_paths` constructor shares one process-global lock
-at the lowest exported raw construction entry point. There is no outer double
-lock; propagation does not hold the lock and remains parallel. Callers that
-wrap a self-constructed `Ephemeris` with `AssistData::new` cannot export kernel
-provenance. Disable the default resolver with `default-features = false`.
+`adam_assist::Ephemeris::from_paths` constructor in one linked crate instance
+shares one process-global lock at the lowest exported raw construction entry
+point. There is no outer double lock; propagation and ephemeris queries do not
+hold the lock and remain parallel. Direct `libassist_sys::Ephemeris`, separately
+linked copies, and external C/FFI construction are outside the guarantee.
+Callers that wrap a self-constructed `Ephemeris` with `AssistData::new` cannot
+export kernel provenance. Disable the default resolver with
+`default-features = false`.
 
 Core's canonical standalone workflows accept `OdPropagator`, not arbitrary
 predictor callbacks. Convert ASSIST to its owned, provenance-complete ABI-v2
@@ -76,18 +79,31 @@ The same provider works with Core-owned `run_iod`, `refine`, and
 `evaluate_orbits`. ASSIST supplies propagation, non-gravitational dynamics,
 STMs, and immutable configuration/data fingerprints only.
 
-Construction retains the exact kernel handles ASSIST loaded but captures no
-metadata trust baseline. The first actual kernel use—direct propagation, shard
-execution, or adapter/capsule metadata—hashes a stable snapshot and establishes
-trust in those current bytes. Benign hard-link, chmod, or touch changes before
-first use therefore work. A metadata race is retried a bounded number of times;
-a failed first observation remains uninitialized so the next call can retry.
-After trust exists, metadata changes rehash the affected retained handle (and a
-replaced path) under a per-provider lock. Byte-identical changes refresh the
-snapshot; changed bytes fail closed without replacing the trusted identity, and
-exact restoration recovers. An already-created adapter retains its immutable
-original fingerprint, but callbacks revalidate before dynamics; a new adapter
-rejects the same tamper.
+Construction retains the exact kernel handles ASSIST loaded and captures no
+mutable metadata trust baseline. Under the same construction lock as the
+upstream parser, it does record an immutable, small digest of the DAF file
+record, comments, complete summary chain, mapped length, and retained file
+identity immediately before and after parsing. The first actual kernel use—
+direct propagation, shard execution, or adapter/capsule metadata—checks that
+load-time binding, hashes a stable snapshot, and establishes trust in the full
+current bytes. Benign hard-link, chmod, or touch changes before first use
+therefore work. Changes to eagerly parsed bytes, truncation, and path/inode
+replacement cannot be adopted as first-use truth. A metadata race is retried a
+bounded number of times; a failed first observation remains uninitialized so
+the next call can retry. After trust exists, metadata changes rehash the
+affected retained handle and canonical path under a per-provider lock.
+Byte-identical changes refresh the snapshot; changed bytes fail closed without
+replacing the trusted identity, and exact restoration recovers. An
+already-created adapter retains its immutable original fingerprint, but
+callbacks revalidate before dynamics; a new adapter rejects the same tamper.
+
+Every call through this crate's public `Ephemeris::from_paths` wrapper shares
+one process-global mutex with provider construction. The mutex covers only
+upstream ephemeris construction and the provider's adjacent eager-region
+observations; it deliberately does not serialize propagation or ephemeris
+queries. Direct `libassist_sys::Ephemeris` construction, separately linked
+copies of this crate/library, and external upstream ASSIST C/FFI callers are
+outside this guarantee.
 
 ## Public Rust surface
 

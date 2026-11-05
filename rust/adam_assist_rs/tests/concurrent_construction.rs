@@ -1,9 +1,11 @@
 //! High-contention regression for ASSIST's process-global ephemeris parser.
 //!
 //! The live test is ignored by default because it needs the 765 MiB reviewed
-//! kernel pair. Run it repeatedly in exact-source acceptance; raw `Ephemeris`
-//! and path-backed provider constructors alternate under contention and share
-//! one lowest-level lock, while propagation after construction remains parallel.
+//! kernel pair. Run it repeatedly in exact-source acceptance. All workers burst
+//! through raw-wrapper and path-backed provider construction before any worker
+//! inspects its results. Each result then queries the eagerly parsed constants,
+//! masses and segment tables directly, so the test remains sensitive to parser
+//! races without spacing constructions apart with a full provenance hash.
 
 use adam_assist::assist_propagation::{assist_propagate_single, Orbit as AssistOrbit};
 use adam_assist::{AssistData, AssistPropagator, Ephemeris};
@@ -14,7 +16,8 @@ use adam_core_rs_coords::{
     CoordinateBatch, DataFrame, Epoch, ObjectId, OrbitBatch, OrbitId, OriginArray, OriginId,
     SchemaError, TimeArray, TimeScale, TimeScaleProvider,
 };
-use std::sync::Arc;
+use libassist_sys::ffi;
+use std::sync::{Arc, Barrier};
 
 struct NoRescale;
 
@@ -61,13 +64,13 @@ fn orbit() -> OrbitBatch {
     .unwrap()
 }
 
-fn propagate_constructed_data(propagator: &AssistPropagator) -> Vec<[f64; 6]> {
+fn propagate_constructed_data(data: &AssistData) -> Vec<[f64; 6]> {
     let results = assist_propagate_single(
-        propagator.data(),
+        data,
         &AssistOrbit::new([1.2, 0.1, 0.05, -0.002, 0.016, 0.001], 60_000.0),
-        &[60_001.0, 60_010.0],
+        &[60_400.0],
         false,
-        &propagator.integrator(),
+        &Default::default(),
     )
     .unwrap();
     let states = results
@@ -82,11 +85,7 @@ fn propagate_constructed_data(propagator: &AssistPropagator) -> Vec<[f64; 6]> {
 }
 
 fn propagate<P: Propagator>(propagator: &P) -> Vec<[f64; 6]> {
-    let targets = TimeArray::new(
-        TimeScale::Tdb,
-        vec![Epoch::new(60_001, 0), Epoch::new(60_010, 0)],
-    )
-    .unwrap();
+    let targets = TimeArray::new(TimeScale::Tdb, vec![Epoch::new(60_400, 0)]).unwrap();
     let options = PropagationOptions {
         covariance: CovariancePropagation::None,
         thread_limit: Some(1),
@@ -110,6 +109,55 @@ fn propagate<P: Propagator>(propagator: &P) -> Vec<[f64; 6]> {
     states
 }
 
+/// Values backed by every eagerly parsed input class: constants, masses and
+/// planetary/small-body summary tables at two epochs.
+fn ephemeris_signature(data: &AssistData) -> Vec<f64> {
+    let ephem = &data.ephem;
+    let mut values = vec![ephem.jd_ref(), ephem.c_au_per_day(), ephem.emrat()];
+    for time in [0.0, 400.0] {
+        for body in [ffi::ASSIST_BODY_SUN, ffi::ASSIST_BODY_JUPITER] {
+            let particle = ephem.get_body_state(body, time).unwrap();
+            values.extend([
+                particle.m,
+                particle.x,
+                particle.y,
+                particle.z,
+                particle.vx,
+                particle.vy,
+                particle.vz,
+            ]);
+        }
+        // SB441-n16 stores position segments; upstream deliberately reports
+        // asteroid velocity as NaN because the polynomial derivative is not
+        // part of this query contract. Exercise the finite parsed GM/position
+        // fields rather than mistaking that sentinel for a construction race.
+        let asteroid = ephem
+            .get_body_state(ffi::ASSIST_BODY_NPLANETS, time)
+            .unwrap();
+        values.extend([asteroid.m, asteroid.x, asteroid.y, asteroid.z]);
+    }
+    assert!(
+        values.iter().all(|value| value.is_finite()),
+        "ephemeris signature contains non-finite values: {values:?}"
+    );
+    assert!(values[3 + 7] > 0.0, "Jupiter GM must be positive");
+    values
+}
+
+enum Constructed {
+    Raw(Box<AssistData>),
+    Provider(AssistPropagator),
+}
+
+impl Constructed {
+    fn data(&self) -> &AssistData {
+        match self {
+            Self::Raw(data) => data.as_ref(),
+            Self::Provider(provider) => provider.data().as_ref(),
+        }
+    }
+}
+
 #[test]
 #[ignore = "live high-contention test requires the reviewed ASSIST kernel pair"]
 fn mixed_raw_and_provider_construction_is_finite_and_bitwise_equal_to_massive_body_reference() {
@@ -117,19 +165,15 @@ fn mixed_raw_and_provider_construction_is_finite_and_bitwise_equal_to_massive_bo
     const CONSTRUCTIONS_PER_THREAD: usize = 8;
 
     let (planets, asteroids) = kernel_paths();
-    let sequential = AssistPropagator::from_paths(&planets, &asteroids).unwrap();
-    let reference = propagate_constructed_data(&sequential);
-    let canonical = propagate(&sequential);
-    let canonical_route_difference = canonical
-        .iter()
-        .flatten()
-        .zip(reference.iter().flatten())
-        .map(|(actual, expected)| {
-            assert!(actual.is_finite() && expected.is_finite());
-            (actual - expected).abs()
-        })
-        .fold(0.0_f64, f64::max);
-    assert!(canonical_route_difference < 1.0e-12);
+    let reference_data = AssistData::new(
+        Ephemeris::from_paths(
+            std::path::Path::new(&planets),
+            std::path::Path::new(&asteroids),
+        )
+        .unwrap(),
+    );
+    let reference_signature = Arc::new(ephemeris_signature(&reference_data));
+    let reference = propagate_constructed_data(&reference_data);
     let two_body = propagate(&TwoBodyPropagator::default());
     let massive_body_difference = reference
         .iter()
@@ -141,49 +185,54 @@ fn mixed_raw_and_provider_construction_is_finite_and_bitwise_equal_to_massive_bo
         })
         .fold(0.0_f64, f64::max);
     assert!(
-        massive_body_difference > 1.0e-8,
+        massive_body_difference > 1.0e-4,
         "ASSIST reference does not exhibit the expected massive-body dynamics: {massive_body_difference:e}"
     );
-    println!(
-        "mixed construction reference: massive-body difference={massive_body_difference:e}, canonical-route difference={canonical_route_difference:e}"
-    );
+    println!("mixed construction reference: massive-body difference={massive_body_difference:e}");
 
-    let reference = Arc::new(reference);
+    let start = Arc::new(Barrier::new(THREADS));
+    let constructed = Arc::new(Barrier::new(THREADS));
     let workers = (0..THREADS)
         .map(|thread_index| {
             let planets = planets.clone();
             let asteroids = asteroids.clone();
-            let reference = Arc::clone(&reference);
+            let reference_signature = Arc::clone(&reference_signature);
+            let start = Arc::clone(&start);
+            let constructed = Arc::clone(&constructed);
             std::thread::spawn(move || {
-                for construction_index in 0..CONSTRUCTIONS_PER_THREAD {
-                    let propagator = if (thread_index + construction_index) % 2 == 0 {
-                        AssistPropagator::from_paths(&planets, &asteroids).unwrap()
-                    } else {
-                        AssistPropagator::new(Arc::new(AssistData::new(
-                            Ephemeris::from_paths(
-                                std::path::Path::new(&planets),
-                                std::path::Path::new(&asteroids),
+                start.wait();
+                let built = (0..CONSTRUCTIONS_PER_THREAD)
+                    .map(|construction_index| {
+                        if (thread_index + construction_index) % 2 == 0 {
+                            Constructed::Provider(
+                                AssistPropagator::from_paths(&planets, &asteroids).unwrap(),
                             )
-                            .unwrap(),
-                        )))
-                    };
-                    // Exercise the newly constructed ephemeris and ASSIST's
-                    // massive-body force setup without performing a separate
-                    // 765 MiB provenance hash for every stress iteration.
-                    // Canonical propagation above separately proves first-use
-                    // trust establishment and exact output agreement.
-                    let actual = propagate_constructed_data(&propagator);
-                    assert_eq!(actual.len(), reference.len());
-                    for (actual, expected) in actual.iter().zip(reference.iter()) {
-                        assert!(actual.iter().all(|value| value.is_finite()));
-                        assert!(expected.iter().all(|value| value.is_finite()));
-                        for axis in 0..6 {
-                            assert_eq!(
-                                actual[axis].to_bits(),
-                                expected[axis].to_bits(),
-                                "concurrent construction changed state axis {axis}: {actual:?} != {expected:?}"
-                            );
+                        } else {
+                            Constructed::Raw(Box::new(AssistData::new(
+                                Ephemeris::from_paths(
+                                    std::path::Path::new(&planets),
+                                    std::path::Path::new(&asteroids),
+                                )
+                                .unwrap(),
+                            )))
                         }
+                    })
+                    .collect::<Vec<_>>();
+                // No worker inspects or hashes until all 64 constructions have
+                // completed their burst through the shared parser lock.
+                constructed.wait();
+                for value in built {
+                    let actual = ephemeris_signature(value.data());
+                    assert_eq!(actual.len(), reference_signature.len());
+                    for (index, (actual, expected)) in
+                        actual.iter().zip(reference_signature.iter()).enumerate()
+                    {
+                        assert!(actual.is_finite() && expected.is_finite());
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "concurrent construction changed eager value {index}: {actual:?} != {expected:?}"
+                        );
                     }
                 }
             })

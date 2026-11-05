@@ -550,12 +550,20 @@ def test_capsule_partial_marsden_constants_match_filled_defaults() -> None:
     )
     assert partial_result[0] == filled_result[0] == 0
     assert partial_result[2:] == filled_result[2:]
+    assert partial_result[2] == filled_result[2] == [1, 1]
+    assert np.isfinite(partial_result[1]).all()
+    assert np.isfinite(filled_result[1]).all()
     np.testing.assert_array_equal(partial_result[1], filled_result[1])
 
     partial_stm = _call_capsule_stm(capsule, TRUTH_STATE, [60020, 60010], partial)
     filled_stm = _call_capsule_stm(capsule, TRUTH_STATE, [60020, 60010], filled)
     assert partial_stm[0] == filled_stm[0] == 0
     assert partial_stm[3:] == filled_stm[3:]
+    assert partial_stm[3] == filled_stm[3] == [1, 1]
+    assert np.isfinite(partial_stm[1]).all()
+    assert np.isfinite(filled_stm[1]).all()
+    assert np.isfinite(partial_stm[2]).all()
+    assert np.isfinite(filled_stm[2]).all()
     np.testing.assert_array_equal(partial_stm[1], filled_stm[1])
     np.testing.assert_array_equal(partial_stm[2], filled_stm[2])
 

@@ -305,18 +305,22 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
 
         The native descriptor includes immutable fingerprints of all IAS15
         settings and the exact planetary/small-body kernel contents.
-        Construction records no metadata trust baseline. The first actual
-        kernel use—ordinary propagation or this capsule request—hashes a stable
-        snapshot of the current retained bytes. Benign hard-link, chmod, or
-        touch changes before first use work; a transient first-hash race leaves
-        the provider uninitialized so a later call can retry. After trust is
-        established, metadata changes rehash and refresh only when bytes match;
-        changed bytes fail closed without replacing trust, and exact restoration
-        recovers. A capsule already returned keeps its original identity
-        metadata, but its callbacks recheck the retained handles and reject
-        tampering before propagation. New capsule requests reject the same
-        change. Core owns OD orchestration and records these identities in
-        workflow provenance.
+        Construction records no mutable metadata trust baseline, but binds a
+        small immutable digest of the DAF file record, comments, complete
+        summary chain, mapped length, and retained file identity immediately
+        before and after ASSIST parses them. The first actual kernel use—ordinary
+        propagation or this capsule request—checks that load-time binding and
+        hashes a stable snapshot of the complete retained bytes. Benign
+        hard-link, chmod, or touch changes before first use work; a transient
+        first-hash race leaves the provider uninitialized so a later call can
+        retry. Changes to eagerly parsed bytes, truncation, or path replacement
+        cannot be adopted as first-use truth. After trust is established,
+        metadata changes rehash and refresh only when bytes match; changed bytes
+        fail closed without replacing trust, and exact restoration recovers. A
+        capsule already returned keeps its original identity metadata, but its
+        callbacks recheck the retained handles and reject tampering before
+        propagation. New capsule requests reject the same change. Core owns OD
+        orchestration and records these identities in workflow provenance.
         """
         return self._native.propagator_capsule()
 

@@ -12,9 +12,11 @@ import ctypes
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
@@ -44,6 +46,30 @@ from adam_assist import ASSISTPropagator
 CONFIG_FP = "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f"
 DATA_FP = "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69"
 RESULTS: dict[str, object] = {}
+
+
+def _capsule_fingerprint(provider: ASSISTPropagator) -> str:
+    """Read a capsule-owned table while retaining the capsule owner."""
+    capsule = provider.propagator_capsule()
+    return bytes(_capsule_table(capsule).data_fingerprint).decode()
+
+
+def _one_orbit() -> Orbits:
+    return Orbits.from_kwargs(
+        orbit_id=["kernel-binding"],
+        coordinates=CartesianCoordinates.from_kwargs(
+            x=[TRUTH_STATE[0]],
+            y=[TRUTH_STATE[1]],
+            z=[TRUTH_STATE[2]],
+            vx=[TRUTH_STATE[3]],
+            vy=[TRUTH_STATE[4]],
+            vz=[TRUTH_STATE[5]],
+            time=Timestamp.from_mjd([60000], scale="tdb"),
+            origin=Origin.from_kwargs(code=["SUN"]),
+            frame="ecliptic",
+        ),
+    )
+
 
 _PyCapsule_New = ctypes.pythonapi.PyCapsule_New
 _PyCapsule_New.restype = ctypes.py_object
@@ -496,14 +522,173 @@ def test_benign_hardlink_change_before_first_use_establishes_current_bytes() -> 
             orbit, Timestamp.from_mjd([60010], scale="tdb")
         )
         assert np.isfinite(propagated.coordinates.values).all()
-        assert (
-            _capsule_table(capsule_first.propagator_capsule()).data_fingerprint
-            == DATA_FP.encode()
+        capsule_first_owner = capsule_first.propagator_capsule()
+        direct_owner = direct.propagator_capsule()
+        assert _capsule_table(capsule_first_owner).data_fingerprint == DATA_FP.encode()
+        assert _capsule_table(direct_owner).data_fingerprint == DATA_FP.encode()
+
+
+def _replace_byte(path: Path, offset: int, value: int) -> int:
+    metadata = path.stat()
+    with path.open("r+b") as handle:
+        handle.seek(offset)
+        original = handle.read(1)[0]
+        handle.seek(offset)
+        handle.write(bytes([value]))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    return original
+
+
+def _gm5_offset(path: Path) -> int:
+    contents = path.read_bytes()
+    start = contents.index(b"Initial conditions and constants")
+    return contents.index(b"GM5           2.8253458252257917D-07", start) + 14
+
+
+def test_pretrust_constant_binding_rejects_same_fingerprint_different_science() -> None:
+    base = ASSISTPropagator()
+    with tempfile.TemporaryDirectory() as tmp:
+        planets = Path(tmp) / "planets.bsp"
+        shutil.copyfile(base.planets_path, planets)
+        loaded_original = ASSISTPropagator(
+            planets_path=planets, asteroids_path=base.asteroids_path
         )
-        assert (
-            _capsule_table(direct.propagator_capsule()).data_fingerprint
-            == DATA_FP.encode()
+        offset = _gm5_offset(planets)
+        original = _replace_byte(planets, offset, ord("3"))
+        loaded_tampered = ASSISTPropagator(
+            planets_path=planets, asteroids_path=base.asteroids_path
         )
+
+        with pytest.raises(RuntimeError, match="bytes ASSIST loaded"):
+            loaded_original.propagator_capsule()
+        tampered_fingerprint = _capsule_fingerprint(loaded_tampered)
+        assert tampered_fingerprint != DATA_FP
+
+        _replace_byte(planets, offset, original)
+        assert _capsule_fingerprint(loaded_original) == DATA_FP
+        propagated = loaded_original.propagate_orbits(
+            _one_orbit(), Timestamp.from_mjd([60400], scale="tdb")
+        )
+        assert np.isfinite(propagated.coordinates.values).all()
+        with pytest.raises(RuntimeError, match="kernel bytes changed"):
+            loaded_tampered.propagator_capsule()
+        _replace_byte(planets, offset, ord("3"))
+        assert _capsule_fingerprint(loaded_tampered) == tampered_fingerprint
+        _replace_byte(planets, offset, original)
+
+
+def test_pretrust_inode_replacement_rejects_then_original_inode_recovers() -> None:
+    base = ASSISTPropagator()
+    with tempfile.TemporaryDirectory() as tmp:
+        planets = Path(tmp) / "planets.bsp"
+        loaded = Path(tmp) / "planets.loaded.bsp"
+        replacement = Path(tmp) / "planets.replacement.bsp"
+        shutil.copyfile(base.planets_path, planets)
+        provider = ASSISTPropagator(
+            planets_path=planets, asteroids_path=base.asteroids_path
+        )
+        planets.rename(loaded)
+        shutil.copyfile(loaded, planets)
+        with pytest.raises(RuntimeError, match="canonical path was replaced"):
+            provider.propagator_capsule()
+
+        planets.rename(replacement)
+        loaded.rename(planets)
+        assert _capsule_fingerprint(provider) == DATA_FP
+
+
+def test_pretrust_truncation_fails_before_propagation_without_sigbus() -> None:
+    base = ASSISTPropagator()
+    with tempfile.TemporaryDirectory() as tmp:
+        planets = Path(tmp) / "planets.bsp"
+        shutil.copyfile(base.planets_path, planets)
+        code = (
+            "from pathlib import Path;import os;"
+            "from adam_assist import ASSISTPropagator;"
+            "from adam_core.time import Timestamp;"
+            "from test_provider_capsule_od import _one_orbit;"
+            f"p=ASSISTPropagator(planets_path=Path({str(planets)!r}),"
+            f"asteroids_path=Path({str(base.asteroids_path)!r}));"
+            f"os.truncate({str(planets)!r},os.path.getsize({str(planets)!r})//2);"
+            "errors=[];"
+            "\nfor call in (lambda:p.propagator_capsule(),"
+            "lambda:p.propagate_orbits(_one_orbit(),Timestamp.from_mjd([60030],scale='tdb'))):"
+            "\n try: call()"
+            "\n except Exception as error: errors.append(str(error))"
+            "\nprint(errors);assert len(errors)==2;"
+            "assert all('bytes ASSIST loaded' in error or 'DAF record' in error for error in errors)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        assert result.returncode == 0, (result.stdout, result.stderr, result.returncode)
+
+
+def test_construction_eager_region_race_is_retryable() -> None:
+    base = ASSISTPropagator()
+    with tempfile.TemporaryDirectory() as tmp:
+        planets = Path(tmp) / "planets.bsp"
+        stop = Path(tmp) / "stop"
+        shutil.copyfile(base.planets_path, planets)
+        offset = _gm5_offset(planets)
+        original = planets.read_bytes()[offset]
+        _replace_byte(planets, offset, ord("3"))
+        stable_tampered = ASSISTPropagator(
+            planets_path=planets, asteroids_path=base.asteroids_path
+        )
+        mutator_code = (
+            "import os,pathlib,sys,time;"
+            "p=pathlib.Path(sys.argv[1]);off=int(sys.argv[2]);stop=pathlib.Path(sys.argv[3]);"
+            "f=p.open('r+b');i=0;"
+            "\nwhile not stop.exists():"
+            "\n f.seek(off);f.write(bytes([ord('2') if i%2==0 else ord('3')]));f.flush();os.fsync(f.fileno());i+=1"
+            "\nf.close()"
+        )
+        mutator = subprocess.Popen(
+            [sys.executable, "-c", mutator_code, str(planets), str(offset), str(stop)]
+        )
+        errors = 0
+        providers = [stable_tampered]
+        try:
+            for _ in range(4):
+                try:
+                    providers.append(
+                        ASSISTPropagator(
+                            planets_path=planets,
+                            asteroids_path=base.asteroids_path,
+                        )
+                    )
+                except RuntimeError as error:
+                    assert "changed during ephemeris construction" in str(error)
+                    errors += 1
+        finally:
+            stop.touch()
+            mutator.wait(timeout=30)
+            _replace_byte(planets, offset, original)
+
+        # A construction wholly inside one stable tampered interval may
+        # legitimately succeed, but after exact restoration its load binding
+        # must reject rather than report the canonical fingerprint. Any
+        # constructor that sampled both intervals must fail immediately.
+        rejected = 0
+        for provider in providers:
+            try:
+                assert _capsule_fingerprint(provider) == DATA_FP
+            except RuntimeError as error:
+                assert "bytes ASSIST loaded" in str(error)
+                rejected += 1
+        assert errors + rejected > 0
+        retry = ASSISTPropagator(
+            planets_path=planets, asteroids_path=base.asteroids_path
+        )
+        assert _capsule_fingerprint(retry) == DATA_FP
 
 
 def test_data_fingerprint_is_content_identity_lazy_and_cached() -> None:
@@ -519,10 +704,8 @@ def test_data_fingerprint_is_content_identity_lazy_and_cached() -> None:
         a = _capsule_table(base_capsule)
         b = _capsule_table(linked_capsule)
         assert a.data_fingerprint == b.data_fingerprint == DATA_FP.encode()
-        assert (
-            _capsule_table(base.propagator_capsule()).data_fingerprint
-            == DATA_FP.encode()
-        )
+        base_capsule_again = base.propagator_capsule()
+        assert _capsule_table(base_capsule_again).data_fingerprint == DATA_FP.encode()
 
     # Construction must only load ASSIST/SPICE. In this fresh process the first
     # actual use is a capsule request, which performs the intentionally

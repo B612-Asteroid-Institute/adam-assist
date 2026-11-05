@@ -26,8 +26,11 @@
   apply full PEP 503 normalization.
 - Deferred the 765 MiB kernel content hash from provider construction to the
   first actual kernel use (direct propagation, shard execution, or provider
-  metadata), without recording a construction-time metadata trust baseline.
-  Benign pre-use hard-link, chmod, and touch changes are accepted; transient
+  metadata), without recording a mutable construction-time metadata trust
+  baseline. Construction now binds the small eagerly parsed DAF region set and
+  retained inode immediately around upstream parsing, so first use cannot adopt
+  changed constants/segments, truncation, or path replacement as truth. Benign
+  pre-use hard-link, chmod, and touch changes remain accepted; transient
   first-hash races leave state uninitialized for retry. After trust is
   established, metadata changes rehash affected exact bytes and atomically
   refresh only when content matches; changed bytes fail closed without
@@ -36,7 +39,9 @@
 - Moved process-global ASSIST SPK-parser construction serialization into the
   exported raw `Ephemeris::from_paths` constructor, so raw and provider paths
   share one lock without outer double-locking while propagation remains
-  parallel; added repeated mixed-constructor finite and bitwise coverage.
+  parallel. Reworked stress coverage into a synchronized 64-constructor burst
+  followed by direct constant/mass/segment queries, avoiding a full 765 MiB hash
+  per constructor and making a lock-removal mutation fail.
 - Expanded exact-source validation to default/all/no-default Rust checks,
   warning-denied Clippy, tests, doctests, docs, packaged-crate tests, and
   independent capsule tamper/composition/batching/STM probes. Packaged unit

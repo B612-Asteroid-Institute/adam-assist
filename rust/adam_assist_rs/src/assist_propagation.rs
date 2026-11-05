@@ -24,6 +24,7 @@ use crate::{AssistError as Error, AssistResult as Result, Ephemeris};
 use libassist_sys::{ffi, AssistSim};
 use librebound_sys::{IntegratorConfig, Simulation};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs::{File, Metadata};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 #[cfg(unix)]
@@ -109,6 +110,68 @@ impl StableFileIdentity {
     }
 }
 
+const DAF_RECORD_LENGTH: usize = 1024;
+
+/// The immutable load-time facts on which ASSIST's eager parsing and fixed
+/// mmap length depend. Deliberately excludes mutable metadata such as mtime,
+/// ctime, mode and hard-link count.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LoadedKernelFileIdentity {
+    size: u64,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    eager_regions_sha256: String,
+}
+
+impl LoadedKernelFileIdentity {
+    fn from_metadata_and_digest(metadata: &Metadata, eager_regions_sha256: String) -> Self {
+        Self {
+            size: metadata.len(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+            eager_regions_sha256,
+        }
+    }
+
+    fn matches_metadata(&self, metadata: &Metadata) -> bool {
+        if self.size != metadata.len() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            self.device == metadata.dev() && self.inode == metadata.ino()
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    }
+
+    fn matches_stable_identity(&self, identity: &StableFileIdentity) -> bool {
+        if self.size != identity.size {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            self.device == identity.device && self.inode == identity.inode
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LoadedKernelPairIdentity {
+    planets: LoadedKernelFileIdentity,
+    asteroids: LoadedKernelFileIdentity,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct KernelFileMetadata {
     handle: StableFileIdentity,
@@ -177,6 +240,155 @@ impl KernelFile {
         Ok(KernelFileMetadata { handle, path })
     }
 
+    fn read_record(
+        file: &File,
+        record_number: u32,
+        label: &str,
+    ) -> Result<[u8; DAF_RECORD_LENGTH]> {
+        if record_number == 0 {
+            return Err(Error::Other(format!(
+                "invalid zero DAF record number in {label} kernel"
+            )));
+        }
+        let mut file = file.try_clone().map_err(|error| {
+            Error::Other(format!("failed to clone {label} kernel handle: {error}"))
+        })?;
+        let offset = u64::from(record_number - 1) * DAF_RECORD_LENGTH as u64;
+        file.seek(SeekFrom::Start(offset)).map_err(|error| {
+            Error::Other(format!(
+                "failed to seek to DAF record {record_number} in {label} kernel: {error}"
+            ))
+        })?;
+        let mut record = [0_u8; DAF_RECORD_LENGTH];
+        file.read_exact(&mut record).map_err(|error| {
+            Error::Other(format!(
+                "failed to read complete DAF record {record_number} from {label} kernel: {error}"
+            ))
+        })?;
+        Ok(record)
+    }
+
+    fn summary_record_number(value: f64, file_records: u64, label: &str) -> Result<u32> {
+        if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > u32::MAX as f64 {
+            return Err(Error::Other(format!(
+                "invalid DAF summary-record pointer {value:?} in {label} kernel"
+            )));
+        }
+        let record = value as u32;
+        if record != 0 && u64::from(record) > file_records {
+            return Err(Error::Other(format!(
+                "DAF summary-record pointer {record} exceeds {label} kernel length"
+            )));
+        }
+        Ok(record)
+    }
+
+    /// Digest exactly the small regions upstream ASSIST parses eagerly: file
+    /// record, comment records and the complete linked summary-record chain.
+    fn loaded_identity(&self) -> Result<LoadedKernelFileIdentity> {
+        let metadata = self.file.metadata().map_err(|error| {
+            Error::Other(format!("failed to inspect {} kernel: {error}", self.label))
+        })?;
+        let size = metadata.len();
+        let file_records = size / DAF_RECORD_LENGTH as u64;
+        if size < DAF_RECORD_LENGTH as u64 || size % DAF_RECORD_LENGTH as u64 != 0 {
+            return Err(Error::Other(format!(
+                "{} kernel length {size} is not a complete DAF record sequence",
+                self.label
+            )));
+        }
+
+        let file_record = Self::read_record(&self.file, 1, self.label)?;
+        if !file_record.starts_with(b"DAF/SPK") {
+            return Err(Error::Other(format!(
+                "{} kernel does not have a DAF/SPK file record",
+                self.label
+            )));
+        }
+        if &file_record[88..96] != b"LTL-IEEE" {
+            return Err(Error::Other(format!(
+                "{} kernel uses an unsupported DAF binary format",
+                self.label
+            )));
+        }
+        let fward = u32::from_le_bytes(file_record[76..80].try_into().unwrap());
+        if fward < 2 || u64::from(fward) > file_records {
+            return Err(Error::Other(format!(
+                "invalid first DAF summary record {fward} in {} kernel",
+                self.label
+            )));
+        }
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"adam-assist-eager-spk-regions-v1\0");
+        let mut update = |kind: u8, record_number: u32, record: &[u8]| {
+            hasher.update([kind]);
+            hasher.update(record_number.to_le_bytes());
+            hasher.update(record);
+        };
+        update(b'F', 1, &file_record);
+        for record_number in 2..fward {
+            let record = Self::read_record(&self.file, record_number, self.label)?;
+            update(b'C', record_number, &record);
+        }
+
+        let mut visited = HashSet::new();
+        let mut record_number = fward;
+        while record_number != 0 {
+            if !visited.insert(record_number) {
+                return Err(Error::Other(format!(
+                    "cyclic DAF summary-record chain at record {record_number} in {} kernel",
+                    self.label
+                )));
+            }
+            let record = Self::read_record(&self.file, record_number, self.label)?;
+            update(b'S', record_number, &record);
+            let next = f64::from_le_bytes(record[0..8].try_into().unwrap());
+            record_number = Self::summary_record_number(next, file_records, self.label)?;
+        }
+
+        Ok(LoadedKernelFileIdentity::from_metadata_and_digest(
+            &metadata,
+            format!("{:x}", hasher.finalize()),
+        ))
+    }
+
+    fn binding_error(&self, trust_established: bool, detail: &str) -> Error {
+        if trust_established {
+            Error::Other("ASSIST kernel bytes changed after provenance was established".to_string())
+        } else {
+            Error::Other(format!(
+                "{} kernel no longer matches the bytes ASSIST loaded before provenance was established: {detail}",
+                self.label
+            ))
+        }
+    }
+
+    fn validate_loaded_binding(
+        &self,
+        expected_metadata: &KernelFileMetadata,
+        observed: &LoadedKernelFileIdentity,
+        loaded: &LoadedKernelFileIdentity,
+        trust_established: bool,
+    ) -> Result<()> {
+        if !expected_metadata.handle.same_file(&expected_metadata.path) {
+            return Err(self.binding_error(
+                trust_established,
+                "the canonical path was replaced with a different file",
+            ));
+        }
+        let handle_metadata = self.file.metadata().map_err(|error| {
+            Error::Other(format!("failed to inspect {} kernel: {error}", self.label))
+        })?;
+        if !loaded.matches_metadata(&handle_metadata) || observed != loaded {
+            return Err(self.binding_error(
+                trust_established,
+                "the eagerly parsed records, mapped length, or loaded file identity changed",
+            ));
+        }
+        Ok(())
+    }
+
     fn hash_open_file(&self, file: &File, source: &str) -> Result<FileIdentity> {
         let mut reader = BufReader::new(file.try_clone().map_err(|error| {
             Error::Other(format!(
@@ -215,6 +427,8 @@ impl KernelFile {
     fn content_identity(
         &self,
         expected_metadata: &KernelFileMetadata,
+        loaded_identity: Option<&LoadedKernelFileIdentity>,
+        trust_established: bool,
     ) -> Result<Option<FileIdentity>> {
         // Metadata movement is not a content failure. Tell the bounded outer
         // loop to take another complete snapshot instead of poisoning the
@@ -222,7 +436,34 @@ impl KernelFile {
         if self.metadata()? != *expected_metadata {
             return Ok(None);
         }
+
+        // Path-backed providers bind their first full digest to the file
+        // record, comments, summary chain, mapped length and retained inode
+        // observed immediately around ASSIST construction. Read those eager
+        // regions both before and after the full stream so the baseline and
+        // digest belong to one stable observation attempt.
+        let eager_before = match loaded_identity {
+            Some(loaded) => {
+                let observed = self.loaded_identity()?;
+                self.validate_loaded_binding(
+                    expected_metadata,
+                    &observed,
+                    loaded,
+                    trust_established,
+                )?;
+                Some(observed)
+            }
+            None => None,
+        };
         let handle_identity = self.hash_open_file(&self.file, "retained handle")?;
+        if let (Some(loaded), Some(before)) = (loaded_identity, eager_before.as_ref()) {
+            let after = self.loaded_identity()?;
+            if &after != before {
+                return Ok(None);
+            }
+            self.validate_loaded_binding(expected_metadata, &after, loaded, trust_established)?;
+        }
+
         let path_file = File::open(&self.canonical_path).map_err(|error| {
             Error::Other(format!(
                 "failed to reopen {} kernel {}: {error}",
@@ -249,10 +490,10 @@ impl KernelFile {
             return Ok(None);
         }
         if handle_identity != path_identity {
-            return Err(Error::Other(format!(
-                "{} kernel path no longer identifies the bytes ASSIST loaded",
-                self.label
-            )));
+            return Err(self.binding_error(
+                trust_established,
+                "the canonical path no longer identifies the loaded bytes",
+            ));
         }
         Ok(Some(handle_identity))
     }
@@ -276,6 +517,7 @@ struct KernelPairIdentity {
 struct KernelFiles {
     planets: KernelFile,
     asteroids: KernelFile,
+    loaded_identity: Option<LoadedKernelPairIdentity>,
     identity: OnceLock<KernelPairIdentity>,
     trusted_metadata: Mutex<Option<KernelPairMetadata>>,
     #[cfg(test)]
@@ -289,10 +531,11 @@ impl KernelFiles {
         Ok(Self {
             planets,
             asteroids,
+            loaded_identity: None,
             identity: OnceLock::new(),
-            // Construction records no metadata trust baseline. The first
-            // actual propagation or metadata request establishes trust from a
-            // stable snapshot of the current bytes.
+            // Mutable metadata is intentionally not trusted at construction.
+            // Path-backed AssistData attaches a small immutable baseline for
+            // the records ASSIST parsed eagerly and its fixed mmap identity.
             trusted_metadata: Mutex::new(None),
             #[cfg(test)]
             compute_count: AtomicUsize::new(0),
@@ -310,6 +553,46 @@ impl KernelFiles {
         })
     }
 
+    fn observe_loaded_identity(&self) -> Result<LoadedKernelPairIdentity> {
+        let before = self.metadata()?;
+        if !before.planets.handle.same_file(&before.planets.path)
+            || !before.asteroids.handle.same_file(&before.asteroids.path)
+        {
+            return Err(Error::Other(
+                "ASSIST kernel path changed before the ephemeris load completed".to_string(),
+            ));
+        }
+        let observed = LoadedKernelPairIdentity {
+            planets: self.planets.loaded_identity()?,
+            asteroids: self.asteroids.loaded_identity()?,
+        };
+        let after = self.metadata()?;
+        if !after.planets.handle.same_file(&after.planets.path)
+            || !after.asteroids.handle.same_file(&after.asteroids.path)
+            || !observed
+                .planets
+                .matches_stable_identity(&before.planets.handle)
+            || !observed
+                .planets
+                .matches_stable_identity(&after.planets.handle)
+            || !observed
+                .asteroids
+                .matches_stable_identity(&before.asteroids.handle)
+            || !observed
+                .asteroids
+                .matches_stable_identity(&after.asteroids.handle)
+        {
+            return Err(Error::Other(
+                "ASSIST kernel load identity changed during eager-region observation".to_string(),
+            ));
+        }
+        Ok(observed)
+    }
+
+    fn bind_loaded_identity(&mut self, identity: LoadedKernelPairIdentity) {
+        self.loaded_identity = Some(identity);
+    }
+
     fn verified_identity(
         &self,
         trusted_metadata: Option<&KernelPairMetadata>,
@@ -324,7 +607,13 @@ impl KernelFiles {
                 (Some(identity), Some(metadata)) if before.planets == metadata.planets => {
                     identity.planets.clone()
                 }
-                _ => match self.planets.content_identity(&before.planets)? {
+                _ => match self.planets.content_identity(
+                    &before.planets,
+                    self.loaded_identity
+                        .as_ref()
+                        .map(|identity| &identity.planets),
+                    trusted_identity.is_some(),
+                )? {
                     Some(identity) => identity,
                     None => continue,
                 },
@@ -333,7 +622,13 @@ impl KernelFiles {
                 (Some(identity), Some(metadata)) if before.asteroids == metadata.asteroids => {
                     identity.asteroids.clone()
                 }
-                _ => match self.asteroids.content_identity(&before.asteroids)? {
+                _ => match self.asteroids.content_identity(
+                    &before.asteroids,
+                    self.loaded_identity
+                        .as_ref()
+                        .map(|identity| &identity.asteroids),
+                    trusted_identity.is_some(),
+                )? {
                     Some(identity) => identity,
                     None => continue,
                 },
@@ -455,18 +750,45 @@ impl AssistData {
     /// Load the planetary and small-body ASSIST ephemeris kernels explicitly.
     ///
     /// Construction opens stable file handles and loads ASSIST from aliases to
-    /// those exact handles. It records no metadata trust baseline. Content
-    /// trust is established from a complete stable snapshot at the first
-    /// actual kernel use: direct propagation, shard execution, external-provider
-    /// construction, or Python capsule metadata. Later path replacement or
-    /// in-place mutation is detected before cached metadata can be returned.
+    /// those exact handles. It records no mutable metadata trust baseline. It
+    /// does bind the DAF file record, comments, complete summary chain, mapped
+    /// length, and retained file identity immediately around upstream parsing.
+    /// Full-content trust is established from a complete stable snapshot at the
+    /// first actual kernel use: direct propagation, shard execution,
+    /// external-provider construction, or Python capsule metadata. Changed
+    /// eagerly parsed bytes, truncation, path replacement, or later in-place
+    /// mutation is detected before cached metadata can be returned.
     pub fn from_paths(
         planets_path: impl AsRef<Path>,
         asteroids_path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let kernel_files = KernelFiles::open(planets_path.as_ref(), asteroids_path.as_ref())?;
+        Self::from_paths_with_load_hook(planets_path.as_ref(), asteroids_path.as_ref(), || Ok(()))
+    }
+
+    fn from_paths_with_load_hook(
+        planets_path: &Path,
+        asteroids_path: &Path,
+        after_initial_observation: impl FnOnce() -> Result<()>,
+    ) -> Result<Self> {
+        let mut kernel_files = KernelFiles::open(planets_path, asteroids_path)?;
         let (planets_loader, asteroids_loader) = kernel_files.loader_paths();
-        let ephem = Ephemeris::from_paths(&planets_loader, &asteroids_loader)?;
+
+        // Keep the eager-region observations and upstream parsing in one
+        // serialized construction window. This baseline is small (file record,
+        // comments and summary chain), not the lazy 765 MiB full-content hash.
+        let _construction = crate::ephemeris::construction_guard();
+        let before = kernel_files.observe_loaded_identity()?;
+        after_initial_observation()?;
+        let ephem =
+            Ephemeris::from_paths_while_construction_locked(&planets_loader, &asteroids_loader)?;
+        let after = kernel_files.observe_loaded_identity()?;
+        if before != after {
+            return Err(Error::Other(
+                "ASSIST kernel eagerly parsed regions changed during ephemeris construction"
+                    .to_string(),
+            ));
+        }
+        kernel_files.bind_loaded_identity(after);
         Ok(Self {
             ephem,
             kernel_files: Some(kernel_files),
@@ -475,14 +797,15 @@ impl AssistData {
 
     /// Return the lazily computed immutable identity for both loaded kernels.
     ///
-    /// The first actual kernel use hashes a stable snapshot of the current
-    /// retained handles and matching paths. Benign hard-link, chmod, or touch
-    /// changes before that use are therefore accepted without trusting stale
-    /// construction metadata. A metadata race during the first hash is retried
-    /// within the call and leaves the provider uninitialized on failure, so a
-    /// later call can retry. Once established, metadata changes rehash affected
-    /// exact bytes: equal bytes refresh the trusted snapshot, while different
-    /// bytes fail closed without replacing it and exact restoration recovers.
+    /// The first actual kernel use verifies the immutable load-time binding,
+    /// then hashes a stable snapshot of the current retained handles and
+    /// matching paths. Benign hard-link, chmod, or touch changes before that use
+    /// are therefore accepted without trusting stale mutable metadata. A race
+    /// during the first hash is retried within the call and leaves the provider
+    /// uninitialized on failure, so a later call can retry. Once established,
+    /// metadata changes rehash affected exact bytes: equal bytes refresh the
+    /// trusted snapshot, while different bytes fail closed without replacing it
+    /// and exact restoration recovers.
     pub fn data_fingerprint(&self) -> Result<&str> {
         self.kernel_files
             .as_ref()
@@ -1467,6 +1790,60 @@ mod tests {
 
     #[test]
     #[ignore = "requires the reviewed ASSIST kernel pair"]
+    fn construction_eager_region_race_fails_and_exact_retry_succeeds() {
+        use std::io::{Read, Seek, Write};
+
+        let source = PathBuf::from(std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH").unwrap());
+        let asteroids = PathBuf::from(std::env::var("ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH").unwrap());
+        let copy = std::env::temp_dir().join(format!(
+            "adam-assist-construction-race-{}.bsp",
+            std::process::id()
+        ));
+        std::fs::copy(&source, &copy).unwrap();
+        let mut contents = Vec::new();
+        std::fs::File::open(&copy)
+            .unwrap()
+            .read_to_end(&mut contents)
+            .unwrap();
+        let needle = b"GM5           2.8253458252257917D-07";
+        let offset = contents
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .unwrap()
+            + 14;
+        let original = contents[offset];
+
+        let result = AssistData::from_paths_with_load_hook(&copy, &asteroids, || {
+            let mut file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
+            file.seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
+            file.write_all(b"3").unwrap();
+            file.sync_all().unwrap();
+            Ok(())
+        });
+        let error = match result {
+            Ok(_) => panic!("construction accepted changed eagerly parsed bytes"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            error.contains("eagerly parsed regions changed during ephemeris construction"),
+            "{error}"
+        );
+
+        let mut file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
+        file.seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
+        file.write_all(&[original]).unwrap();
+        file.sync_all().unwrap();
+        let retry = AssistData::from_paths(&copy, &asteroids).unwrap();
+        assert_eq!(
+            retry.data_fingerprint().unwrap(),
+            "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69"
+        );
+        drop(retry);
+        std::fs::remove_file(copy).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires the reviewed ASSIST kernel pair"]
     fn direct_propagation_establishes_kernel_provenance_on_first_use() {
         let planets = std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH").unwrap();
         let asteroids = std::env::var("ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH").unwrap();
@@ -1562,6 +1939,122 @@ mod tests {
             std::fs::remove_file(asteroids).unwrap();
         }
         std::fs::remove_dir(directory).unwrap();
+    }
+
+    fn synthetic_daf_bytes() -> Vec<u8> {
+        let mut bytes = vec![0_u8; 6 * DAF_RECORD_LENGTH];
+        bytes[0..8].copy_from_slice(b"DAF/SPK ");
+        bytes[8..12].copy_from_slice(&2_u32.to_le_bytes());
+        bytes[12..16].copy_from_slice(&6_u32.to_le_bytes());
+        bytes[76..80].copy_from_slice(&3_u32.to_le_bytes());
+        bytes[80..84].copy_from_slice(&5_u32.to_le_bytes());
+        bytes[88..96].copy_from_slice(b"LTL-IEEE");
+        let comment = b"synthetic-comment";
+        bytes[DAF_RECORD_LENGTH..DAF_RECORD_LENGTH + comment.len()].copy_from_slice(comment);
+        bytes[2 * DAF_RECORD_LENGTH..2 * DAF_RECORD_LENGTH + 8]
+            .copy_from_slice(&5.0_f64.to_le_bytes());
+        bytes[4 * DAF_RECORD_LENGTH..4 * DAF_RECORD_LENGTH + 8]
+            .copy_from_slice(&0.0_f64.to_le_bytes());
+        bytes[5 * DAF_RECORD_LENGTH..].fill(0x5a);
+        bytes
+    }
+
+    fn temporary_daf_pair(test_name: &str) -> (PathBuf, PathBuf, Vec<u8>) {
+        let (planets, asteroids) = temporary_kernel_pair(test_name);
+        let bytes = synthetic_daf_bytes();
+        std::fs::write(&planets, &bytes).unwrap();
+        std::fs::write(&asteroids, &bytes).unwrap();
+        (planets, asteroids, bytes)
+    }
+
+    #[test]
+    fn eager_region_identity_covers_file_comments_and_complete_summary_chain() {
+        let (planets, asteroids, original) = temporary_daf_pair("eager-regions");
+        let file = KernelFile::open(&planets, "test").unwrap();
+        let baseline = file.loaded_identity().unwrap();
+
+        let mut changed = original.clone();
+        changed[DAF_RECORD_LENGTH + 4] ^= 0xff;
+        std::fs::write(&planets, &changed).unwrap();
+        assert_ne!(file.loaded_identity().unwrap(), baseline);
+
+        std::fs::write(&planets, &original).unwrap();
+        let mut changed = original.clone();
+        changed[4 * DAF_RECORD_LENGTH + 24] ^= 0xff;
+        std::fs::write(&planets, &changed).unwrap();
+        assert_ne!(file.loaded_identity().unwrap(), baseline);
+
+        std::fs::write(&planets, &original).unwrap();
+        let mut changed = original.clone();
+        changed[5 * DAF_RECORD_LENGTH + 24] ^= 0xff;
+        std::fs::write(&planets, &changed).unwrap();
+        assert_eq!(file.loaded_identity().unwrap(), baseline);
+
+        drop(file);
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[test]
+    fn pretrust_eager_change_and_truncation_fail_without_caching_then_restore() {
+        let (planets, asteroids, original) = temporary_daf_pair("eager-restore");
+        let mut files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let loaded = files.observe_loaded_identity().unwrap();
+        files.bind_loaded_identity(loaded);
+
+        let mut changed = original.clone();
+        changed[DAF_RECORD_LENGTH + 4] ^= 0xff;
+        std::fs::write(&planets, &changed).unwrap();
+        let error = files.identity().unwrap_err().to_string();
+        assert!(error.contains("bytes ASSIST loaded"), "{error}");
+        assert!(files.identity.get().is_none());
+
+        std::fs::write(&planets, &original).unwrap();
+        let fingerprint = files.identity().unwrap().fingerprint.clone();
+        assert_eq!(fingerprint.len(), 64);
+
+        drop(files);
+        let mut files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let loaded = files.observe_loaded_identity().unwrap();
+        files.bind_loaded_identity(loaded);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&planets)
+            .unwrap()
+            .set_len((original.len() / 2) as u64)
+            .unwrap();
+        let error = files.identity().unwrap_err().to_string();
+        assert!(error.contains("DAF") || error.contains("bytes ASSIST loaded"));
+        assert!(files.identity.get().is_none());
+        std::fs::write(&planets, &original).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint.len(), 64);
+
+        drop(files);
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pretrust_inode_replacement_fails_then_original_inode_recovers() {
+        let (planets, asteroids, _original_bytes) = temporary_daf_pair("eager-inode");
+        let mut files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let loaded = files.observe_loaded_identity().unwrap();
+        files.bind_loaded_identity(loaded);
+
+        let original = planets.with_extension("loaded");
+        let replacement = planets.with_extension("replacement");
+        std::fs::rename(&planets, &original).unwrap();
+        std::fs::copy(&original, &planets).unwrap();
+        let error = files.identity().unwrap_err().to_string();
+        assert!(error.contains("canonical path was replaced"), "{error}");
+        assert!(files.identity.get().is_none());
+
+        std::fs::rename(&planets, &replacement).unwrap();
+        std::fs::rename(&original, &planets).unwrap();
+        assert_eq!(files.identity().unwrap().fingerprint.len(), 64);
+
+        drop(files);
+        std::fs::remove_file(replacement).unwrap();
+        remove_temporary_kernel_pair(&planets, &asteroids);
     }
 
     #[test]

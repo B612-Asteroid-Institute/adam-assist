@@ -4,7 +4,12 @@
 //! ephemeris is created. Serialization therefore belongs at the lowest public
 //! raw constructor exported by this crate, not only in higher-level provider
 //! constructors: raw [`Ephemeris::from_paths`] and [`crate::AssistPropagator`]
-//! callers must participate in the same lock.
+//! callers in one linked crate instance participate in the same process-global
+//! lock. Provider construction holds the same guard while observing eager DAF
+//! regions immediately around parsing. Propagation and ephemeris queries are
+//! intentionally not serialized. Direct `libassist_sys::Ephemeris`
+//! construction, separately linked crate/library copies, and external upstream
+//! ASSIST C/FFI callers are outside this guarantee.
 
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -12,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 
 static EPHEMERIS_CONSTRUCTION_LOCK: Mutex<()> = Mutex::new(());
 
-fn construction_guard() -> MutexGuard<'static, ()> {
+pub(crate) fn construction_guard() -> MutexGuard<'static, ()> {
     // A Rust panic cannot cross the underlying C call, and this mutex protects
     // no Rust data invariant. If unrelated caller code panicked while holding
     // the guard, recovering the lock is safer than permanently disabling every
@@ -32,14 +37,28 @@ pub struct Ephemeris(libassist_sys::Ephemeris);
 impl Ephemeris {
     /// Load an ASSIST ephemeris from planetary and small-body SPK paths.
     ///
-    /// Calls in every thread and every adam-assist construction route share
-    /// one process-global lock around upstream parsing. The lock is released
-    /// before this function returns and is never held during propagation.
+    /// Calls in every thread through this wrapper (including all crate-owned
+    /// provider routes) share one process-global lock around upstream parsing.
+    /// The lock is released before this function returns and is never held
+    /// during propagation or queries. Direct `libassist_sys` and separately
+    /// linked copies are outside this guarantee.
     pub fn from_paths(
         planets: &Path,
         asteroids: &Path,
     ) -> std::result::Result<Self, libassist_sys::Error> {
         let _construction = construction_guard();
+        Self::from_paths_while_construction_locked(planets, asteroids)
+    }
+
+    /// Construct while the caller holds [`construction_guard`].
+    ///
+    /// This crate-private route lets path-backed [`crate::AssistData`] observe
+    /// the small SPK regions ASSIST parses eagerly immediately before and after
+    /// the upstream call, without taking an outer second lock.
+    pub(crate) fn from_paths_while_construction_locked(
+        planets: &Path,
+        asteroids: &Path,
+    ) -> std::result::Result<Self, libassist_sys::Error> {
         libassist_sys::Ephemeris::from_paths(planets, asteroids).map(Self)
     }
 }
