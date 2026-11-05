@@ -1975,10 +1975,7 @@ mod tests {
         );
         drop(canonical);
 
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&copy)
-            .unwrap();
+        let file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
         assert_eq!(file.write_at(b"3", offset as u64).unwrap(), 1);
         file.sync_data().unwrap();
         let tampered = AssistData::from_paths(&copy, &asteroids).unwrap();
@@ -2115,13 +2112,7 @@ mod tests {
         if let Some(data) = tampered_success {
             let error = data.data_fingerprint().unwrap_err().to_string();
             assert!(error.contains("eager content"), "{error}");
-            assert!(data
-                .kernel_files
-                .as_ref()
-                .unwrap()
-                .identity
-                .get()
-                .is_none());
+            assert!(data.kernel_files.as_ref().unwrap().identity.get().is_none());
         }
         println!(
             "oscillating construction race: attempts={ATTEMPTS} successes={successes} errors={errors} toggles={}",
