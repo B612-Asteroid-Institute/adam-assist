@@ -304,27 +304,23 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         """Return Core's private propagation-only ABI-v2 capsule.
 
         The native descriptor includes immutable fingerprints of all IAS15
-        settings and the exact planetary/small-body kernel contents.
-        Construction stores no mutable metadata trust baseline, but binds the
-        DAF file record, comments, complete summary chain, mapped length, and
-        retained file identity around ASSIST's eager parse. The complete
-        handle/path metadata snapshot must remain unchanged across that window;
-        a concurrent write or metadata operation returns a retryable error and
-        no provider. Benign metadata changes after successful construction and
-        before first use remain accepted.
+        settings and the exact planetary/small-body kernel contents. Kernel
+        files are immutable package-managed resources and must remain unchanged
+        for the provider's lifetime. Construction binds the DAF file record,
+        comments, complete summary chain, mapped length, and retained file
+        identity around ASSIST's eager parse. Ordinary propagation or this
+        capsule request verifies that binding and hashes a stable snapshot of
+        the complete retained bytes.
 
-        Ordinary propagation or this capsule request checks the load binding and
-        hashes a stable snapshot of the complete retained bytes. Chebyshev data
-        bytes unread at construction remain live through ASSIST's mapping and
-        are intentionally adopted by this first complete fingerprint; later
-        changes fail closed. Byte-identical metadata changes refresh only on the
-        same retained mapping. Replacing the path with another inode requires
-        restoring the original inode or reconstructing the provider, even when
-        bytes match. Content failure does not replace trust, and exact-byte
-        restoration on the original mapping recovers. A returned capsule keeps
-        its original identity metadata, while callbacks recheck the retained
-        handles before propagation. Core owns OD orchestration and records these
-        identities in workflow provenance.
+        Ordinary detectable replacement, truncation, corruption, or changes
+        between construction and first use return an error; exact restoration
+        on the original mapping recovers. Concurrent mutation is unsupported,
+        and these checks are not an adversarial filesystem security boundary.
+        Legitimate kernel updates require a new provider. Chebyshev data bytes
+        unread at construction remain live through ASSIST's mapping and are
+        intentionally adopted by this first complete fingerprint when the
+        eager/mapping binding is intact. Core owns OD orchestration and records
+        these identities in workflow provenance.
         """
         return self._native.propagator_capsule()
 

@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np
@@ -647,98 +646,6 @@ def test_pretrust_truncation_fails_before_propagation_without_sigbus() -> None:
             check=False,
         )
         assert result.returncode == 0, (result.stdout, result.stderr, result.returncode)
-
-
-@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux ctime semantics")
-def test_oscillating_writer_has_no_provenance_science_breach() -> None:
-    attempts = 900
-    base = ASSISTPropagator()
-    with tempfile.TemporaryDirectory() as tmp:
-        planets = Path(tmp) / "planets.bsp"
-        stop = Path(tmp) / "stop"
-        shutil.copyfile(base.planets_path, planets)
-        offset = _gm5_offset(planets)
-        with planets.open("rb") as handle:
-            handle.seek(offset)
-            assert handle.read(1) == b"2"
-        reference_provider = ASSISTPropagator(
-            planets_path=planets, asteroids_path=base.asteroids_path
-        )
-        reference = reference_provider.propagate_orbits(
-            _one_orbit(), Timestamp.from_mjd([60400], scale="tdb")
-        ).coordinates.values
-
-        mutator_code = (
-            "import os,pathlib,sys;"
-            "p=sys.argv[1];off=int(sys.argv[2]);stop=pathlib.Path(sys.argv[3]);"
-            "fd=os.open(p,os.O_WRONLY);i=0;"
-            "\nwhile True:"
-            "\n os.pwrite(fd,b'3' if i%2==0 else b'2',off);i+=1"
-            "\n if i%4096==0 and stop.exists(): break"
-            "\nos.pwrite(fd,b'2',off);os.fsync(fd);os.close(fd);print(i)"
-        )
-        mutator = subprocess.Popen(
-            [sys.executable, "-c", mutator_code, str(planets), str(offset), str(stop)],
-            stdout=subprocess.PIPE,
-            text=True,
-        )
-        time.sleep(0.1)
-        providers: list[ASSISTPropagator] = []
-        errors = 0
-        try:
-            for _ in range(attempts):
-                try:
-                    providers.append(
-                        ASSISTPropagator(
-                            planets_path=planets,
-                            asteroids_path=base.asteroids_path,
-                        )
-                    )
-                except RuntimeError as error:
-                    message = str(error)
-                    assert (
-                        "metadata changed concurrently during ephemeris construction"
-                        in message
-                        or "eagerly parsed content changed during ephemeris construction"
-                        in message
-                    )
-                    errors += 1
-        finally:
-            stop.touch()
-            toggles = int(mutator.communicate(timeout=30)[0])
-        with planets.open("rb") as handle:
-            handle.seek(offset)
-            assert handle.read(1) == b"2"
-
-        canonical = rejected = breaches = 0
-        for provider in providers:
-            try:
-                fingerprint = _capsule_fingerprint(provider)
-            except RuntimeError as error:
-                assert "eager content" in str(error)
-                rejected += 1
-                continue
-            assert fingerprint == DATA_FP
-            canonical += 1
-            propagated = provider.propagate_orbits(
-                _one_orbit(), Timestamp.from_mjd([60400], scale="tdb")
-            ).coordinates.values
-            assert np.isfinite(propagated).all()
-            if not np.array_equal(propagated, reference):
-                breaches += 1
-
-        assert errors + len(providers) == attempts
-        assert breaches == 0
-        print(
-            "oscillating construction race: "
-            f"attempts={attempts} errors={errors} successes={len(providers)} "
-            f"canonical={canonical} rejected={rejected} breaches={breaches} "
-            f"toggles={toggles}"
-        )
-        retry = ASSISTPropagator(
-            planets_path=planets, asteroids_path=base.asteroids_path
-        )
-        assert _capsule_fingerprint(retry) == DATA_FP
 
 
 def test_data_fingerprint_is_content_identity_lazy_and_cached() -> None:

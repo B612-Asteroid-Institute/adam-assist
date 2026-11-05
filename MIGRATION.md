@@ -138,28 +138,26 @@ Added or adapted for the exact Core source:
   load through aliases to those handles. The exported raw
   `Ephemeris::from_paths`, explicit/default provider, and Python constructors
   share one process-global lock at the lowest construction entry point;
-  propagation never holds it and remains parallel. Construction stores no
-  mutable metadata trust baseline, but binds the DAF file record, comments,
-  complete summary chain, mapped length, and retained identity around parsing.
-  The complete handle/path metadata snapshot must remain unchanged across that
-  window; any concurrent write or metadata operation returns a retryable error
-  without returning a provider. Benign metadata changes after successful
-  construction remain accepted. First use verifies the binding and hashes the
-  complete current bytes. Chebyshev data bytes unread during construction remain
-  live through the mapping and are intentionally adopted by that first full
-  fingerprint; later changes fail closed. Byte-identical changes refresh only
-  on the same retained mapping. An inode replacement fails mapping identity and
-  requires restoring the original inode or reconstructing the provider. Content
-  failure does not destroy trusted identity, and exact-byte restoration on the
-  original mapping recovers.
+  propagation never holds it and remains parallel. Kernel files are immutable
+  package-managed resources for the provider lifetime. Construction binds the
+  DAF file record, comments, complete summary chain, mapped length, and retained
+  identity around parsing; first use verifies that binding and hashes the
+  complete current bytes. Ordinary detectable replacement, truncation,
+  corruption, or construction-to-first-use changes return an error, and exact
+  restoration on the original mapping recovers. These checks are not a security
+  boundary: concurrent mutation is unsupported, and legitimate updates require
+  a new provider. Chebyshev data bytes unread during construction remain live
+  through the mapping and are intentionally adopted by the first full
+  fingerprint when the eager/mapping binding is intact.
 - `AssistExternalPropagator` owns the raw ABI-v2 table and exposes only a
   lifetime-bound validated borrow. Callers never own a context pointer or
   manage capsule/table destruction. Python's capsule and standalone Rust use
   the same `OwnedExternalPropagator<AssistPropagator>` implementation. A table
-  already created before on-disk tampering keeps the immutable fingerprint of
-  the exact retained handle ASSIST loaded, while each callback revalidates the
-  handle/path and rejects changed bytes before dynamics; asking its owning
-  propagator for a new adapter fails the same verification.
+  already created before ordinary detectable on-disk changes keeps the
+  immutable fingerprint of the exact retained handle ASSIST loaded, while each
+  callback revalidates the handle/path and rejects those changes before
+  dynamics; asking its owning propagator for a new adapter fails the same
+  verification. Concurrent mutation remains outside the supported contract.
 - `AssistData::new(Ephemeris)` remains valid for direct propagation but cannot
   claim unavailable kernel provenance; external-provider construction fails
   with the explicit `construct it from paths` error.
@@ -203,10 +201,10 @@ Repository validation covers:
   failure and first-hash metadata races, metadata-only post-trust refresh,
   same-size/restored-mtime tamper rejection and restoration recovery, and
   retained capsule/new-adapter tamper behavior;
-- load-time binding of eagerly parsed constants/summary records, deterministic
-  and 900-attempt oscillating construction races, truncation/SIGBUS prevention,
-  constant-byte tamper, inode replacement, no-cache failure, exact restoration,
-  and Python entry-point behavior;
+- load-time binding of eagerly parsed constants/summary records, ordinary
+  construction-time changes, truncation/SIGBUS prevention, constant-byte
+  tamper, inode replacement, no-cache failure, exact restoration, and Python
+  entry-point behavior;
 - repeated high-contention mixed raw/provider construction (64 constructors in
   one synchronized burst), direct finite constant/mass/segment queries at two
   epochs, a long-horizon finite massive-body control, and bitwise agreement with

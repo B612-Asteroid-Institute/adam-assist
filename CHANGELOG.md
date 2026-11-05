@@ -26,18 +26,15 @@
   apply full PEP 503 normalization.
 - Deferred the 765 MiB kernel content hash from provider construction to the
   first actual kernel use (direct propagation, shard execution, or provider
-  metadata), without recording a mutable construction-time metadata trust
-  baseline. Construction now binds the small eagerly parsed DAF region set and
-  retained mapping while requiring the complete handle/path metadata snapshot
-  to remain stable across upstream parsing. Concurrent writes or metadata
-  operations return a retryable error without a provider; benign changes after
-  successful construction remain accepted. Chebyshev data bytes unread at
-  construction remain live and are intentionally adopted by the first complete
-  fingerprint. Later content changes fail closed. Byte-identical refresh is
-  limited to the same mapping; an inode replacement requires provider
-  reconstruction or restoration of the original inode. Existing capsule
-  metadata remains the trusted loaded-handle snapshot, while callbacks and new
-  capsules reject tampering.
+  metadata). Kernel files are immutable package-managed resources for the
+  provider lifetime. Construction binds the small eagerly parsed DAF region set
+  and retained mapping; first use verifies that binding and hashes the complete
+  bytes. Ordinary detectable replacement, truncation, corruption, or
+  construction-to-first-use changes return an error, and restoration on the
+  original mapping recovers. Concurrent mutation is unsupported and these
+  checks are not an adversarial filesystem security boundary. Chebyshev data
+  bytes unread at construction remain live and are intentionally adopted by the
+  first complete fingerprint when the eager/mapping binding is intact.
 - Moved process-global ASSIST SPK-parser construction serialization into the
   exported raw `Ephemeris::from_paths` constructor, so raw and provider paths
   share one lock without outer double-locking while propagation remains

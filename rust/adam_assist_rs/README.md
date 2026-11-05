@@ -79,27 +79,22 @@ The same provider works with Core-owned `run_iod`, `refine`, and
 `evaluate_orbits`. ASSIST supplies propagation, non-gravitational dynamics,
 STMs, and immutable configuration/data fingerprints only.
 
-Construction retains the exact kernel handles ASSIST loaded and stores no
-mutable metadata trust baseline. Under the same construction lock as the
-upstream parser, it binds an immutable small digest of the DAF file record,
+Kernel files are immutable package-managed resources and must remain unchanged
+for the provider's lifetime. Construction retains the exact handles ASSIST
+loaded and, under the parser lock, binds a small digest of the DAF file record,
 comments, complete summary chain, mapped length, and retained file identity.
-The complete handle/path metadata snapshot must remain unchanged across that
-window; a concurrent write or metadata operation returns a retryable error and
-no provider. Benign hard-link, chmod, or touch changes after successful
-construction and before first use still work.
-
 The first actual kernel use—direct propagation, shard execution, or
-adapter/capsule metadata—checks that load binding, hashes a stable snapshot, and
-establishes trust in the full current bytes. Chebyshev data bytes not read at
-construction remain live through ASSIST's mapping and are intentionally adopted
-at this first complete fingerprint when the eager/mapping binding is intact;
-later changes fail closed. Byte-identical metadata changes on the same retained
-mapping refresh the snapshot. A canonical-path replacement is a mapping-identity
-failure even when its bytes are equal: restore the original inode or reconstruct
-the provider. Content failure does not replace trusted identity, and exact-byte
-restoration on the original mapping recovers. An already-created adapter keeps
-its immutable original fingerprint, while callbacks revalidate before dynamics
-and a new adapter rejects the same tamper.
+adapter/capsule metadata—checks that binding, hashes a stable snapshot, and
+establishes trust in the full current bytes.
+
+Ordinary detectable replacement, truncation, corruption, or changes between
+construction and first use return an error; exact restoration on the original
+mapping recovers. These checks are provenance consistency checks, not a
+security boundary against hostile shared-mapping writers. Concurrent mutation
+is unsupported, and legitimate kernel updates require a new provider.
+Chebyshev data bytes not read during construction remain live through ASSIST's
+mapping and are intentionally adopted by the first complete fingerprint when
+the eager/mapping binding is intact.
 
 Every call through this crate's public `Ephemeris::from_paths` wrapper shares
 one process-global mutex with provider construction. The mutex covers only

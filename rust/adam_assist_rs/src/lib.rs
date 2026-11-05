@@ -63,10 +63,11 @@ pub struct AssistPropagator {
 /// `evaluate_orbits` workflow without Python or PyO3.
 ///
 /// The table captures the fingerprint of the exact retained kernel handles
-/// used to construct ASSIST. Its metadata remains an immutable snapshot if a
-/// path is later tampered with. Every propagation callback revalidates those
-/// retained handles and paths, however, and fails before dynamics when bytes
-/// differ; requesting another adapter from the owner fails the same check.
+/// used to construct ASSIST. Kernel files are immutable resources for the
+/// provider lifetime; ordinary detectable changes are rejected before
+/// dynamics. Concurrent mutation is unsupported and these consistency checks
+/// are not an adversarial filesystem security boundary. Construct a new
+/// provider after any legitimate kernel update.
 pub struct AssistExternalPropagator {
     external: ExternalPropagator,
     _owner: Box<OwnedExternalPropagator<AssistPropagator>>,
@@ -132,9 +133,9 @@ impl AssistPropagator {
     ///
     /// The first actual propagation, shard call, or explicit fingerprint
     /// request hashes a stable snapshot of both retained handles and matching
-    /// paths. Later calls reuse that digest after metadata checks; changed
-    /// metadata rehashes affected exact bytes and refreshes only when content
-    /// still matches.
+    /// paths. Kernel files must remain immutable for the provider lifetime.
+    /// Later calls reuse that digest after consistency checks for ordinary
+    /// detectable changes; concurrent mutation is unsupported.
     pub fn data_fingerprint(&self) -> AssistResult<&str> {
         self.data.data_fingerprint()
     }
