@@ -28,14 +28,16 @@
   first actual kernel use (direct propagation, shard execution, or provider
   metadata), without recording a mutable construction-time metadata trust
   baseline. Construction now binds the small eagerly parsed DAF region set and
-  retained inode immediately around upstream parsing, so first use cannot adopt
-  changed constants/segments, truncation, or path replacement as truth. Benign
-  pre-use hard-link, chmod, and touch changes remain accepted; transient
-  first-hash races leave state uninitialized for retry. After trust is
-  established, metadata changes rehash affected exact bytes and atomically
-  refresh only when content matches; changed bytes fail closed without
-  replacing recovery state. Existing capsule metadata remains the trusted
-  loaded-handle snapshot, while callbacks and new capsules reject tampering.
+  retained mapping while requiring the complete handle/path metadata snapshot
+  to remain stable across upstream parsing. Concurrent writes or metadata
+  operations return a retryable error without a provider; benign changes after
+  successful construction remain accepted. Chebyshev data bytes unread at
+  construction remain live and are intentionally adopted by the first complete
+  fingerprint. Later content changes fail closed. Byte-identical refresh is
+  limited to the same mapping; an inode replacement requires provider
+  reconstruction or restoration of the original inode. Existing capsule
+  metadata remains the trusted loaded-handle snapshot, while callbacks and new
+  capsules reject tampering.
 - Moved process-global ASSIST SPK-parser construction serialization into the
   exported raw `Ephemeris::from_paths` constructor, so raw and provider paths
   share one lock without outer double-locking while propagation remains

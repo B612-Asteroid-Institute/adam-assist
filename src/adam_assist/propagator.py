@@ -305,22 +305,26 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
 
         The native descriptor includes immutable fingerprints of all IAS15
         settings and the exact planetary/small-body kernel contents.
-        Construction records no mutable metadata trust baseline, but binds a
-        small immutable digest of the DAF file record, comments, complete
-        summary chain, mapped length, and retained file identity immediately
-        before and after ASSIST parses them. The first actual kernel use—ordinary
-        propagation or this capsule request—checks that load-time binding and
-        hashes a stable snapshot of the complete retained bytes. Benign
-        hard-link, chmod, or touch changes before first use work; a transient
-        first-hash race leaves the provider uninitialized so a later call can
-        retry. Changes to eagerly parsed bytes, truncation, or path replacement
-        cannot be adopted as first-use truth. After trust is established,
-        metadata changes rehash and refresh only when bytes match; changed bytes
-        fail closed without replacing trust, and exact restoration recovers. A
-        capsule already returned keeps its original identity metadata, but its
-        callbacks recheck the retained handles and reject tampering before
-        propagation. New capsule requests reject the same change. Core owns OD
-        orchestration and records these identities in workflow provenance.
+        Construction stores no mutable metadata trust baseline, but binds the
+        DAF file record, comments, complete summary chain, mapped length, and
+        retained file identity around ASSIST's eager parse. The complete
+        handle/path metadata snapshot must remain unchanged across that window;
+        a concurrent write or metadata operation returns a retryable error and
+        no provider. Benign metadata changes after successful construction and
+        before first use remain accepted.
+
+        Ordinary propagation or this capsule request checks the load binding and
+        hashes a stable snapshot of the complete retained bytes. Chebyshev data
+        bytes unread at construction remain live through ASSIST's mapping and
+        are intentionally adopted by this first complete fingerprint; later
+        changes fail closed. Byte-identical metadata changes refresh only on the
+        same retained mapping. Replacing the path with another inode requires
+        restoring the original inode or reconstructing the provider, even when
+        bytes match. Content failure does not replace trust, and exact-byte
+        restoration on the original mapping recovers. A returned capsule keeps
+        its original identity metadata, while callbacks recheck the retained
+        handles before propagation. Core owns OD orchestration and records these
+        identities in workflow provenance.
         """
         return self._native.propagator_capsule()
 

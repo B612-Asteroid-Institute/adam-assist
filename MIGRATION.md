@@ -138,18 +138,20 @@ Added or adapted for the exact Core source:
   load through aliases to those handles. The exported raw
   `Ephemeris::from_paths`, explicit/default provider, and Python constructors
   share one process-global lock at the lowest construction entry point;
-  propagation never holds it and remains parallel. Construction records no
+  propagation never holds it and remains parallel. Construction stores no
   mutable metadata trust baseline, but binds the DAF file record, comments,
-  complete summary chain, mapped length, and retained identity immediately
-  around parsing. The first actual kernel use verifies that binding and hashes a
-  stable snapshot of the complete retained bytes, so benign pre-use hard-link,
-  chmod, or touch changes work while changed parsed bytes, truncation, and path
-  replacement fail closed. A metadata race is retried within a bounded
-  observation and a failed first hash leaves state uninitialized for the next
-  call. Once trust is established, metadata changes atomically rehash affected
-  exact bytes: byte-identical changes refresh the snapshot, while changed bytes
-  fail closed without destroying the trusted identity and exact restoration
-  recovers.
+  complete summary chain, mapped length, and retained identity around parsing.
+  The complete handle/path metadata snapshot must remain unchanged across that
+  window; any concurrent write or metadata operation returns a retryable error
+  without returning a provider. Benign metadata changes after successful
+  construction remain accepted. First use verifies the binding and hashes the
+  complete current bytes. Chebyshev data bytes unread during construction remain
+  live through the mapping and are intentionally adopted by that first full
+  fingerprint; later changes fail closed. Byte-identical changes refresh only
+  on the same retained mapping. An inode replacement fails mapping identity and
+  requires restoring the original inode or reconstructing the provider. Content
+  failure does not destroy trusted identity, and exact-byte restoration on the
+  original mapping recovers.
 - `AssistExternalPropagator` owns the raw ABI-v2 table and exposes only a
   lifetime-bound validated borrow. Callers never own a context pointer or
   manage capsule/table destruction. Python's capsule and standalone Rust use
@@ -201,9 +203,10 @@ Repository validation covers:
   failure and first-hash metadata races, metadata-only post-trust refresh,
   same-size/restored-mtime tamper rejection and restoration recovery, and
   retained capsule/new-adapter tamper behavior;
-- load-time binding of eagerly parsed constants/summary records, construction
-  races, truncation/SIGBUS prevention, constant-byte tamper, inode replacement,
-  no-cache failure, exact restoration, and Python entry-point behavior;
+- load-time binding of eagerly parsed constants/summary records, deterministic
+  and 900-attempt oscillating construction races, truncation/SIGBUS prevention,
+  constant-byte tamper, inode replacement, no-cache failure, exact restoration,
+  and Python entry-point behavior;
 - repeated high-contention mixed raw/provider construction (64 constructors in
   one synchronized burst), direct finite constant/mass/segment queries at two
   epochs, a long-horizon finite massive-body control, and bitwise agreement with

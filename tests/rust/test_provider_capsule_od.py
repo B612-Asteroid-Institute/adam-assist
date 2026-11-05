@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import numpy as np
@@ -572,7 +573,10 @@ def test_pretrust_constant_binding_rejects_same_fingerprint_different_science() 
             _one_orbit(), Timestamp.from_mjd([60400], scale="tdb")
         )
         assert np.isfinite(propagated.coordinates.values).all()
-        with pytest.raises(RuntimeError, match="kernel bytes changed"):
+        with pytest.raises(
+            RuntimeError,
+            match="eager content changed after provenance was established",
+        ):
             loaded_tampered.propagator_capsule()
         _replace_byte(planets, offset, ord("3"))
         assert _capsule_fingerprint(loaded_tampered) == tampered_fingerprint
@@ -596,6 +600,20 @@ def test_pretrust_inode_replacement_rejects_then_original_inode_recovers() -> No
 
         planets.rename(replacement)
         loaded.rename(planets)
+        assert _capsule_fingerprint(provider) == DATA_FP
+        replacement.unlink()
+
+        posttrust_loaded = Path(tmp) / "planets.posttrust-loaded.bsp"
+        posttrust_replacement = Path(tmp) / "planets.posttrust-replacement.bsp"
+        planets.rename(posttrust_loaded)
+        shutil.copyfile(posttrust_loaded, planets)
+        with pytest.raises(
+            RuntimeError,
+            match="mapping identity changed after provenance was established.*reconstruct",
+        ):
+            provider.propagator_capsule()
+        planets.rename(posttrust_replacement)
+        posttrust_loaded.rename(planets)
         assert _capsule_fingerprint(provider) == DATA_FP
 
 
@@ -631,33 +649,44 @@ def test_pretrust_truncation_fails_before_propagation_without_sigbus() -> None:
         assert result.returncode == 0, (result.stdout, result.stderr, result.returncode)
 
 
-def test_construction_eager_region_race_is_retryable() -> None:
+@pytest.mark.skipif(sys.platform != "linux", reason="requires Linux ctime semantics")
+def test_oscillating_writer_has_no_provenance_science_breach() -> None:
+    attempts = 900
     base = ASSISTPropagator()
     with tempfile.TemporaryDirectory() as tmp:
         planets = Path(tmp) / "planets.bsp"
         stop = Path(tmp) / "stop"
         shutil.copyfile(base.planets_path, planets)
         offset = _gm5_offset(planets)
-        original = planets.read_bytes()[offset]
-        _replace_byte(planets, offset, ord("3"))
-        stable_tampered = ASSISTPropagator(
+        with planets.open("rb") as handle:
+            handle.seek(offset)
+            assert handle.read(1) == b"2"
+        reference_provider = ASSISTPropagator(
             planets_path=planets, asteroids_path=base.asteroids_path
         )
+        reference = reference_provider.propagate_orbits(
+            _one_orbit(), Timestamp.from_mjd([60400], scale="tdb")
+        ).coordinates.values
+
         mutator_code = (
-            "import os,pathlib,sys,time;"
-            "p=pathlib.Path(sys.argv[1]);off=int(sys.argv[2]);stop=pathlib.Path(sys.argv[3]);"
-            "f=p.open('r+b');i=0;"
-            "\nwhile not stop.exists():"
-            "\n f.seek(off);f.write(bytes([ord('2') if i%2==0 else ord('3')]));f.flush();os.fsync(f.fileno());i+=1"
-            "\nf.close()"
+            "import os,pathlib,sys;"
+            "p=sys.argv[1];off=int(sys.argv[2]);stop=pathlib.Path(sys.argv[3]);"
+            "fd=os.open(p,os.O_WRONLY);i=0;"
+            "\nwhile True:"
+            "\n os.pwrite(fd,b'3' if i%2==0 else b'2',off);i+=1"
+            "\n if i%4096==0 and stop.exists(): break"
+            "\nos.pwrite(fd,b'2',off);os.fsync(fd);os.close(fd);print(i)"
         )
         mutator = subprocess.Popen(
-            [sys.executable, "-c", mutator_code, str(planets), str(offset), str(stop)]
+            [sys.executable, "-c", mutator_code, str(planets), str(offset), str(stop)],
+            stdout=subprocess.PIPE,
+            text=True,
         )
+        time.sleep(0.1)
+        providers: list[ASSISTPropagator] = []
         errors = 0
-        providers = [stable_tampered]
         try:
-            for _ in range(4):
+            for _ in range(attempts):
                 try:
                     providers.append(
                         ASSISTPropagator(
@@ -666,25 +695,46 @@ def test_construction_eager_region_race_is_retryable() -> None:
                         )
                     )
                 except RuntimeError as error:
-                    assert "changed during ephemeris construction" in str(error)
+                    message = str(error)
+                    assert (
+                        "metadata changed concurrently during ephemeris construction"
+                        in message
+                        or "eagerly parsed content changed during ephemeris construction"
+                        in message
+                    )
                     errors += 1
         finally:
             stop.touch()
-            mutator.wait(timeout=30)
-            _replace_byte(planets, offset, original)
+            toggles = int(mutator.communicate(timeout=30)[0])
+        with planets.open("rb") as handle:
+            handle.seek(offset)
+            assert handle.read(1) == b"2"
 
-        # A construction wholly inside one stable tampered interval may
-        # legitimately succeed, but after exact restoration its load binding
-        # must reject rather than report the canonical fingerprint. Any
-        # constructor that sampled both intervals must fail immediately.
-        rejected = 0
+        canonical = rejected = breaches = 0
         for provider in providers:
             try:
-                assert _capsule_fingerprint(provider) == DATA_FP
+                fingerprint = _capsule_fingerprint(provider)
             except RuntimeError as error:
-                assert "bytes ASSIST loaded" in str(error)
+                assert "eager content" in str(error)
                 rejected += 1
-        assert errors + rejected > 0
+                continue
+            assert fingerprint == DATA_FP
+            canonical += 1
+            propagated = provider.propagate_orbits(
+                _one_orbit(), Timestamp.from_mjd([60400], scale="tdb")
+            ).coordinates.values
+            assert np.isfinite(propagated).all()
+            if not np.array_equal(propagated, reference):
+                breaches += 1
+
+        assert errors + len(providers) == attempts
+        assert breaches == 0
+        print(
+            "oscillating construction race: "
+            f"attempts={attempts} errors={errors} successes={len(providers)} "
+            f"canonical={canonical} rejected={rejected} breaches={breaches} "
+            f"toggles={toggles}"
+        )
         retry = ASSISTPropagator(
             planets_path=planets, asteroids_path=base.asteroids_path
         )

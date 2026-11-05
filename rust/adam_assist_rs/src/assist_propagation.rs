@@ -172,6 +172,12 @@ struct LoadedKernelPairIdentity {
     asteroids: LoadedKernelFileIdentity,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BindingMismatch {
+    EagerContent,
+    MappingIdentity,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct KernelFileMetadata {
     handle: StableFileIdentity,
@@ -353,12 +359,30 @@ impl KernelFile {
         ))
     }
 
-    fn binding_error(&self, trust_established: bool, detail: &str) -> Error {
+    fn binding_error(
+        &self,
+        trust_established: bool,
+        mismatch: BindingMismatch,
+        detail: &str,
+    ) -> Error {
+        let kind = match mismatch {
+            BindingMismatch::EagerContent => "eager content",
+            BindingMismatch::MappingIdentity => "mapping identity",
+        };
         if trust_established {
-            Error::Other("ASSIST kernel bytes changed after provenance was established".to_string())
+            let recovery = match mismatch {
+                BindingMismatch::EagerContent => "restore the trusted bytes",
+                BindingMismatch::MappingIdentity => {
+                    "restore the original inode or reconstruct the provider"
+                }
+            };
+            Error::Other(format!(
+                "ASSIST {} kernel {kind} changed after provenance was established: {detail}; {recovery}",
+                self.label
+            ))
         } else {
             Error::Other(format!(
-                "{} kernel no longer matches the bytes ASSIST loaded before provenance was established: {detail}",
+                "{} kernel {kind} no longer matches the bytes ASSIST loaded before provenance was established: {detail}",
                 self.label
             ))
         }
@@ -374,16 +398,25 @@ impl KernelFile {
         if !expected_metadata.handle.same_file(&expected_metadata.path) {
             return Err(self.binding_error(
                 trust_established,
-                "the canonical path was replaced with a different file",
+                BindingMismatch::MappingIdentity,
+                "the canonical path was replaced with a different inode than the retained ASSIST mapping",
             ));
         }
         let handle_metadata = self.file.metadata().map_err(|error| {
             Error::Other(format!("failed to inspect {} kernel: {error}", self.label))
         })?;
-        if !loaded.matches_metadata(&handle_metadata) || observed != loaded {
+        if !loaded.matches_metadata(&handle_metadata) {
             return Err(self.binding_error(
                 trust_established,
-                "the eagerly parsed records, mapped length, or loaded file identity changed",
+                BindingMismatch::MappingIdentity,
+                "the retained mapping length, device, or inode changed",
+            ));
+        }
+        if observed != loaded {
+            return Err(self.binding_error(
+                trust_established,
+                BindingMismatch::EagerContent,
+                "the eagerly parsed DAF records changed",
             ));
         }
         Ok(())
@@ -492,7 +525,8 @@ impl KernelFile {
         if handle_identity != path_identity {
             return Err(self.binding_error(
                 trust_established,
-                "the canonical path no longer identifies the loaded bytes",
+                BindingMismatch::MappingIdentity,
+                "the canonical path no longer identifies the retained ASSIST mapping",
             ));
         }
         Ok(Some(handle_identity))
@@ -646,7 +680,8 @@ impl KernelFiles {
             if let Some(identity) = trusted_identity {
                 if observed != *identity {
                     return Err(Error::Other(
-                        "ASSIST kernel bytes changed after provenance was established".to_string(),
+                        "ASSIST kernel bytes changed after provenance was established: complete content digest mismatch"
+                            .to_string(),
                     ));
                 }
             }
@@ -750,41 +785,58 @@ impl AssistData {
     /// Load the planetary and small-body ASSIST ephemeris kernels explicitly.
     ///
     /// Construction opens stable file handles and loads ASSIST from aliases to
-    /// those exact handles. It records no mutable metadata trust baseline. It
-    /// does bind the DAF file record, comments, complete summary chain, mapped
-    /// length, and retained file identity immediately around upstream parsing.
-    /// Full-content trust is established from a complete stable snapshot at the
-    /// first actual kernel use: direct propagation, shard execution,
-    /// external-provider construction, or Python capsule metadata. Changed
-    /// eagerly parsed bytes, truncation, path replacement, or later in-place
-    /// mutation is detected before cached metadata can be returned.
+    /// those exact handles. It stores no mutable metadata trust baseline, but
+    /// binds the DAF file record, comments, complete summary chain, mapped
+    /// length, and retained file identity around upstream parsing. The complete
+    /// handle/path metadata snapshot must remain unchanged across that locked
+    /// window; concurrent writes or metadata operations return a retryable error
+    /// and no value. Full-content trust is established from a stable snapshot at
+    /// first actual use. Chebyshev data bytes unread during construction remain
+    /// live through the mapping and are intentionally adopted by that first
+    /// complete fingerprint; later mutation fails closed.
     pub fn from_paths(
         planets_path: impl AsRef<Path>,
         asteroids_path: impl AsRef<Path>,
     ) -> Result<Self> {
-        Self::from_paths_with_load_hook(planets_path.as_ref(), asteroids_path.as_ref(), || Ok(()))
+        Self::from_paths_with_load_hooks(
+            planets_path.as_ref(),
+            asteroids_path.as_ref(),
+            || Ok(()),
+            || Ok(()),
+        )
     }
 
-    fn from_paths_with_load_hook(
+    fn from_paths_with_load_hooks(
         planets_path: &Path,
         asteroids_path: &Path,
         after_initial_observation: impl FnOnce() -> Result<()>,
+        after_upstream_parse: impl FnOnce() -> Result<()>,
     ) -> Result<Self> {
         let mut kernel_files = KernelFiles::open(planets_path, asteroids_path)?;
         let (planets_loader, asteroids_loader) = kernel_files.loader_paths();
 
         // Keep the eager-region observations and upstream parsing in one
-        // serialized construction window. This baseline is small (file record,
-        // comments and summary chain), not the lazy 765 MiB full-content hash.
+        // serialized construction window. Complete metadata snapshots close
+        // content A→B→A races without replacing this small eager-region digest
+        // (file record, comments, and summary chain) with the lazy 765 MiB hash.
         let _construction = crate::ephemeris::construction_guard();
+        let metadata_before = kernel_files.metadata()?;
         let before = kernel_files.observe_loaded_identity()?;
         after_initial_observation()?;
         let ephem =
             Ephemeris::from_paths_while_construction_locked(&planets_loader, &asteroids_loader)?;
+        after_upstream_parse()?;
         let after = kernel_files.observe_loaded_identity()?;
+        let metadata_after = kernel_files.metadata()?;
+        if metadata_before != metadata_after {
+            return Err(Error::Other(
+                "ASSIST kernel metadata changed concurrently during ephemeris construction; retry construction"
+                    .to_string(),
+            ));
+        }
         if before != after {
             return Err(Error::Other(
-                "ASSIST kernel eagerly parsed regions changed during ephemeris construction"
+                "ASSIST kernel eagerly parsed content changed during ephemeris construction; retry construction"
                     .to_string(),
             ));
         }
@@ -799,13 +851,13 @@ impl AssistData {
     ///
     /// The first actual kernel use verifies the immutable load-time binding,
     /// then hashes a stable snapshot of the current retained handles and
-    /// matching paths. Benign hard-link, chmod, or touch changes before that use
-    /// are therefore accepted without trusting stale mutable metadata. A race
-    /// during the first hash is retried within the call and leaves the provider
-    /// uninitialized on failure, so a later call can retry. Once established,
-    /// metadata changes rehash affected exact bytes: equal bytes refresh the
-    /// trusted snapshot, while different bytes fail closed without replacing it
-    /// and exact restoration recovers.
+    /// matching paths. Benign hard-link, chmod, or touch changes after successful
+    /// construction are accepted without trusting stale mutable metadata. A
+    /// first-hash race leaves the provider uninitialized for retry. Once trust
+    /// exists, equal bytes refresh metadata only on the same retained mapping.
+    /// Replacing the path with another inode requires restoring the original
+    /// inode or reconstructing the provider. Different content fails closed
+    /// without replacing trust, and exact restoration recovers.
     pub fn data_fingerprint(&self) -> Result<&str> {
         self.kernel_files
             .as_ref()
@@ -1813,32 +1865,268 @@ mod tests {
             + 14;
         let original = contents[offset];
 
-        let result = AssistData::from_paths_with_load_hook(&copy, &asteroids, || {
-            let mut file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
-            file.seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
-            file.write_all(b"3").unwrap();
-            file.sync_all().unwrap();
-            Ok(())
-        });
+        let result = AssistData::from_paths_with_load_hooks(
+            &copy,
+            &asteroids,
+            || {
+                let mut file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
+                file.seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
+                file.write_all(b"3").unwrap();
+                file.sync_all().unwrap();
+                Ok(())
+            },
+            || {
+                let mut file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
+                file.seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
+                file.write_all(&[original]).unwrap();
+                file.sync_all().unwrap();
+                Ok(())
+            },
+        );
         let error = match result {
-            Ok(_) => panic!("construction accepted changed eagerly parsed bytes"),
+            Ok(_) => panic!("construction accepted an A->B->A metadata race"),
             Err(error) => error.to_string(),
         };
         assert!(
-            error.contains("eagerly parsed regions changed during ephemeris construction"),
+            error.contains("metadata changed concurrently during ephemeris construction"),
             "{error}"
         );
 
-        let mut file = std::fs::OpenOptions::new().write(true).open(&copy).unwrap();
-        file.seek(std::io::SeekFrom::Start(offset as u64)).unwrap();
-        file.write_all(&[original]).unwrap();
-        file.sync_all().unwrap();
+        assert_eq!(std::fs::read(&copy).unwrap()[offset], original);
         let retry = AssistData::from_paths(&copy, &asteroids).unwrap();
         assert_eq!(
             retry.data_fingerprint().unwrap(),
             "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69"
         );
         drop(retry);
+        std::fs::remove_file(copy).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires the reviewed ASSIST kernel pair"]
+    fn oscillating_writer_never_binds_canonical_provenance_to_tampered_science() {
+        use std::io::Read;
+        use std::os::unix::fs::FileExt;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        const ATTEMPTS: usize = 900;
+        const CANONICAL_FINGERPRINT: &str =
+            "f4ac12257d77c7e8dbafa0f24a0f029001b7144f0577bebab27a79c9aca10e69";
+
+        let source = PathBuf::from(std::env::var("ADAM_CORE_RS_ASSIST_PLANETS_PATH").unwrap());
+        let asteroids = PathBuf::from(std::env::var("ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH").unwrap());
+        let copy = std::env::temp_dir().join(format!(
+            "adam-assist-construction-aba-{}.bsp",
+            std::process::id()
+        ));
+        std::fs::copy(&source, &copy).unwrap();
+        let mut contents = Vec::new();
+        std::fs::File::open(&copy)
+            .unwrap()
+            .read_to_end(&mut contents)
+            .unwrap();
+        let needle = b"GM5           2.8253458252257917D-07";
+        let offset = contents
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .unwrap()
+            + 14;
+        assert_eq!(contents[offset], b'2');
+        drop(contents);
+
+        let reference_data = AssistData::new(Ephemeris::from_paths(&copy, &asteroids).unwrap());
+        let reference_gm = reference_data
+            .ephem
+            .get_body_state(ffi::ASSIST_BODY_JUPITER, 0.0)
+            .unwrap()
+            .m;
+        let orbit = Orbit::new([1.2, 0.1, 0.05, -0.002, 0.016, 0.001], 60_000.0);
+        let reference_states = assist_propagate_single(
+            &reference_data,
+            &orbit,
+            &[60_400.0],
+            false,
+            &IntegratorConfig::default(),
+        )
+        .unwrap();
+        drop(reference_data);
+
+        let canonical = AssistData::from_paths(&copy, &asteroids).unwrap();
+        let canonical_binding = canonical
+            .kernel_files
+            .as_ref()
+            .unwrap()
+            .loaded_identity
+            .as_ref()
+            .unwrap()
+            .planets
+            .eager_regions_sha256
+            .clone();
+        assert_eq!(
+            canonical
+                .ephem
+                .get_body_state(ffi::ASSIST_BODY_JUPITER, 0.0)
+                .unwrap()
+                .m
+                .to_bits(),
+            reference_gm.to_bits()
+        );
+        drop(canonical);
+
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&copy)
+            .unwrap();
+        assert_eq!(file.write_at(b"3", offset as u64).unwrap(), 1);
+        file.sync_data().unwrap();
+        let tampered = AssistData::from_paths(&copy, &asteroids).unwrap();
+        let tampered_gm = tampered
+            .ephem
+            .get_body_state(ffi::ASSIST_BODY_JUPITER, 0.0)
+            .unwrap()
+            .m;
+        let tampered_binding = tampered
+            .kernel_files
+            .as_ref()
+            .unwrap()
+            .loaded_identity
+            .as_ref()
+            .unwrap()
+            .planets
+            .eager_regions_sha256
+            .clone();
+        assert_ne!(tampered_binding, canonical_binding);
+        assert_ne!(tampered_gm.to_bits(), reference_gm.to_bits());
+        drop(tampered);
+        assert_eq!(file.write_at(b"2", offset as u64).unwrap(), 1);
+        file.sync_data().unwrap();
+        drop(file);
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let toggles = Arc::new(AtomicUsize::new(0));
+        let writer_path = copy.clone();
+        let writer_stop = Arc::clone(&stop);
+        let writer_toggles = Arc::clone(&toggles);
+        let writer = std::thread::spawn(move || {
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(writer_path)
+                .unwrap();
+            let mut digit = b'3';
+            while !writer_stop.load(Ordering::Acquire) {
+                assert_eq!(file.write_at(&[digit], offset as u64).unwrap(), 1);
+                digit = if digit == b'3' { b'2' } else { b'3' };
+                writer_toggles.fetch_add(1, Ordering::Release);
+            }
+            assert_eq!(file.write_at(b"2", offset as u64).unwrap(), 1);
+            file.sync_data().unwrap();
+        });
+        while toggles.load(Ordering::Acquire) < 10_000 {
+            std::thread::yield_now();
+        }
+
+        let mut errors = 0_usize;
+        let mut successes = 0_usize;
+        let mut canonical_success = None;
+        let mut tampered_success = None;
+        for _ in 0..ATTEMPTS {
+            match AssistData::from_paths(&copy, &asteroids) {
+                Ok(data) => {
+                    successes += 1;
+                    let gm = data
+                        .ephem
+                        .get_body_state(ffi::ASSIST_BODY_JUPITER, 0.0)
+                        .unwrap()
+                        .m;
+                    let binding = &data
+                        .kernel_files
+                        .as_ref()
+                        .unwrap()
+                        .loaded_identity
+                        .as_ref()
+                        .unwrap()
+                        .planets
+                        .eager_regions_sha256;
+                    if binding == &canonical_binding {
+                        assert_eq!(
+                            gm.to_bits(),
+                            reference_gm.to_bits(),
+                            "canonical eager binding captured tampered Jupiter GM"
+                        );
+                        canonical_success.get_or_insert(data);
+                    } else if binding == &tampered_binding {
+                        assert_eq!(
+                            gm.to_bits(),
+                            tampered_gm.to_bits(),
+                            "tampered eager binding captured canonical Jupiter GM"
+                        );
+                        tampered_success.get_or_insert(data);
+                    } else {
+                        panic!("construction produced an unknown eager-region binding");
+                    }
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    assert!(
+                        message.contains(
+                            "metadata changed concurrently during ephemeris construction"
+                        ) || message.contains(
+                            "eagerly parsed content changed during ephemeris construction"
+                        ),
+                        "unexpected construction error: {message}"
+                    );
+                    errors += 1;
+                }
+            }
+        }
+        stop.store(true, Ordering::Release);
+        writer.join().unwrap();
+        let mut restored = [0_u8; 1];
+        let restored_file = std::fs::File::open(&copy).unwrap();
+        assert_eq!(
+            restored_file.read_at(&mut restored, offset as u64).unwrap(),
+            1
+        );
+        assert_eq!(
+            restored[0], b'2',
+            "writer must restore the canonical GM5 digit"
+        );
+        assert_eq!(successes + errors, ATTEMPTS);
+
+        if let Some(data) = canonical_success {
+            assert_eq!(data.data_fingerprint().unwrap(), CANONICAL_FINGERPRINT);
+            let actual = assist_propagate_single(
+                &data,
+                &orbit,
+                &[60_400.0],
+                false,
+                &IntegratorConfig::default(),
+            )
+            .unwrap();
+            assert_eq!(actual.len(), reference_states.len());
+            for (actual, expected) in actual.iter().zip(&reference_states) {
+                for (actual, expected) in actual.state.iter().zip(expected.state) {
+                    assert_eq!(actual.to_bits(), expected.to_bits());
+                }
+            }
+        }
+        if let Some(data) = tampered_success {
+            let error = data.data_fingerprint().unwrap_err().to_string();
+            assert!(error.contains("eager content"), "{error}");
+            assert!(data
+                .kernel_files
+                .as_ref()
+                .unwrap()
+                .identity
+                .get()
+                .is_none());
+        }
+        println!(
+            "oscillating construction race: attempts={ATTEMPTS} successes={successes} errors={errors} toggles={}",
+            toggles.load(Ordering::Acquire)
+        );
         std::fs::remove_file(copy).unwrap();
     }
 
@@ -2123,7 +2411,7 @@ mod tests {
         let error = files.identity().unwrap_err().to_string();
         assert!(
             error.contains("kernel bytes changed")
-                || error.contains("path no longer identifies the bytes ASSIST loaded"),
+                || error.contains("path no longer identifies the retained ASSIST mapping"),
             "{error}"
         );
         assert_eq!(files.compute_count(), 3);

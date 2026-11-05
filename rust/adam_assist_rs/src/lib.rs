@@ -2198,7 +2198,7 @@ mod tests {
             Err(error) => error.to_string(),
         };
         assert!(
-            new_adapter_error.contains("path no longer identifies")
+            new_adapter_error.contains("mapping identity changed")
                 || new_adapter_error.contains("kernel bytes changed"),
             "{new_adapter_error}"
         );

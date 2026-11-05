@@ -103,19 +103,26 @@ The default resolver loads DE440 and SB441-n16 through adam-core's environment,
 installed-package, cache, and checksummed-fetch policy. Explicit/offline users
 can call `AssistPropagator::from_paths` and can disable default resolver support
 with `default-features = false`. Explicit-path construction does not hash the
-765 MiB kernel pair or capture a mutable metadata trust baseline. It does bind a
+765 MiB kernel pair or retain a mutable metadata trust baseline. It binds a
 small digest of the DAF file record, comments, complete summary chain, mapped
-length, and retained file identity immediately before and after ASSIST eagerly
-parses those regions. The first actual kernel use—ordinary propagation or
-external-provider metadata—checks that binding and hashes a stable snapshot of
-the complete retained bytes. Benign hard-link, chmod, or touch changes before
-first use are accepted; changes to parsed constants/segments, truncation, or
-path replacement cannot be adopted as first-use truth, and transient
-first-hash races leave the provider uninitialized for retry. After trust is
-established, cached metadata is returned only while retained handles and
-canonical paths identify the trusted bytes. Byte-identical metadata changes
-refresh the snapshot, changed bytes fail closed without replacing trust, and
-exact restoration recovers.
+length, and retained file identity immediately around ASSIST's eager parse. The
+complete handle/path metadata snapshot must also remain unchanged across that
+locked window; a concurrent write, hard-link, chmod, touch, truncation, or inode
+replacement returns a retryable construction error and no provider. Once
+construction succeeds, benign metadata changes before first use remain
+accepted. The first actual kernel use—ordinary propagation or external-provider
+metadata—checks the load binding and hashes a stable snapshot of the complete
+retained bytes.
+
+Chebyshev data-region bytes that ASSIST did not read during construction remain
+live through its shared mapping. If the eager/mapping binding is intact, their
+current values are intentionally adopted by the first complete fingerprint;
+changes after that fingerprint fail closed. Byte-identical metadata changes on
+the same retained mapping refresh its snapshot, while replacing the canonical
+path with another inode fails the mapping binding even when bytes are equal.
+Restore the original inode to recover the existing provider, or reconstruct the
+provider on the replacement. Content changes fail without replacing trust, and
+exact-byte restoration on the original mapping recovers.
 
 All `adam_assist::Ephemeris::from_paths` calls in one linked crate instance,
 including those used by `AssistData`/`AssistPropagator`, share one

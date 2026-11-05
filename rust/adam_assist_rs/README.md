@@ -79,23 +79,27 @@ The same provider works with Core-owned `run_iod`, `refine`, and
 `evaluate_orbits`. ASSIST supplies propagation, non-gravitational dynamics,
 STMs, and immutable configuration/data fingerprints only.
 
-Construction retains the exact kernel handles ASSIST loaded and captures no
+Construction retains the exact kernel handles ASSIST loaded and stores no
 mutable metadata trust baseline. Under the same construction lock as the
-upstream parser, it does record an immutable, small digest of the DAF file
-record, comments, complete summary chain, mapped length, and retained file
-identity immediately before and after parsing. The first actual kernel use—
-direct propagation, shard execution, or adapter/capsule metadata—checks that
-load-time binding, hashes a stable snapshot, and establishes trust in the full
-current bytes. Benign hard-link, chmod, or touch changes before first use
-therefore work. Changes to eagerly parsed bytes, truncation, and path/inode
-replacement cannot be adopted as first-use truth. A metadata race is retried a
-bounded number of times; a failed first observation remains uninitialized so
-the next call can retry. After trust exists, metadata changes rehash the
-affected retained handle and canonical path under a per-provider lock.
-Byte-identical changes refresh the snapshot; changed bytes fail closed without
-replacing the trusted identity, and exact restoration recovers. An
-already-created adapter retains its immutable original fingerprint, but
-callbacks revalidate before dynamics; a new adapter rejects the same tamper.
+upstream parser, it binds an immutable small digest of the DAF file record,
+comments, complete summary chain, mapped length, and retained file identity.
+The complete handle/path metadata snapshot must remain unchanged across that
+window; a concurrent write or metadata operation returns a retryable error and
+no provider. Benign hard-link, chmod, or touch changes after successful
+construction and before first use still work.
+
+The first actual kernel use—direct propagation, shard execution, or
+adapter/capsule metadata—checks that load binding, hashes a stable snapshot, and
+establishes trust in the full current bytes. Chebyshev data bytes not read at
+construction remain live through ASSIST's mapping and are intentionally adopted
+at this first complete fingerprint when the eager/mapping binding is intact;
+later changes fail closed. Byte-identical metadata changes on the same retained
+mapping refresh the snapshot. A canonical-path replacement is a mapping-identity
+failure even when its bytes are equal: restore the original inode or reconstruct
+the provider. Content failure does not replace trusted identity, and exact-byte
+restoration on the original mapping recovers. An already-created adapter keeps
+its immutable original fingerprint, while callbacks revalidate before dynamics
+and a new adapter rejects the same tamper.
 
 Every call through this crate's public `Ephemeris::from_paths` wrapper shares
 one process-global mutex with provider construction. The mutex covers only
