@@ -1,6 +1,8 @@
+import ast
 import hashlib
 import importlib.util
 import json
+import re
 import tomllib
 from importlib.metadata import version
 from pathlib import Path
@@ -23,6 +25,38 @@ def _project_dependencies() -> list[str]:
 def _cargo_manifest() -> dict:
     with (ROOT / "rust" / "adam_assist_rs" / "Cargo.toml").open("rb") as cargo_file:
         return tomllib.load(cargo_file)
+
+
+def _python_docstrings() -> list[str]:
+    docs: list[str] = []
+    for path in sorted((ROOT / "src" / "adam_assist").rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        module_doc = ast.get_docstring(tree, clean=False)
+        if module_doc:
+            docs.append(module_doc)
+        for node in ast.walk(tree):
+            if not isinstance(
+                node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            ):
+                continue
+            docstring = ast.get_docstring(node, clean=False)
+            if docstring:
+                docs.append(docstring)
+    return docs
+
+
+def _public_rustdoc() -> list[str]:
+    docs: list[str] = []
+    for path in sorted((ROOT / "rust" / "adam_assist_rs" / "src").rglob("*.rs")):
+        source = path.read_text()
+        line_docs = []
+        for line in source.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith(("///", "//!")):
+                line_docs.append(stripped[3:].lstrip())
+        docs.extend(line_docs)
+        docs.extend(re.findall(r"/\*\*.*?\*/|/\*!.*?\*/", source, flags=re.DOTALL))
+    return docs
 
 
 def test_legacy_python_assist_stack_is_not_a_runtime_dependency() -> None:
@@ -307,26 +341,79 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
     assert ".legacy-assist-venv" not in source
 
 
-def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
+def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     core_ref = "0b49938eb0be04214a8d07b206227d31b248394a"
     readme = (ROOT / "README.md").read_text()
+    crate_readme = (ROOT / "rust" / "adam_assist_rs" / "README.md").read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
+    release_tooling = (
+        ROOT / "migration" / "scripts" / "RELEASE_TOOLING.md"
+    ).read_text()
     normal_ci = (
         ROOT / ".github" / "workflows" / "pip-build-lint-test-coverage.yml"
     ).read_text()
-    assert core_ref in readme and core_ref in migration and core_ref in normal_ci
-    assert "adam-core>=0.7.0,<0.8.0" in readme
-    assert readme.index("Core `0.7.0` is not yet available") < readme.index(
-        "### Pure Rust"
+
+    public_runtime_docs = "\n".join(
+        [readme, crate_readme, *_python_docstrings(), *_public_rustdoc()]
     )
+    public_runtime_docs_lower = public_runtime_docs.lower()
+    for transition_detail in (
+        core_ref,
+        "adam_assist_releases_enabled",
+        "exact-source",
+        "source-pair",
+        "registry lock",
+        "authentic lock",
+        "not yet available",
+        "not yet on crates.io",
+        "release candidate",
+        "reviewed core",
+        "reviewed source",
+    ):
+        assert transition_detail not in public_runtime_docs_lower
+    forbidden_doc_patterns = {
+        "exact source revision": re.compile(
+            r"(?i)\b(?=[0-9a-f]{7,40}\b)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b"
+        ),
+        "Core/package version history": re.compile(
+            r"(?i)\b(?:adam[-_ ]?core|adam[-_ ]?assist|core)\b"
+            r"[^\n]{0,24}\bv?\d+\.\d+(?:\.\d+)?\b"
+        ),
+        "transition terminology": re.compile(
+            r"(?i)\b(?:exact[- ]source|source[- ]pair|registry locks?|"
+            r"release candidates?|authentic locks?)\b"
+        ),
+        "internal Beads task": re.compile(r"(?i)\bpersonal-[a-z0-9.]+\b"),
+    }
+    for description, pattern in forbidden_doc_patterns.items():
+        assert pattern.search(public_runtime_docs) is None, description
+
+    assert "`pyproject.toml`" in readme
+    assert "`rust/adam_assist_rs/Cargo.toml`" in readme
+    assert "`migration/scripts/RELEASE_TOOLING.md`" in readme
+    assert "`Cargo.toml` is" in crate_readme
+    assert "the authority for compatible adam-core crate versions" in crate_readme
+    assert "packaged-crate consumers" not in crate_readme
+    assert "kernel-backed integration tests" not in crate_readme
+    assert "adam-core>=0.7.0,<0.8.0" in _project_dependencies()
+    assert _cargo_manifest()["dependencies"]["adam_core_rs_coords"] == "0.7"
+
+    assert core_ref in migration
+    assert core_ref in release_tooling
+    assert core_ref in normal_ci
+    assert "f66517aa" in migration
+    assert "src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}" in migration
+    assert "ADAM_ASSIST_RELEASES_ENABLED" in release_tooling
+    assert "verify_source_pair_contract.py --core-tree" in release_tooling
     for crate in (
         "adam_core",
         "adam_core_rs_coords",
         "adam_core_rs_spice",
         "adam_core_rs_kernel_data",
     ):
-        assert f"patch.crates-io.{crate}.path" in readme
-        assert f"patch.crates-io.{crate}.path" in normal_ci
+        assert f"patch.crates-io.{crate}.path" in release_tooling
+    assert "rm -f rust/adam_assist_rs/Cargo.lock" in release_tooling
+    assert 'test -z "$(git status --porcelain)"' in release_tooling
     assert "Exact Core source pair" in normal_ci
     assert "exit 1" not in normal_ci
     workflows = sorted(
@@ -339,4 +426,3 @@ def test_propagator_v2_source_pair_and_release_floor_are_explicit() -> None:
         "release-candidate-wheel-matrix.yml",
         "rust-crate-release-candidate.yml",
     ]
-    assert "every job requires the unset-by-default repository" in readme

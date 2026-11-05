@@ -32,59 +32,20 @@ macOS Apple silicon/Intel. Windows is currently unsupported because
 ``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
 unsupported.
 
-### adam-core compatibility and exact-source validation
+### adam-core integration
 
-The `0.6.0` source line requires `adam-core>=0.7.0,<0.8.0` and the coherent
-`0.7` Rust crate line. It is validated against the exact reviewed adam-core
-source commit `0b49938eb0be04214a8d07b206227d31b248394a`, which has
-package/crate version
-`0.7.0` and defines the private `adam_core.propagator.v2` ABI. Released
-`adam-core 0.6.1` is outside the declared range and has no v2 ABI.
+`adam-assist` is a propagation backend for adam-core. Python callers pass an
+`ASSISTPropagator` to Core-owned workflows through the private
+`adam_core.propagator.v2` capsule. Standalone Rust callers use the typed
+propagation traits or the owned external-provider view described below. ASSIST
+owns dynamics, propagation, STMs, and provider identity; adam-core owns orbit
+determination, fitting, rejection, linkage, and workflow orchestration.
 
-Core `0.7.0` is not yet available from PyPI/crates.io. Active PDM and Cargo
-registry locks are therefore intentionally absent instead of retaining the
-incompatible `0.6.1` graph or inventing checksums. The machine-checked
-`migration/source_pair_contract.json` pins this exact pre-release pairing.
-Normal CI builds both projects from those sources, installs the built ASSIST
-wheel with its complete `dev` extra, and verifies `astropy` plus every frozen
-NAIF data version before tests and benchmarks. It is the repository's only
-active workflow. The reviewed release-candidate and publication workflows
-remain manual-only and every job requires the unset-by-default repository
-variable `ADAM_ASSIST_RELEASES_ENABLED` to equal `true`.
-`migration/scripts/verify_workflow_policy.py` checks the exact workflow
-inventory, triggers, composed job conditions, versions, credentials boundary,
-source-pair matrix, and required validation commands. The variable is not
-configured. It may be enabled only after Core 0.7 is public, authentic
-registry-only locks are committed and reviewed, release-environment protections
-are verified, and separate publication authorization is granted.
-The retained migration helpers and gated workflows are documented in
-`migration/scripts/RELEASE_TOOLING.md`; they are not enabled release entry
-points during this transition.
-
-For reproducible local Rust validation, use one detached Core tree for all
-four Core crates. Patched Cargo commands create a temporary untracked lock;
-remove it afterward and verify that no tracked or untracked changes remain.
-The command below runs only the all-feature `cargo test --all-targets` lane.
-It does not run formatting, Clippy, doctests, or docs. The authoritative CI
-invokes separate `fmt`, `check`, warning-denied Clippy, test, doctest, and
-warning-denied doc commands across default, all, and no-default features:
-
-```console
-git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-0b49938e
-git -C ../adam-core-0b49938e checkout --detach 0b49938eb0be04214a8d07b206227d31b248394a
-CORE="$(cd ../adam-core-0b49938e && pwd)"
-test "$(git -C "$CORE" rev-parse HEAD)" = 0b49938eb0be04214a8d07b206227d31b248394a
-python migration/scripts/verify_source_pair_contract.py --core-tree "$CORE"
-
-cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
-  --all-targets --features python,extension-module \
-  --config "patch.crates-io.adam_core.path='$CORE/rust/adam_core'" \
-  --config "patch.crates-io.adam_core_rs_coords.path='$CORE/rust/adam_core_rs_coords'" \
-  --config "patch.crates-io.adam_core_rs_spice.path='$CORE/rust/adam_core_rs_spice'" \
-  --config "patch.crates-io.adam_core_rs_kernel_data.path='$CORE/rust/adam_core_rs_kernel_data'"
-rm -f rust/adam_assist_rs/Cargo.lock
-test -z "$(git status --porcelain)"
-```
+Install compatible releases through the normal Python or Cargo resolver. The
+Python requirement in `pyproject.toml` and the Rust requirements in
+`rust/adam_assist_rs/Cargo.toml` are the authoritative compatibility ranges.
+Maintainer-only pairing and release procedures are documented in
+`migration/scripts/RELEASE_TOOLING.md`, not in the runtime integration contract.
 
 ### Pure Rust
 
@@ -244,12 +205,11 @@ timings, genuine Rust-owned `std::time::Instant` timings where available,
 public/native overhead, and exact workload shapes. It does not require a frozen
 Python environment or baseline timing cache, and all ASSIST workloads use
 `max_processes=1`. Use `--quick` for a smoke run or select, for example,
-`--domains nongrav ephemeris covariance --lanes tiny small`. Release CI runs
-all 30 ASSIST product workloads with native timing required. After wheel
-acceptance, release candidates also run all 54 live JPL Horizons propagation
-and ephemeris accuracy cases.
+`--domains nongrav ephemeris covariance --lanes tiny small`. Optional live JPL
+Horizons propagation and ephemeris accuracy cases are marked `live` and remain
+separate from the deterministic benchmark suite.
 
-The deterministic test suite uses reviewed, hash-pinned frozen outputs for
+The deterministic test suite uses hash-pinned frozen outputs for
 propagation, covariance, ephemeris, collision, typed mapping, and the minimal
 Core-owned capsule integration fixture. Normal pytest and the current benchmark
 suite do not import or launch the archived ASSIST oracle and never skip because

@@ -672,7 +672,7 @@ pub struct CollisionConditionSpec {
 /// Survivors are reported at the final executed step time, which overshoots
 /// the requested horizon exactly as the legacy step loop does.
 ///
-/// IMPACT-TIME RESOLUTION (personal-tse): `impact_times_jd_tdb` is the IAS15
+/// IMPACT-TIME RESOLUTION: `impact_times_jd_tdb` is the IAS15
 /// step time at which a particle was *first observed* inside a collision
 /// body's radius, not the exact distance-crossing instant. It is therefore
 /// step-resolution-limited, not physics-limited: the reported epoch can lag
@@ -870,7 +870,7 @@ impl AssistPropagator {
                         // Step-resolution-limited impact epoch: `t` is the
                         // first IAS15 step at which the particle is inside the
                         // body radius, not the exact crossing time. See the
-                        // CollisionDetectionOutput docs (personal-tse).
+                        // CollisionDetectionOutput docs.
                         output.impact_times_jd_tdb.push(t + jd_ref);
                         if condition.stopping {
                             remove[slot] = true;

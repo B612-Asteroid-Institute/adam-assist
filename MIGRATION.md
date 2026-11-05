@@ -38,8 +38,8 @@ exact-pins `adam-core==0.5.7`.
 ## Orbit-determination API migration
 
 This breaking removal starts the adam-assist `0.6.0` source line. Released
-`0.5.0` artifacts retain their historical methods; this candidate does not
-report itself as `0.5.0`-compatible.
+`0.5.0` artifacts retain their historical methods; the `0.6` line is not
+`0.5`-compatible.
 
 This line exports only `adam_core.propagator.v2`, declares Python
 `adam-core>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements, and is validated
@@ -78,6 +78,13 @@ reviewed-source pair. It describes source state only: it is not a release,
 compatibility, publication, or registry claim.
 
 ### Lineage and replay accounting
+
+The public `assist_propagation` Rust module descends from historical
+`assist-rs` revision `f66517aa`, specifically
+`src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}`. Its obliquity
+constants remain bit-identical to adam-core's
+`np.cos/np.sin(Constants.OBLIQUITY)` values. This file-move provenance belongs
+in migration history rather than the stable module Rustdoc.
 
 The implementation starts from current adam-assist `main`
 `a8ec6d22b422da055730ff7c0e076f51afe8b0ba`, not directly from the accepted
