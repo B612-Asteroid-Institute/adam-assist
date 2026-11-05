@@ -79,6 +79,13 @@ compatibility, publication, or registry claim.
 
 ### Lineage and replay accounting
 
+The public `assist_propagation` Rust module descends from historical
+`assist-rs` revision `f66517aa`, specifically
+`src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}`. Its obliquity
+constants remain bit-identical to adam-core's
+`np.cos/np.sin(Constants.OBLIQUITY)` values. This file-move provenance belongs
+in migration history rather than the stable module Rustdoc.
+
 The implementation starts from current adam-assist `main`
 `a8ec6d22b422da055730ff7c0e076f51afe8b0ba`, not directly from the accepted
 semantic candidate. The 12 accepted commits ending at

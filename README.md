@@ -44,8 +44,8 @@ determination, fitting, rejection, linkage, and workflow orchestration.
 Install compatible releases through the normal Python or Cargo resolver. The
 Python requirement in `pyproject.toml` and the Rust requirements in
 `rust/adam_assist_rs/Cargo.toml` are the authoritative compatibility ranges.
-Maintainer-only pairing and release procedures live under `migration/`, not in
-the runtime integration contract.
+Maintainer-only pairing and release procedures are documented in
+`migration/scripts/RELEASE_TOOLING.md`, not in the runtime integration contract.
 
 ### Pure Rust
 

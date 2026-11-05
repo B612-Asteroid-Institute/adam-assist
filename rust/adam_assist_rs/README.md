@@ -140,5 +140,5 @@ cargo test --doc
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 ```
 
-Repository CI additionally exercises the declared feature combinations,
-packaged-crate consumers, and kernel-backed integration tests.
+Repository CI exercises the declared feature combinations with separate
+checks, warning-denied Clippy, tests, doctests, and warning-denied docs.

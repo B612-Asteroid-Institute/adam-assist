@@ -1,10 +1,9 @@
-//! ASSIST propagation orchestration, moved from the historical `assist-rs`
-//! domain layer into its owning consumer. The binding/RAII layer now comes
-//! directly from `libassist-sys` and `librebound-sys`. Provenance: historical
-//! `assist-rs` rev `f66517aa`
-//! `src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}`; the
-//! obliquity constants remain bit-identical to adam-core's
-//! (`np.cos/np.sin(Constants.OBLIQUITY)`).
+//! ASSIST propagation orchestration built on the canonical `libassist-sys`
+//! and `librebound-sys` binding and RAII layers.
+//!
+//! Coordinate conversion, propagation, covariance transport, pooling, and
+//! ephemeris-data ownership live together here so every public path uses the
+//! same validated dynamics and resource contracts.
 //!
 //! Two propagation entry points:
 //!
@@ -865,7 +864,7 @@ impl AssistData {
 
     /// Resolve DE440 plus SB441-n16 using adam-core's pure-Rust override ->
     /// installed-Python -> cache -> verified-wheel policy, then verify the
-    /// reviewed file size and SHA-256 before returning the ephemeris.
+    /// pinned file size and SHA-256 before returning the ephemeris.
     #[cfg(feature = "kernel-data")]
     pub fn from_default_kernels() -> Result<Self> {
         let resolver = adam_core_rs_kernel_data::Resolver::from_env();

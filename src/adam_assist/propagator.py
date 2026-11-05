@@ -415,13 +415,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         orbits: OrbitTable,
         times: Timestamp,
     ) -> OrbitTable:
-        """Satisfy the adam-core <=0.5.5 private propagator contract.
+        """Private compatibility alias retained for the public adam-assist surface.
 
-        The public method remains the single implementation and performs the
-        one native Rust crossing. Newer adam-core releases make the public
-        method itself the abstract contract, while the published 0.5.5 base
-        class still requires this private hook before the class can be
-        instantiated.
+        The public ``propagate_orbits`` method remains the single
+        implementation and performs the native Rust crossing.
         """
         return self.propagate_orbits(orbits, times)
 
@@ -656,15 +653,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         max_processes: int | None = 1,
         chunk_size: int | None = 100,
     ) -> tuple[OrbitTable, CollisionEvent]:
-        """Single-crossing Rust collision detection (bead personal-cmy.33.9).
+        """Detect same-epoch collisions in one native Rust crossing.
 
-        Standalone public entry: the Rust backend owns the whole same-epoch
-        detection in one crossing, so no Ray chunking is required.
-        ``max_processes``/``chunk_size`` are accepted for signature
-        compatibility with the abstract ``ImpactMixin.detect_collisions``
-        contract and are ignored (rayon handles internal parallelism). This
-        replaces the deleted adam_core ``ImpactMixin.detect_collisions`` Ray
-        composition that this propagator previously inherited.
+        ``max_processes`` and ``chunk_size`` remain accepted for public
+        signature compatibility and are ignored; Rayon owns internal
+        parallelism.
         """
         if conditions is None:
             conditions = CollisionConditions.from_kwargs(
