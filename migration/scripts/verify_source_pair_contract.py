@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the explicit pre-release adam-core/adam-assist source-pair contract."""
+"""Verify the exact reviewed-source adam-core/adam-assist pairing contract."""
 
 from __future__ import annotations
 
@@ -163,9 +163,9 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "capsule": "adam_core.propagator.v2",
         "registry_state": "awaiting-core-0.7.0-publication",
         "lock_state": "absent-until-core-0.7.0-is-public",
-        "source_pair_status": "provisional",
+        "source_pair_status": "exact-reviewed-source",
         "release_automation": "absent-until-core-0.7.0-is-public-and-locked",
-        "workflow_sha256": "867e6a509e27a136007df1fcad72c558ed6b033e620585d9779411e656955fc8",
+        "workflow_sha256": "fe5124fac493fd064238e92a0887c41fe404ba091a5bd7843f3af49206006e6b",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")

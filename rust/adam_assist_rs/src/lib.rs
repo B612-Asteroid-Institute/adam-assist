@@ -121,20 +121,19 @@ impl AssistPropagator {
         integrator_configuration_fingerprint(self.integrator)
     }
 
-    /// Return the canonical content identity of the planetary and small-body kernels.
-    pub fn data_fingerprint(&self) -> Option<&str> {
+    /// Return the lazily computed content identity of the loaded kernel bytes.
+    ///
+    /// The first call hashes both stable file handles. Later calls reuse that
+    /// digest only after verifying that both handles and canonical paths still
+    /// identify unchanged files.
+    pub fn data_fingerprint(&self) -> AssistResult<&str> {
         self.data.data_fingerprint()
     }
 
     /// Build a provenance-complete ABI-v2 provider for standalone adam-core OD.
     pub fn external_propagator(&self) -> AssistResult<AssistExternalPropagator> {
         let configuration_fingerprint = self.configuration_fingerprint();
-        let data_fingerprint = self.data_fingerprint().ok_or_else(|| {
-            AssistError::Other(
-                "ASSIST provider has no kernel content fingerprint; construct it from paths"
-                    .to_string(),
-            )
-        })?;
+        let data_fingerprint = self.data_fingerprint()?;
         let owner = Box::new(OwnedExternalPropagator::new_with_fingerprints(
             self.clone(),
             "adam_assist",
@@ -2093,6 +2092,39 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "live public-API fingerprint test requires ASSIST kernel data"]
+    fn public_configuration_fingerprint_changes_for_every_ias15_field() {
+        let defaults = live_propagator_from_env();
+        let default_integrator = defaults.integrator();
+        let default_fingerprint = defaults.configuration_fingerprint();
+        assert_eq!(
+            default_fingerprint,
+            "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f"
+        );
+        for changed in [
+            IntegratorConfig {
+                initial_dt: Some(2.0e-6),
+                ..default_integrator
+            },
+            IntegratorConfig {
+                min_dt: Some(2.0e-9),
+                ..default_integrator
+            },
+            IntegratorConfig {
+                adaptive_mode: Some(Ias15AdaptiveMode::Individual),
+                ..default_integrator
+            },
+            IntegratorConfig {
+                epsilon: Some(2.0e-6),
+                ..default_integrator
+            },
+        ] {
+            let changed = AssistPropagator::with_integrator(Arc::clone(defaults.data()), changed);
+            assert_ne!(changed.configuration_fingerprint(), default_fingerprint);
+        }
+    }
+
+    #[test]
     fn partial_marsden_constants_fill_asteroid_defaults_per_field() {
         let parameters = assist_non_gravitational_parameters(
             Some(NonGravitationalParametersRow {
@@ -2480,7 +2512,7 @@ mod tests {
 
     fn fixture() -> Value {
         serde_json::from_str(include_str!(
-            "../../../migration/artifacts/assist_public_semantics_fixture_2026-05-20.json"
+            "../testdata/assist_public_semantics_fixture_2026-05-20.json"
         ))
         .expect("fixture JSON must parse")
     }

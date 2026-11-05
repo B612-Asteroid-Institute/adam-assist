@@ -189,9 +189,9 @@ MUTATIONS = [
     ),
     Mutation(
         "checkout-drift",
-        lambda w: _step(w, "source-pair", "Checkout final exact adam-core source pair")[
-            "with"
-        ].__setitem__("ref", "main"),
+        lambda w: _step(
+            w, "source-pair", "Checkout exact reviewed adam-core source pair"
+        )["with"].__setitem__("ref", "main"),
     ),
     Mutation(
         "drop-source-contract",

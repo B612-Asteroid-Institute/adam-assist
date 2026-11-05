@@ -24,10 +24,16 @@ use crate::{AssistError as Error, AssistResult as Result};
 use libassist_sys::{ffi, AssistSim, Ephemeris};
 use librebound_sys::{IntegratorConfig, Simulation};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::io::{BufReader, Read};
+use std::fs::{File, Metadata};
+use std::io::{BufReader, Read, Seek, SeekFrom};
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::OnceLock;
 
 // ─── Data bundle ────────────────────────────────────────────────────────────
 
@@ -46,68 +52,146 @@ struct FileIdentity {
     sha256: String,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct FileCacheKey {
-    path: PathBuf,
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StableFileIdentity {
     size: u64,
-    modified_nanos: Option<u128>,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    modified_seconds: i64,
+    #[cfg(unix)]
+    modified_nanoseconds: i64,
+    #[cfg(unix)]
+    changed_seconds: i64,
+    #[cfg(unix)]
+    changed_nanoseconds: i64,
 }
 
-static FILE_IDENTITIES: LazyLock<Mutex<HashMap<FileCacheKey, FileIdentity>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn file_identity(path: &Path, label: &str) -> Result<FileIdentity> {
-    let canonical = path.canonicalize().map_err(|error| {
-        Error::Other(format!(
-            "failed to resolve {label} kernel {}: {error}",
-            path.display()
-        ))
-    })?;
-    let file = std::fs::File::open(&canonical)
-        .map_err(|error| Error::Other(format!("failed to open {label} kernel: {error}")))?;
-    let metadata = file
-        .metadata()
-        .map_err(|error| Error::Other(format!("failed to inspect {label} kernel: {error}")))?;
-    let modified_nanos = metadata
-        .modified()
-        .ok()
-        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|value| value.as_nanos());
-    let key = FileCacheKey {
-        path: canonical,
-        size: metadata.len(),
-        modified_nanos,
-    };
-    if let Some(identity) = FILE_IDENTITIES
-        .lock()
-        .map_err(|_| Error::Other("kernel identity cache is poisoned".to_string()))?
-        .get(&key)
-        .cloned()
-    {
-        return Ok(identity);
-    }
-
-    let mut reader = BufReader::new(file);
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let count = reader
-            .read(&mut buffer)
-            .map_err(|error| Error::Other(format!("failed to read {label} kernel: {error}")))?;
-        if count == 0 {
-            break;
+impl StableFileIdentity {
+    fn from_metadata(metadata: &Metadata) -> Self {
+        Self {
+            size: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+            #[cfg(unix)]
+            modified_seconds: metadata.mtime(),
+            #[cfg(unix)]
+            modified_nanoseconds: metadata.mtime_nsec(),
+            #[cfg(unix)]
+            changed_seconds: metadata.ctime(),
+            #[cfg(unix)]
+            changed_nanoseconds: metadata.ctime_nsec(),
         }
-        hasher.update(&buffer[..count]);
     }
-    let identity = FileIdentity {
-        size: key.size,
-        sha256: format!("{:x}", hasher.finalize()),
-    };
-    FILE_IDENTITIES
-        .lock()
-        .map_err(|_| Error::Other("kernel identity cache is poisoned".to_string()))?
-        .insert(key, identity.clone());
-    Ok(identity)
+}
+
+struct KernelFile {
+    label: &'static str,
+    canonical_path: PathBuf,
+    file: File,
+    identity: StableFileIdentity,
+}
+
+impl KernelFile {
+    fn open(path: &Path, label: &'static str) -> Result<Self> {
+        let canonical_path = path.canonicalize().map_err(|error| {
+            Error::Other(format!(
+                "failed to resolve {label} kernel {}: {error}",
+                path.display()
+            ))
+        })?;
+        let file = File::open(&canonical_path)
+            .map_err(|error| Error::Other(format!("failed to open {label} kernel: {error}")))?;
+        let identity =
+            StableFileIdentity::from_metadata(&file.metadata().map_err(|error| {
+                Error::Other(format!("failed to inspect {label} kernel: {error}"))
+            })?);
+        Ok(Self {
+            label,
+            canonical_path,
+            file,
+            identity,
+        })
+    }
+
+    fn loader_path(&self) -> PathBuf {
+        #[cfg(target_os = "linux")]
+        {
+            PathBuf::from(format!("/proc/self/fd/{}", self.file.as_raw_fd()))
+        }
+        #[cfg(all(unix, not(target_os = "linux")))]
+        {
+            PathBuf::from(format!("/dev/fd/{}", self.file.as_raw_fd()))
+        }
+        #[cfg(not(unix))]
+        {
+            self.canonical_path.clone()
+        }
+    }
+
+    fn verify_unchanged(&self) -> Result<()> {
+        let handle_identity =
+            StableFileIdentity::from_metadata(&self.file.metadata().map_err(|error| {
+                Error::Other(format!("failed to inspect {} kernel: {error}", self.label))
+            })?);
+        if handle_identity != self.identity {
+            return Err(Error::Other(format!(
+                "{} kernel changed after ASSIST loaded it",
+                self.label
+            )));
+        }
+        let path_identity = StableFileIdentity::from_metadata(
+            &std::fs::metadata(&self.canonical_path).map_err(|error| {
+                Error::Other(format!(
+                    "failed to re-inspect {} kernel {}: {error}",
+                    self.label,
+                    self.canonical_path.display()
+                ))
+            })?,
+        );
+        if path_identity != self.identity {
+            return Err(Error::Other(format!(
+                "{} kernel path no longer identifies the bytes ASSIST loaded",
+                self.label
+            )));
+        }
+        Ok(())
+    }
+
+    fn content_identity(&self) -> Result<FileIdentity> {
+        self.verify_unchanged()?;
+        let mut reader = BufReader::new(self.file.try_clone().map_err(|error| {
+            Error::Other(format!(
+                "failed to clone {} kernel handle: {error}",
+                self.label
+            ))
+        })?);
+        reader.seek(SeekFrom::Start(0)).map_err(|error| {
+            Error::Other(format!("failed to rewind {} kernel: {error}", self.label))
+        })?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let count = reader.read(&mut buffer).map_err(|error| {
+                Error::Other(format!("failed to read {} kernel: {error}", self.label))
+            })?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+        }
+        self.verify_unchanged()?;
+        Ok(FileIdentity {
+            size: self.identity.size,
+            sha256: format!("{:x}", hasher.finalize()),
+        })
+    }
 }
 
 fn kernel_pair_fingerprint(planets: &FileIdentity, asteroids: &FileIdentity) -> String {
@@ -118,14 +202,78 @@ fn kernel_pair_fingerprint(planets: &FileIdentity, asteroids: &FileIdentity) -> 
     format!("{:x}", Sha256::digest(canonical.as_bytes()))
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct KernelPairIdentity {
+    planets: FileIdentity,
+    asteroids: FileIdentity,
+    fingerprint: String,
+}
+
+struct KernelFiles {
+    planets: KernelFile,
+    asteroids: KernelFile,
+    identity: OnceLock<std::result::Result<KernelPairIdentity, String>>,
+    #[cfg(test)]
+    compute_count: AtomicUsize,
+}
+
+impl KernelFiles {
+    fn open(planets_path: &Path, asteroids_path: &Path) -> Result<Self> {
+        Ok(Self {
+            planets: KernelFile::open(planets_path, "planetary")?,
+            asteroids: KernelFile::open(asteroids_path, "small-body")?,
+            identity: OnceLock::new(),
+            #[cfg(test)]
+            compute_count: AtomicUsize::new(0),
+        })
+    }
+
+    fn loader_paths(&self) -> (PathBuf, PathBuf) {
+        (self.planets.loader_path(), self.asteroids.loader_path())
+    }
+
+    fn verify_unchanged(&self) -> Result<()> {
+        self.planets.verify_unchanged()?;
+        self.asteroids.verify_unchanged()
+    }
+
+    fn identity(&self) -> Result<&KernelPairIdentity> {
+        self.verify_unchanged()?;
+        let identity = self.identity.get_or_init(|| {
+            #[cfg(test)]
+            self.compute_count.fetch_add(1, AtomicOrdering::SeqCst);
+            (|| {
+                let planets = self.planets.content_identity()?;
+                let asteroids = self.asteroids.content_identity()?;
+                let fingerprint = kernel_pair_fingerprint(&planets, &asteroids);
+                Ok(KernelPairIdentity {
+                    planets,
+                    asteroids,
+                    fingerprint,
+                })
+            })()
+            .map_err(|error: Error| error.to_string())
+        });
+        self.verify_unchanged()?;
+        identity
+            .as_ref()
+            .map_err(|message| Error::Other(message.clone()))
+    }
+
+    #[cfg(test)]
+    fn compute_count(&self) -> usize {
+        self.compute_count.load(AtomicOrdering::SeqCst)
+    }
+}
+
 #[cfg(feature = "kernel-data")]
 fn verify_kernel_identity(
     path: &Path,
     label: &str,
+    identity: &FileIdentity,
     expected_size: u64,
     expected_sha256: &str,
-) -> Result<FileIdentity> {
-    let identity = file_identity(path, label)?;
+) -> Result<()> {
     if identity.size != expected_size {
         return Err(Error::Other(format!(
             "{label} kernel size mismatch for {}: expected {expected_size}, got {}",
@@ -140,7 +288,7 @@ fn verify_kernel_identity(
             identity.sha256
         )));
     }
-    Ok(identity)
+    Ok(())
 }
 
 /// The data resource every propagation entry point needs: the JPL SPK
@@ -149,7 +297,7 @@ fn verify_kernel_identity(
 pub struct AssistData {
     /// JPL SPK ephemeris.
     pub ephem: Ephemeris,
-    data_fingerprint: Option<String>,
+    kernel_files: Option<KernelFiles>,
 }
 
 impl AssistData {
@@ -161,64 +309,75 @@ impl AssistData {
     pub fn new(ephem: Ephemeris) -> Self {
         Self {
             ephem,
-            data_fingerprint: None,
-        }
-    }
-
-    fn from_ephemeris_and_identities(
-        ephem: Ephemeris,
-        planets: &FileIdentity,
-        asteroids: &FileIdentity,
-    ) -> Self {
-        Self {
-            ephem,
-            data_fingerprint: Some(kernel_pair_fingerprint(planets, asteroids)),
+            kernel_files: None,
         }
     }
 
     /// Load the planetary and small-body ASSIST ephemeris kernels explicitly.
+    ///
+    /// Construction opens stable file handles and loads ASSIST from aliases to
+    /// those exact handles. Content hashing stays lazy until provenance is
+    /// requested by [`AssistPropagator::external_propagator`](crate::AssistPropagator::external_propagator)
+    /// or the Python capsule. Later path replacement or in-place mutation is
+    /// detected before cached metadata can be returned.
     pub fn from_paths(
         planets_path: impl AsRef<Path>,
         asteroids_path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let planets_path = planets_path.as_ref();
-        let asteroids_path = asteroids_path.as_ref();
-        let planets = file_identity(planets_path, "planetary")?;
-        let asteroids = file_identity(asteroids_path, "small-body")?;
-        let ephem = Ephemeris::from_paths(planets_path, asteroids_path)?;
-        Ok(Self::from_ephemeris_and_identities(
-            ephem, &planets, &asteroids,
-        ))
+        let kernel_files = KernelFiles::open(planets_path.as_ref(), asteroids_path.as_ref())?;
+        let (planets_loader, asteroids_loader) = kernel_files.loader_paths();
+        let ephem = Ephemeris::from_paths(&planets_loader, &asteroids_loader)?;
+        kernel_files.verify_unchanged()?;
+        Ok(Self {
+            ephem,
+            kernel_files: Some(kernel_files),
+        })
     }
 
-    /// Return the immutable content identity for both loaded kernel slots.
-    pub fn data_fingerprint(&self) -> Option<&str> {
-        self.data_fingerprint.as_deref()
+    /// Return the lazily computed immutable identity for both loaded kernels.
+    pub fn data_fingerprint(&self) -> Result<&str> {
+        self.kernel_files
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other(
+                    "ASSIST provider has no kernel content fingerprint; construct it from paths"
+                        .to_string(),
+                )
+            })?
+            .identity()
+            .map(|identity| identity.fingerprint.as_str())
     }
 
     /// Resolve DE440 plus SB441-n16 using adam-core's pure-Rust override ->
     /// installed-Python -> cache -> verified-wheel policy, then verify the
-    /// reviewed file size and SHA-256 before loading either ephemeris.
+    /// reviewed file size and SHA-256 before returning the ephemeris.
     #[cfg(feature = "kernel-data")]
     pub fn from_default_kernels() -> Result<Self> {
         let resolver = adam_core_rs_kernel_data::Resolver::from_env();
         let (planets, asteroids) = resolver
             .assist_ephemeris_paths()
             .map_err(|error| Error::Other(format!("failed to resolve ASSIST kernels: {error}")))?;
-        let planets_identity =
-            verify_kernel_identity(&planets, "DE440", DE440_SIZE_BYTES, DE440_SHA256)?;
-        let asteroids_identity = verify_kernel_identity(
+        let data = Self::from_paths(&planets, &asteroids)?;
+        let identity = data
+            .kernel_files
+            .as_ref()
+            .expect("from_paths records kernel handles")
+            .identity()?;
+        verify_kernel_identity(
+            &planets,
+            "DE440",
+            &identity.planets,
+            DE440_SIZE_BYTES,
+            DE440_SHA256,
+        )?;
+        verify_kernel_identity(
             &asteroids,
             "SB441-n16",
+            &identity.asteroids,
             SB441_N16_SIZE_BYTES,
             SB441_N16_SHA256,
         )?;
-        let ephem = Ephemeris::from_paths(&planets, &asteroids)?;
-        Ok(Self::from_ephemeris_and_identities(
-            ephem,
-            &planets_identity,
-            &asteroids_identity,
-        ))
+        Ok(data)
     }
 }
 
@@ -1173,18 +1332,136 @@ mod tests {
             std::process::id()
         ));
         std::fs::write(&path, b"kernel").unwrap();
+        let identity = FileIdentity {
+            size: 6,
+            sha256: "6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c".to_string(),
+        };
         verify_kernel_identity(
             &path,
             "test",
+            &identity,
             6,
             "6923dd1bc0460082c5d55a831908c24a282860b7f1cd6c2b79cf1bc8857c639c",
         )
         .unwrap();
-        let size_error = verify_kernel_identity(&path, "test", 7, "unused").unwrap_err();
+        let size_error = verify_kernel_identity(&path, "test", &identity, 7, "unused").unwrap_err();
         assert!(size_error.to_string().contains("size mismatch"));
-        let digest_error = verify_kernel_identity(&path, "test", 6, &"0".repeat(64)).unwrap_err();
+        let digest_error =
+            verify_kernel_identity(&path, "test", &identity, 6, &"0".repeat(64)).unwrap_err();
         assert!(digest_error.to_string().contains("SHA-256 mismatch"));
         std::fs::remove_file(path).unwrap();
+    }
+
+    fn temporary_kernel_pair(test_name: &str) -> (PathBuf, PathBuf) {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let nonce = NEXT.fetch_add(1, AtomicOrdering::SeqCst);
+        let directory = std::env::temp_dir().join(format!(
+            "adam-assist-{test_name}-{}-{nonce}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let planets = directory.join("planets.bsp");
+        let asteroids = directory.join("asteroids.bsp");
+        std::fs::write(&planets, b"planet-kernel-a").unwrap();
+        std::fs::write(&asteroids, b"asteroid-kernel-a").unwrap();
+        (planets, asteroids)
+    }
+
+    fn remove_temporary_kernel_pair(planets: &Path, asteroids: &Path) {
+        let directory = planets.parent().unwrap();
+        if planets.exists() {
+            std::fs::remove_file(planets).unwrap();
+        }
+        if asteroids.exists() {
+            std::fs::remove_file(asteroids).unwrap();
+        }
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn kernel_fingerprint_is_lazy_thread_safe_and_cached_per_provider() {
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-cache");
+        let files = std::sync::Arc::new(KernelFiles::open(&planets, &asteroids).unwrap());
+        assert_eq!(files.compute_count(), 0);
+
+        let workers = (0..8)
+            .map(|_| {
+                let files = std::sync::Arc::clone(&files);
+                std::thread::spawn(move || files.identity().unwrap().fingerprint.clone())
+            })
+            .collect::<Vec<_>>();
+        let fingerprints = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+        assert!(fingerprints.windows(2).all(|pair| pair[0] == pair[1]));
+        assert_eq!(files.compute_count(), 1);
+        assert_eq!(files.identity().unwrap().fingerprint, fingerprints[0]);
+        assert_eq!(files.compute_count(), 1);
+
+        drop(files);
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[test]
+    fn cached_kernel_fingerprint_rejects_same_size_rewrite_with_restored_mtime() {
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-rewrite");
+        let files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let _ = files.identity().unwrap();
+        assert_eq!(files.compute_count(), 1);
+
+        let original_mtime =
+            filetime::FileTime::from_last_modification_time(&std::fs::metadata(&planets).unwrap());
+        std::fs::write(&planets, b"planet-kernel-b").unwrap();
+        filetime::set_file_mtime(&planets, original_mtime).unwrap();
+        let error = files.identity().unwrap_err().to_string();
+        assert!(error.contains("changed after ASSIST loaded it"), "{error}");
+        assert_eq!(files.compute_count(), 1);
+
+        drop(files);
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[test]
+    fn cached_kernel_fingerprint_rejects_path_replacement() {
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-replace");
+        let files = KernelFiles::open(&planets, &asteroids).unwrap();
+        let _ = files.identity().unwrap();
+        let original = planets.with_extension("original");
+        std::fs::rename(&planets, &original).unwrap();
+        std::fs::write(&planets, b"planet-kernel-a").unwrap();
+
+        let error = files.identity().unwrap_err().to_string();
+        assert!(
+            error.contains("path no longer identifies the bytes ASSIST loaded")
+                || error.contains("changed after ASSIST loaded it"),
+            "{error}"
+        );
+        assert_eq!(files.compute_count(), 1);
+
+        drop(files);
+        std::fs::remove_file(original).unwrap();
+        remove_temporary_kernel_pair(&planets, &asteroids);
+    }
+
+    #[test]
+    fn lazy_kernel_fingerprint_rejects_truncation_before_hashing() {
+        let (planets, asteroids) = temporary_kernel_pair("fingerprint-truncate");
+        let files = KernelFiles::open(&planets, &asteroids).unwrap();
+        assert_eq!(files.compute_count(), 0);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&asteroids)
+            .unwrap()
+            .set_len(3)
+            .unwrap();
+
+        let error = files.identity().unwrap_err().to_string();
+        assert!(error.contains("changed after ASSIST loaded it"), "{error}");
+        assert_eq!(files.compute_count(), 0);
+
+        drop(files);
+        remove_temporary_kernel_pair(&planets, &asteroids);
     }
 
     // ── frame rotation contracts (moved from assist-rs coordinates.rs) ─────

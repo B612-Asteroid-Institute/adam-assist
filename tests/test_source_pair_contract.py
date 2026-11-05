@@ -17,7 +17,7 @@ def test_source_pair_contract_accepts_current_tree() -> None:
     contract = verify()
     assert contract["assist_version"] == "0.6.0"
     assert contract["core_version"] == "0.7.0"
-    assert contract["source_pair_status"] == "provisional"
+    assert contract["source_pair_status"] == "exact-reviewed-source"
     assert contract["release_automation"] == (
         "absent-until-core-0.7.0-is-public-and-locked"
     )

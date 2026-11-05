@@ -24,6 +24,15 @@
   its full Python matrix, Rust source-pair gates, read-only execution boundary,
   and benchmark artifacts on every trigger. Python dependency-name checks now
   apply full PEP 503 normalization.
+- Deferred the 765 MiB kernel content hash from ordinary provider construction
+  to the first metadata request. The digest is cached once per immutable
+  provider over retained handles, while device/inode/change-time/path checks
+  reject rewrites, replacement, or truncation before cached provenance can be
+  returned.
+- Expanded exact-source validation to default/all/no-default Rust checks,
+  warning-denied Clippy, tests, doctests, docs, packaged-crate tests, and
+  independent capsule tamper/composition/batching/STM probes. Packaged unit
+  tests now carry their pinned science fixture inside the crate.
 
 ### Changed
 
@@ -33,12 +42,14 @@
   optional STMs, and the append-only configuration/data fingerprint suffix.
   Standalone Rust callers receive the same provenance-complete provider through
   `AssistPropagator::external_propagator()`. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
-  coherent Rust `0.7`, validated against the exact final Core `0.7.0` candidate
-  commit `0b49938eb0be04214a8d07b206227d31b248394a`. No release automation exists
+  coherent Rust `0.7`, validated against the exact reviewed Core `0.7.0`
+  source commit `0b49938eb0be04214a8d07b206227d31b248394a`. No release automation exists
   until Core `0.7.0` is public and real registry locks can be generated.
 - Removed ASSIST OD workloads from the current benchmark and public-surface
   classifications; OD algorithms, defaults, and reports are now exclusively
-  Core-owned. Historical migration benchmarks and oracle evidence are retained.
+  Core-owned. The stale generator that called removed methods is retired;
+  frozen benchmark output and isolated oracle evidence remain explicitly
+  historical.
 
 ## [0.5.0] - 2026-10-16
 

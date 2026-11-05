@@ -30,11 +30,15 @@ ASSIST opens either ephemeris.
 ```no_run
 use adam_assist::{AssistPropagator, AssistResult};
 
+#[cfg(feature = "kernel-data")]
 fn main() -> AssistResult<()> {
     let propagator = AssistPropagator::from_default_kernels()?;
     let _integrator = propagator.integrator();
     Ok(())
 }
+
+#[cfg(not(feature = "kernel-data"))]
+fn main() {}
 ```
 
 For explicit data ownership or offline deployments, call
@@ -81,8 +85,8 @@ STMs, and immutable configuration/data fingerprints only.
 
 `libassist-sys` and `librebound-sys` provide the versioned FFI and RAII layers.
 The adam-core dependencies provide generic coordinate, propagation, SPICE,
-and kernel-data contracts. The manifest declares the coherent Core `0.7` line; exact pre-publication
-validation is pinned to the commit above.
+and kernel-data contracts. The manifest declares the coherent Core `0.7` line; exact reviewed-source
+validation is pinned to the commit above; public registry locking remains deferred.
 
 ## Optional Python extension
 

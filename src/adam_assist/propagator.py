@@ -304,8 +304,10 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         """Return Core's private propagation-only ABI-v2 capsule.
 
         The native descriptor includes immutable fingerprints of all IAS15
-        settings and the exact planetary/small-body kernel contents. Core owns
-        OD orchestration and records those identities in workflow provenance.
+        settings and the exact planetary/small-body kernel contents. Kernel
+        hashing is lazy on the first capsule request and cached on this
+        immutable provider instance with tamper checks. Core owns OD
+        orchestration and records those identities in workflow provenance.
         """
         return self._native.propagator_capsule()
 

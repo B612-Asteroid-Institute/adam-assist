@@ -65,6 +65,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == (
         kernel_dependency
     )
+    assert manifest["dev-dependencies"]["filetime"] == "0.2"
     assert {
         "icu_locale_core",
         "icu_normalizer",
@@ -117,10 +118,58 @@ def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
     assert contract["core_version"] == "0.7.0"
     assert contract["core_commit"] == "0b49938eb0be04214a8d07b206227d31b248394a"
     assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
-    assert contract["source_pair_status"] == "provisional"
+    assert contract["source_pair_status"] == "exact-reviewed-source"
     assert contract["release_automation"] == (
         "absent-until-core-0.7.0-is-public-and-locked"
     )
+
+
+def test_packaged_rust_fixture_matches_frozen_migration_evidence() -> None:
+    historical = (
+        ROOT
+        / "migration"
+        / "artifacts"
+        / "assist_public_semantics_fixture_2026-05-20.json"
+    ).read_bytes()
+    packaged = (
+        ROOT
+        / "rust"
+        / "adam_assist_rs"
+        / "testdata"
+        / "assist_public_semantics_fixture_2026-05-20.json"
+    ).read_bytes()
+    assert hashlib.sha256(historical).hexdigest() == (
+        "31de414652f86a4d23399610e32407bb11e37022e5c28af27e1fbf85dc1aa913"
+    )
+    assert packaged == historical
+
+
+def test_core_07_migration_inventory_is_complete() -> None:
+    inventory = (ROOT / "MIGRATION.md").read_text()
+    for required in (
+        "a8ec6d22b422da055730ff7c0e076f51afe8b0ba",
+        "00ec21e3888d737becc6b180d1cb7ea3d7524df3",
+        "6ef5c5a^{tree}",
+        "11 of the 12 replayed commits",
+        "spicekit",
+        "Propagation, science, and runtime inventory",
+        "Core-owned OD surface removal and adapter boundary",
+        "Tests, workflows, documentation, and metadata",
+        "test_core_refine_preserves_physical_and_custom_nongrav_metadata",
+        "test_core_refine_preserves_but_does_not_activate_source_only_nongrav",
+        "No Windows or musllinux support",
+    ):
+        assert required in inventory
+
+
+def test_stale_assist_owned_od_benchmark_is_retired() -> None:
+    assert not (ROOT / "migration" / "scripts" / "benchmark_assist_od.py").exists()
+    note = (
+        ROOT / "migration" / "artifacts" / "assist_od_benchmark_2026-08-12.README.md"
+    ).read_text()
+    assert "Frozen historical" in note
+    normalized = note.replace("**", "").replace("\n", " ")
+    assert "not a current benchmark" in normalized
 
 
 def test_public_extension_is_packaged_inside_adam_assist() -> None:

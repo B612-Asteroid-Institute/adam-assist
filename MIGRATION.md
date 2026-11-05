@@ -43,7 +43,7 @@ report itself as `0.5.0`-compatible.
 
 This line exports only `adam_core.propagator.v2`, declares Python
 `adam-core>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements, and is validated
-against the exact final Core `0.7.0` candidate commit
+against the exact reviewed Core `0.7.0` source commit
 `0b49938eb0be04214a8d07b206227d31b248394a`. Core `0.7.0` is not yet on the
 registries: active locks are intentionally absent and release/publication stays
 blocked until public artifacts exist and their real checksums can be locked.
@@ -70,6 +70,172 @@ candidate, solver, rejection, and grouping decision. Standalone Rust callers
 use `AssistPropagator::external_propagator()`, borrow its validated external
 view into `adam_core::od::OdPropagator::external`, and call the same Core-owned
 `run_iod`, `run_od`, `refine`, or `evaluate_orbits` functions.
+
+## Core 0.7 / ASSIST 0.6 change inventory
+
+This section is the PR-level migration and validation inventory for the exact
+reviewed-source pair. It describes source state only: it is not a release,
+compatibility, publication, or registry claim.
+
+### Lineage and replay accounting
+
+The implementation starts from current adam-assist `main`
+`a8ec6d22b422da055730ff7c0e076f51afe8b0ba`, not directly from the accepted
+semantic candidate. The 12 accepted commits ending at
+`00ec21e3888d737becc6b180d1cb7ea3d7524df3` were replayed as
+`c5dd7a2..6ef5c5a`:
+
+| Accepted change | Disposition on current main |
+|---|---|
+| Expose ASSIST to Core OD as a native external propagator | Retained, then narrowed to the propagation-only ABI-v2 table and safe `AssistExternalPropagator` owner. |
+| Implement ASSIST STMs through `Propagator::propagate_stm` | Retained; six-state STMs, non-gravitational partial plumbing, covariance propagation, and row-failure classification remain Assist-owned propagation behavior. |
+| Make ASSIST capsule-only for Core integration | Retained; Python supplies the private capsule and owns no OD behavior. |
+| Correct the capsule-only migration | Retained. |
+| Adopt Core propagator-v2 | Adapted to the append-only provenance suffix required by exact Core `0b49938e`. |
+| Align Marsden defaults with Core v2 | Retained field-by-field for `ALN`, `NK`, `NM`, `NN`, and `R0`. |
+| Set the Core 0.7 floor | Retained as Python `>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements. |
+| Harden source-pair and release gates | Retained and strengthened with exact-commit wheel and Rust lanes. |
+| Enforce structural release policy | Retained. |
+| Remove prerelease publication workflows | Retained; only read-only CI remains. |
+| Close transition-policy tripwires | Retained. |
+| Reject local Core dependency overrides | Retained in package metadata; CI-only `--config patch.crates-io` values point at the one exact reviewed Core checkout. |
+
+Stable patch IDs match for 11 of the 12 replayed commits. The sole patch-ID
+difference is the deleted `Cargo.lock` hunk in the Core-floor change: current
+main had already advanced `spicekit` from `0.2.2`/`17c159ac…` to
+`0.2.3`/`be636b2f…` in `8eba85d`. The lock remains intentionally absent;
+exact-source validation resolves `spicekit 0.2.3` through Core. The replay
+parent tree `6ef5c5a^{tree}` is exactly the accepted
+`00ec21e^{tree}` (`4b1ec10b63fd95e3c99e6ac565b20fb841afd468`), so the
+current-main lock correction is preserved without semantic drift. Every other
+file and behavior already present at the current-main base remains inherited;
+the replay does not reset, replace, or roll back later-main work.
+
+### Propagation, science, and runtime inventory
+
+Retained unchanged in behavior:
+
+- ASSIST gravity and non-gravitational dynamics, IAS15 integration, explicit
+  kernel paths, epoch handling, frame/origin transformations, collision
+  detection, ephemeris generation, sampled covariance behavior, Rayon thread
+  limits, and per-row propagation failures;
+- state-transition matrices, non-gravitational partials, covariance transport,
+  and null/inactive Marsden-row semantics;
+- the public Python propagation, ephemeris, collision, pickling, positional
+  signature, and helper/constant surface tracked by
+  `migration/public_surface/manifest.json`;
+- direct standalone Rust use of `AssistPropagator` through Core's propagation
+  traits, independent of Python and independent of Core OD orchestration.
+
+Added or adapted for the exact Core source:
+
+- ABI-v2 provider metadata now includes content-derived IAS15 configuration
+  and kernel-data fingerprints. Every IAS15 option is encoded by exact floating
+  bit pattern or enum value; kernel identity includes semantic slot, byte size,
+  and SHA-256, not a filesystem path.
+- Explicit-path construction retains stable open handles and asks ASSIST to
+  load through aliases to those handles. Kernel hashing is lazy, thread-safe,
+  and cached per immutable `AssistData` instance. Every metadata acquisition
+  verifies size, device, inode, modification time, and change time on both the
+  retained handle and canonical path, so truncation, same-size rewrites,
+  restored-mtime rewrites, and path replacement fail closed instead of
+  returning stale provenance.
+- `AssistExternalPropagator` owns the raw ABI-v2 table and exposes only a
+  lifetime-bound validated borrow. Callers never own a context pointer or
+  manage capsule/table destruction. Python's capsule and standalone Rust use
+  the same `OwnedExternalPropagator<AssistPropagator>` implementation.
+- `AssistData::new(Ephemeris)` remains valid for direct propagation but cannot
+  claim unavailable kernel provenance; external-provider construction fails
+  with the explicit `construct it from paths` error.
+
+No dynamics formula, integrator default, state ordering, failure code,
+propagation output, or ABI callback behavior is intentionally changed by the
+provenance work. Bitwise propagation comparisons against the accepted tree are
+the numerical guard.
+
+### Core-owned OD surface removal and adapter boundary
+
+ASSIST does not own IOD, least-squares fitting, rejection, linkage, profile or
+resource selection, evaluation, or workflow orchestration. The old Python and
+PyO3 `fit_least_squares`, `fit_least_squares_evaluated`, `od_fit`,
+`initial_orbit_determination`, and `vallado_least_squares` routes and native
+work units remain removed. There are no compatibility aliases.
+
+Python only constructs the provider, returns the private
+`adam_core.propagator.v2` capsule, and delegates. Core owns decoding,
+validation, grouping, fitting, typed scientific failures, memberships,
+composition, and results. Standalone Rust either calls propagation traits on
+`AssistPropagator` directly or borrows `AssistExternalPropagator::external()`
+into Core's `OdPropagator`; no Python, PyO3 callback, or Assist OD layer is
+required. The example `rust/adam_assist_rs/examples/core_owned_od.rs` documents
+that lifetime boundary.
+
+### Tests, workflows, documentation, and metadata
+
+Repository validation covers:
+
+- direct Rust propagation contracts plus compiled standalone Core-owned OD;
+- the external owner/lifetime and direct-trait/adapter boundaries;
+- all malformed capsule suffix, size, ABI, reserved-word, capability,
+  callback, name/version, and two-body-flag tamper classes;
+- exact `run_od == refine(run_iod)` composition with and without provider
+  Jacobians, deterministic repeats, evaluate parity, two-group ordering,
+  typed failure isolation, mixed-epoch/mixed-non-grav batching, public-vs-ABI
+  propagation, and STM finite-difference behavior with a real ASSIST provider;
+- lazy fingerprint call count, concurrent first access, cache reuse,
+  same-size/restored-mtime mutation, replacement, and truncation;
+- default, all-feature, and no-default-feature `check`, warning-denied Clippy,
+  tests, doctests, and warning-denied docs on Rust 1.87;
+- Python 3.11–3.13 source-pair wheels, lint, formatting, import compilation,
+  strict mypy, installed versions, wheel dependency floors, workflow policy,
+  public-surface governance, and current propagation-only benchmarks;
+- source-tree and packaged-crate consumers. The science fixture needed by
+  crate unit tests is duplicated under `rust/adam_assist_rs/testdata`; a test
+  pins it byte-for-byte to the historical migration artifact so packaged
+  `--all-targets` does not depend on repository-external files.
+
+The machine-readable source-pair state is `exact-reviewed-source`, while
+`lock_state` and `registry_state` continue to say that authentic public Core
+0.7 artifacts do not yet exist. CI patches all four Core crates only for the
+exact-source validation checkout. Package manifests contain registry-version
+requirements only and intentionally contain no lock, path, Git, or fabricated
+checksum state.
+
+### Accepted-test disposition
+
+The accepted `00ec` capsule tests are accounted for as follows:
+
+- retained or adapted: capsule-only routing (now including fingerprints and
+  Core metadata), refinement STM (expanded to refinement plus evaluation),
+  ordering/non-grav/row failures, partial Marsden defaults, custom/inactive STM
+  behavior, capsule lifetime, Python-only rejection, and one-acquisition IOD;
+- replaced: the distinct-IOD/refinement-capsules test is replaced by
+  `run_od_uses_one_assist_capsule_for_both_stages`, because one immutable
+  provider identity now serves both Core-owned stages;
+- intentionally omitted:
+  `test_core_refine_preserves_physical_and_custom_nongrav_metadata` and
+  `test_core_refine_preserves_but_does_not_activate_source_only_nongrav`.
+  Injecting a changed non-gravitational row into a canonical IOD handoff would
+  invalidate Core's state fingerprint, so canonical `refine` correctly rejects
+  that mutated handoff before propagation. Non-gravitational dynamics remain
+  covered through direct traits, ABI batching, STM/partial tests, and fresh
+  canonical provider workflows; ASSIST does not bypass Core's immutable
+  handoff identity.
+
+### Historical evidence and deliberate omissions
+
+`migration/scripts/benchmark_assist_od.py` is removed because it called the
+removed Assist-owned OD methods and could no longer be an active benchmark.
+`migration/artifacts/assist_od_benchmark_2026-08-12.json` and the isolated
+`migration/parity` request handlers remain frozen historical oracle evidence;
+they are not current APIs, runnable current-provider benchmarks, or release
+claims. Current CI benchmarks only propagation, ephemeris, covariance,
+collision, non-gravitational dynamics, and the native adapter boundary.
+
+No Windows or musllinux support is added; upstream ASSIST still requires POSIX
+memory mapping. No Core or Assist publication, tag, registry lock, hosted
+release qualification, or live-registry claim is included. Those operations
+remain separate post-Core-publication work requiring owner authorization.
 
 ## Parity
 

@@ -35,8 +35,8 @@ unsupported.
 ### adam-core compatibility and exact-source validation
 
 The `0.6.0` source line requires `adam-core>=0.7.0,<0.8.0` and the coherent
-`0.7` Rust crate line. It is validated against the exact final adam-core
-candidate commit `0b49938eb0be04214a8d07b206227d31b248394a`, which has
+`0.7` Rust crate line. It is validated against the exact reviewed adam-core
+source commit `0b49938eb0be04214a8d07b206227d31b248394a`, which has
 package/crate version
 `0.7.0` and defines the private `adam_core.propagator.v2` ABI. Released
 `adam-core 0.6.1` is outside the declared range and has no v2 ABI.
@@ -59,9 +59,11 @@ The retained migration helpers are documented as inert local tools in
 `migration/scripts/RELEASE_TOOLING.md`; they are not CI release entry points.
 
 For reproducible local Rust validation, use one detached Core tree for all
-three direct Core crates. Patched Cargo commands create a temporary untracked
-lock; remove it afterward and verify that no tracked or untracked changes
-remain:
+four Core crates. Patched Cargo commands create a temporary untracked lock;
+remove it afterward and verify that no tracked or untracked changes remain.
+The command below shows the all-feature lane; the authoritative CI also runs
+`check`, warning-denied Clippy, tests, doctests, and warning-denied docs with
+default, all, and no-default features:
 
 ```console
 git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-0b49938e
@@ -99,7 +101,11 @@ fn main() -> AssistResult<()> {
 The default resolver loads DE440 and SB441-n16 through adam-core's environment,
 installed-package, cache, and checksummed-fetch policy. Explicit/offline users
 can call `AssistPropagator::from_paths` and can disable default resolver support
-with `default-features = false`.
+with `default-features = false`. Explicit-path construction loads the ephemeris
+without hashing the 765 MiB kernel pair. The content fingerprint is computed
+once, lazily, when external-provider metadata is requested; cached metadata is
+returned only while the retained handles and canonical paths still identify
+unchanged bytes.
 
 ## Usage
 

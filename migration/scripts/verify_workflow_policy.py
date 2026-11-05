@@ -49,7 +49,7 @@ INERT_RELEASE_HELPERS = (
     "verify_registry_locks",
     "verify_release",
 )
-WORKFLOW_SHA256 = "867e6a509e27a136007df1fcad72c558ed6b033e620585d9779411e656955fc8"
+WORKFLOW_SHA256 = "fe5124fac493fd064238e92a0887c41fe404ba091a5bd7843f3af49206006e6b"
 REQUIRED_RUN_SHA256 = {
     (
         "source-pair",
@@ -90,7 +90,7 @@ REQUIRED_RUN_SHA256 = {
     (
         "rust-quality",
         "Verify source pair and run Rust gates",
-    ): "f21ce1c86181cc1291c5a01a31f91b1dfd4e75030500d297c9ca2a3bfa5d6d67",
+    ): "f91d2dfc08e6e1ae99d9edae9cd9cdb97ba6c3af6b39c0f1624576ff9b3a4ab0",
     (
         "benchmark",
         "Install the already-tested source-pair wheels",
@@ -185,13 +185,13 @@ def _require_condition(step: Mapping[str, Any], expected: str | None) -> None:
 
 
 def _verify_checkout(job: Mapping[str, Any], location: str) -> None:
-    step = _step_by_name(job, "Checkout final exact adam-core source pair")
+    step = _step_by_name(job, "Checkout exact reviewed adam-core source pair")
     if step.get("uses") != "actions/checkout@v4" or step.get("with") != {
         "repository": CORE_REPOSITORY,
         "ref": "${{ env.ADAM_CORE_SOURCE_REF }}",
         "path": ".source-pair/adam-core",
     }:
-        _fail(location, "Core checkout must use the final exact source pair")
+        _fail(location, "Core checkout must use the exact reviewed source pair")
 
 
 def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:
@@ -280,7 +280,7 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
         "ADAM_CORE_VERSION": "0.7.0",
         "ADAM_CORE_SOURCE_REF": CORE_REF,
     }:
-        _fail(NORMAL, "Core version/ref drifted from the provisional source pair")
+        _fail(NORMAL, "Core version/ref drifted from the exact reviewed source pair")
     jobs = workflow["jobs"]
     if set(jobs) != {"source-pair", "rust-quality", "benchmark"}:
         _fail(NORMAL, "required job inventory is source-pair, rust-quality, benchmark")

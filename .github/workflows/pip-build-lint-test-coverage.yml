@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout final exact adam-core source pair
+      - name: Checkout exact reviewed adam-core source pair
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -138,7 +138,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout final exact adam-core source pair
+      - name: Checkout exact reviewed adam-core source pair
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -164,13 +164,35 @@ jobs:
             --config "patch.crates-io.adam_core_rs_spice.path='$core/adam_core_rs_spice'"
             --config "patch.crates-io.adam_core_rs_kernel_data.path='$core/adam_core_rs_kernel_data'"
           )
-          cargo fmt --manifest-path rust/adam_assist_rs/Cargo.toml -- --check
-          cargo check --manifest-path rust/adam_assist_rs/Cargo.toml \
-            --all-targets --features python,extension-module "${configs[@]}"
-          cargo clippy --manifest-path rust/adam_assist_rs/Cargo.toml \
-            --all-targets --features python,extension-module "${configs[@]}" -- -D warnings
-          cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
-            --all-targets --features python,extension-module "${configs[@]}"
+          manifest=rust/adam_assist_rs/Cargo.toml
+          cargo fmt --manifest-path "$manifest" -- --check
+          cargo check --manifest-path "$manifest" --all-targets "${configs[@]}"
+          cargo check --manifest-path "$manifest" --all-targets \
+            --no-default-features "${configs[@]}"
+          cargo check --manifest-path "$manifest" --all-targets \
+            --all-features "${configs[@]}"
+          cargo clippy --manifest-path "$manifest" --all-targets \
+            "${configs[@]}" -- -D warnings
+          cargo clippy --manifest-path "$manifest" --all-targets \
+            --no-default-features "${configs[@]}" -- -D warnings
+          cargo clippy --manifest-path "$manifest" --all-targets \
+            --all-features "${configs[@]}" -- -D warnings
+          cargo test --manifest-path "$manifest" --all-targets "${configs[@]}"
+          cargo test --manifest-path "$manifest" --all-targets \
+            --no-default-features "${configs[@]}"
+          cargo test --manifest-path "$manifest" --all-targets \
+            --all-features "${configs[@]}"
+          cargo test --manifest-path "$manifest" --doc "${configs[@]}"
+          cargo test --manifest-path "$manifest" --doc \
+            --no-default-features "${configs[@]}"
+          cargo test --manifest-path "$manifest" --doc \
+            --all-features "${configs[@]}"
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
+            --no-deps "${configs[@]}"
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
+            --no-deps --no-default-features "${configs[@]}"
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
+            --no-deps --all-features "${configs[@]}"
           rm -f rust/adam_assist_rs/Cargo.lock
           git diff --exit-code
           git -C .source-pair/adam-core diff --exit-code

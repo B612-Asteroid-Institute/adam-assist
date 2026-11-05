@@ -153,11 +153,10 @@ impl NativeAssistPropagator {
             std::ffi::CString::new(adam_core_rs_coords::propagation::EXTERNAL_PROPAGATOR_CAPSULE)
                 .expect("no NUL");
         let configuration_fingerprint = self.inner.configuration_fingerprint();
-        let data_fingerprint = self.inner.data_fingerprint().ok_or_else(|| {
-            PyRuntimeError::new_err(
-                "ASSIST provider has no kernel content fingerprint; construct it from paths",
-            )
-        })?;
+        let data_fingerprint = self
+            .inner
+            .data_fingerprint()
+            .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
         PyCapsule::new_bound(
             py,
             adam_core_rs_coords::propagation::OwnedExternalPropagator::new_with_fingerprints(
