@@ -55,9 +55,7 @@ def _public_rustdoc() -> list[str]:
             if stripped.startswith(("///", "//!")):
                 line_docs.append(stripped[3:].lstrip())
         docs.extend(line_docs)
-        docs.extend(
-            re.findall(r"/\*\*.*?\*/|/\*!.*?\*/", source, flags=re.DOTALL)
-        )
+        docs.extend(re.findall(r"/\*\*.*?\*/|/\*!.*?\*/", source, flags=re.DOTALL))
     return docs
 
 
@@ -346,9 +344,7 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
 def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     core_ref = "0b49938eb0be04214a8d07b206227d31b248394a"
     readme = (ROOT / "README.md").read_text()
-    crate_readme = (
-        ROOT / "rust" / "adam_assist_rs" / "README.md"
-    ).read_text()
+    crate_readme = (ROOT / "rust" / "adam_assist_rs" / "README.md").read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
     release_tooling = (
         ROOT / "migration" / "scripts" / "RELEASE_TOOLING.md"
