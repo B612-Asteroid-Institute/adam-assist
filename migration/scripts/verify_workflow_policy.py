@@ -447,7 +447,14 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             _fail(f"{name}:{job_id}", "job must be a mapping")
         if job.get("if") != expected_condition:
             _fail(f"{name}:{job_id}", "release readiness condition drifted")
-        if "continue-on-error" in job:
+        is_diagnostic = (
+            name == "release-candidate-wheel-matrix.yml"
+            and job_id == "full-current-benchmark"
+        )
+        if is_diagnostic:
+            if job.get("continue-on-error") is not True:
+                _fail(f"{name}:{job_id}", "benchmark diagnostic must be non-gating")
+        elif "continue-on-error" in job:
             _fail(f"{name}:{job_id}", "continue-on-error is forbidden")
 
     for value in _walk(workflow):
@@ -507,6 +514,11 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
         ]
         if len(macos_arm64) != 1 or macos_arm64[0].get("runner") != "macos-15":
             _fail(name, "macOS arm64 wheels require the supported macos-15 runner")
+        benchmark = jobs["full-current-benchmark"]
+        if benchmark.get("needs") != "artifact-acceptance":
+            _fail(name, "benchmark diagnostic must depend on artifact acceptance")
+        if benchmark.get("runs-on") != "macos-15":
+            _fail(name, "benchmark diagnostic requires the supported macos-15 runner")
     elif name == "rust-crate-release-candidate.yml":
         if workflow.get("env") != {
             "RUST_RELEASE_VERSION": "0.6.0",
