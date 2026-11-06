@@ -372,6 +372,20 @@ def test_rust_release_python_feature_jobs_require_cpython_313(job: str) -> None:
         verify_workflow_documents(unsupported)
 
 
+def test_wheel_release_requires_supported_macos_arm64_runner() -> None:
+    workflows = deepcopy(BASE)
+    workflow = workflows["release-candidate-wheel-matrix.yml"]
+    platforms = workflow["jobs"]["artifact-acceptance"]["strategy"]["matrix"][
+        "platform"
+    ]
+    macos_arm64 = next(
+        platform for platform in platforms if platform["name"] == "macos-arm64"
+    )
+    macos_arm64["runner"] = "macos-14"
+    with pytest.raises(WorkflowPolicyError, match="supported macos-15 runner"):
+        verify_workflow_documents(workflows)
+
+
 def test_normal_artifact_and_reporting_actions_are_explicitly_allowed() -> None:
     actions = {
         step.get("uses")

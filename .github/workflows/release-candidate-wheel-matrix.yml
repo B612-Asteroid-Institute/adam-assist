@@ -46,7 +46,7 @@ jobs:
         platform:
           - {name: manylinux-x86_64, runner: ubuntu-latest, system: Linux-x86_64, family: manylinux, target: x86_64, wheel_tag: "manylinux*x86_64"}
           - {name: manylinux-aarch64, runner: ubuntu-24.04-arm, system: Linux-aarch64, family: manylinux, target: aarch64, wheel_tag: "manylinux*aarch64"}
-          - {name: macos-arm64, runner: macos-14, system: Darwin-arm64, family: native, wheel_tag: "macosx*arm64"}
+          - {name: macos-arm64, runner: macos-15, system: Darwin-arm64, family: native, wheel_tag: "macosx*arm64"}
           - {name: macos-x86_64, runner: macos-15-intel, system: Darwin-x86_64, family: native, wheel_tag: "macosx*x86_64"}
     steps:
       - name: Checkout adam-assist candidate

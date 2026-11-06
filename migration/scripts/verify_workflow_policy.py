@@ -498,6 +498,15 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             "ADAM_ASSIST_RELEASE_VERSION": "0.6.0",
         }:
             _fail(name, "wheel release identities drifted")
+        matrix = jobs["artifact-acceptance"].get("strategy", {}).get("matrix", {})
+        platforms = matrix.get("platform", [])
+        macos_arm64 = [
+            platform
+            for platform in platforms
+            if isinstance(platform, Mapping) and platform.get("name") == "macos-arm64"
+        ]
+        if len(macos_arm64) != 1 or macos_arm64[0].get("runner") != "macos-15":
+            _fail(name, "macOS arm64 wheels require the supported macos-15 runner")
     elif name == "rust-crate-release-candidate.yml":
         if workflow.get("env") != {
             "RUST_RELEASE_VERSION": "0.6.0",
