@@ -351,6 +351,27 @@ def test_release_ready_policy_rejects_mutations(mutation: Mutation) -> None:
         verify_workflow_documents(workflows)
 
 
+@pytest.mark.parametrize("job", ["package-and-test", "latest-stable-compatibility"])
+def test_rust_release_python_feature_jobs_require_cpython_313(job: str) -> None:
+    workflow = "rust-crate-release-candidate.yml"
+
+    missing = deepcopy(BASE)
+    steps = missing[workflow]["jobs"][job]["steps"]
+    steps[:] = [step for step in steps if step.get("name") != "Set up supported Python"]
+    with pytest.raises(WorkflowPolicyError):
+        verify_workflow_documents(missing)
+
+    unsupported = deepcopy(BASE)
+    setup = next(
+        step
+        for step in unsupported[workflow]["jobs"][job]["steps"]
+        if step.get("name") == "Set up supported Python"
+    )
+    setup["with"]["python-version"] = "3.14"
+    with pytest.raises(WorkflowPolicyError):
+        verify_workflow_documents(unsupported)
+
+
 def test_normal_artifact_and_reporting_actions_are_explicitly_allowed() -> None:
     actions = {
         step.get("uses")
