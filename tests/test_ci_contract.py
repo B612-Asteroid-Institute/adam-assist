@@ -42,7 +42,7 @@ def test_active_ci_contains_no_release_or_publication_credentials() -> None:
         assert forbidden not in source
 
 
-def test_release_tools_exist_only_behind_disabled_workflow_jobs() -> None:
+def test_publication_tools_stay_behind_gated_release_jobs() -> None:
     active = (ROOT / ".github" / "workflows" / NORMAL).read_text()
     disabled = "\n".join(
         (ROOT / ".github" / "workflows" / name).read_text()
@@ -52,7 +52,6 @@ def test_release_tools_exist_only_behind_disabled_workflow_jobs() -> None:
         "publish_crate_archive",
         "prepare_pypi_upload",
         "verify_release",
-        "verify_registry_locks",
     ):
         assert script not in active
         assert script in disabled
@@ -75,13 +74,16 @@ def test_critical_ci_commands_and_benchmark_evidence_are_pinned() -> None:
     for command in (
         "python -m pytest --benchmark-skip -q tests",
         "mypy --strict src/adam_assist",
-        "test ! -e pdm.lock",
+        "pdm lock --check",
+        "verify_registry_locks.py",
         "verify_source_pair_contract.py",
         "--core-tree .source-pair/adam-core",
     ):
         assert command in source_runs
     for command in ("cargo fmt", "cargo check", "cargo clippy", "cargo test"):
         assert command in rust_run
+    assert "--locked" in rust_run
+    assert "patch.crates-io" not in rust_run
     assert "python -m pytest --benchmark-only" in benchmark_runs
     for name in (
         "Upload current-only benchmark artifact",

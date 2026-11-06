@@ -16,11 +16,11 @@ concurrency:
 
 env:
   ADAM_CORE_VERSION: "0.7.0"
-  ADAM_CORE_SOURCE_REF: "0b49938eb0be04214a8d07b206227d31b248394a"
+  ADAM_CORE_SOURCE_REF: "a6478f2f280c266d7a5d1442997eb520fc20888f"
 
 jobs:
   source-pair:
-    name: Exact Core source pair / Python ${{ matrix.python-version }}
+    name: Exact public Core release / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout exact reviewed adam-core source pair
+      - name: Checkout exact public adam-core release
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -54,31 +54,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cleanup() {
-            rm -f rust/adam_assist_rs/Cargo.lock .cargo/config.toml
-            rmdir .cargo 2>/dev/null || true
-          }
-          trap cleanup EXIT
           wheelhouse="$RUNNER_TEMP/source-pair-wheels"
           mkdir -p "$wheelhouse"
           (cd .source-pair/adam-core && maturin build --release --out "$wheelhouse")
-          core="$GITHUB_WORKSPACE/.source-pair/adam-core/rust"
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<EOF
-          [patch.crates-io]
-          adam_core = { path = "$core/adam_core" }
-          adam_core_rs_coords = { path = "$core/adam_core_rs_coords" }
-          adam_core_rs_spice = { path = "$core/adam_core_rs_spice" }
-          adam_core_rs_kernel_data = { path = "$core/adam_core_rs_kernel_data" }
-          EOF
-          maturin build --release --out "$wheelhouse"
-          cleanup
+          maturin build --release --locked --out "$wheelhouse"
           core_wheel="$(find "$wheelhouse" -name 'adam_core-*.whl' -print -quit)"
           assist_wheel="$(find "$wheelhouse" -name 'adam_assist-*.whl' -print -quit)"
           test -n "$core_wheel" && test -n "$assist_wheel"
           python -m pip install "$core_wheel" "${assist_wheel}[dev]"
           python migration/scripts/verify_dev_environment.py --require-wheel
-      - name: Verify transitional workflow policy
+      - name: Verify release-ready workflow policy
         run: python migration/scripts/verify_workflow_policy.py
       - name: Verify installed versions and wheel dependency floor
         run: |
@@ -110,10 +95,11 @@ jobs:
           black --check src/adam_assist tests
           isort --check-only src/adam_assist tests
           mypy --strict src/adam_assist
-      - name: Verify no generated lock or tracked mutation survived
+      - name: Verify authentic locks and clean tracked state
         run: |
-          test ! -e pdm.lock
-          test ! -e rust/adam_assist_rs/Cargo.lock
+          pdm lock --check
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_VERSION" --python-lock --rust-lock
           git diff --exit-code
       - name: Upload exact source-pair wheels
         uses: actions/upload-artifact@v4
@@ -133,12 +119,12 @@ jobs:
           path-to-lcov: coverage.xml
 
   rust-quality:
-    name: Exact Core source-paired Rust quality
+    name: Public Core registry-locked Rust quality
     runs-on: ubuntu-latest
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout exact reviewed adam-core source pair
+      - name: Checkout exact public adam-core release
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -154,49 +140,39 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          trap 'rm -f rust/adam_assist_rs/Cargo.lock' EXIT
           python migration/scripts/verify_source_pair_contract.py \
             --core-tree .source-pair/adam-core
-          core="$GITHUB_WORKSPACE/.source-pair/adam-core/rust"
-          configs=(
-            --config "patch.crates-io.adam_core.path='$core/adam_core'"
-            --config "patch.crates-io.adam_core_rs_coords.path='$core/adam_core_rs_coords'"
-            --config "patch.crates-io.adam_core_rs_spice.path='$core/adam_core_rs_spice'"
-            --config "patch.crates-io.adam_core_rs_kernel_data.path='$core/adam_core_rs_kernel_data'"
-          )
           manifest=rust/adam_assist_rs/Cargo.toml
           cargo fmt --manifest-path "$manifest" -- --check
-          cargo check --manifest-path "$manifest" --all-targets "${configs[@]}"
-          cargo check --manifest-path "$manifest" --all-targets \
-            --no-default-features "${configs[@]}"
-          cargo check --manifest-path "$manifest" --all-targets \
-            --all-features "${configs[@]}"
-          cargo clippy --manifest-path "$manifest" --all-targets \
-            "${configs[@]}" -- -D warnings
-          cargo clippy --manifest-path "$manifest" --all-targets \
-            --no-default-features "${configs[@]}" -- -D warnings
-          cargo clippy --manifest-path "$manifest" --all-targets \
-            --all-features "${configs[@]}" -- -D warnings
-          cargo test --manifest-path "$manifest" --all-targets "${configs[@]}"
-          cargo test --manifest-path "$manifest" --all-targets \
-            --no-default-features "${configs[@]}"
-          cargo test --manifest-path "$manifest" --all-targets \
-            --all-features "${configs[@]}"
-          cargo test --manifest-path "$manifest" --doc "${configs[@]}"
-          cargo test --manifest-path "$manifest" --doc \
-            --no-default-features "${configs[@]}"
-          cargo test --manifest-path "$manifest" --doc \
-            --all-features "${configs[@]}"
+          cargo check --manifest-path "$manifest" --locked --all-targets
+          cargo check --manifest-path "$manifest" --locked --all-targets \
+            --no-default-features
+          cargo check --manifest-path "$manifest" --locked --all-targets \
+            --all-features
+          cargo clippy --manifest-path "$manifest" --locked --all-targets \
+            -- -D warnings
+          cargo clippy --manifest-path "$manifest" --locked --all-targets \
+            --no-default-features -- -D warnings
+          cargo clippy --manifest-path "$manifest" --locked --all-targets \
+            --all-features -- -D warnings
+          cargo test --manifest-path "$manifest" --locked --all-targets
+          cargo test --manifest-path "$manifest" --locked --all-targets \
+            --no-default-features
+          cargo test --manifest-path "$manifest" --locked --all-targets \
+            --all-features
+          cargo test --manifest-path "$manifest" --locked --doc
+          cargo test --manifest-path "$manifest" --locked --doc \
+            --no-default-features
+          cargo test --manifest-path "$manifest" --locked --doc \
+            --all-features
           RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
-            --no-deps "${configs[@]}"
+            --locked --no-deps
           RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
-            --no-deps --no-default-features "${configs[@]}"
+            --locked --no-deps --no-default-features
           RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
-            --no-deps --all-features "${configs[@]}"
-          rm -f rust/adam_assist_rs/Cargo.lock
+            --locked --no-deps --all-features
           git diff --exit-code
           git -C .source-pair/adam-core diff --exit-code
-          test ! -e rust/adam_assist_rs/Cargo.lock
 
   benchmark:
     runs-on: ubuntu-latest

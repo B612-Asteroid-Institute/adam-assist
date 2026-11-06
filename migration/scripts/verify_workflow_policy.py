@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Verify exact-source CI and preserved-but-disabled release workflows.
+"""Verify public-release CI and manually gated release workflows.
 
-Until Core 0.7 is public and authentic registry locks exist, exact-source CI is
-the only active workflow. Reviewed release infrastructure remains manual-only,
-and every release job requires one unset-by-default repository variable.
+Core 0.7 and authentic registry locks are public. Release infrastructure stays
+workflow-dispatch-only, and every release job requires one bounded-window
+repository variable.
 """
 
 from __future__ import annotations
@@ -54,8 +54,8 @@ EXPECTED_RELEASE_JOB_CONDITIONS = {
         "latest-stable-compatibility": READINESS_CONDITION,
     },
 }
-RELEASE_AUTOMATION_STATE = "present-but-disabled-until-core-0.7.0-is-public-and-locked"
-CORE_REF = "0b49938eb0be04214a8d07b206227d31b248394a"
+RELEASE_AUTOMATION_STATE = "present-and-release-eligible-when-enabled"
+CORE_REF = "a6478f2f280c266d7a5d1442997eb520fc20888f"
 CORE_REPOSITORY = "B612-Asteroid-Institute/adam_core"
 ALLOWED_ACTIONS = {
     "actions/checkout@v4",
@@ -81,10 +81,9 @@ SECRET_IDENTIFIER = re.compile(r"(?i)\bsecrets\b")
 INERT_RELEASE_HELPERS = (
     "prepare_pypi_upload",
     "publish_crate_archive",
-    "verify_registry_locks",
     "verify_release",
 )
-WORKFLOW_SHA256 = "fe5124fac493fd064238e92a0887c41fe404ba091a5bd7843f3af49206006e6b"
+WORKFLOW_SHA256 = "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644"
 REQUIRED_RUN_SHA256 = {
     (
         "source-pair",
@@ -97,10 +96,10 @@ REQUIRED_RUN_SHA256 = {
     (
         "source-pair",
         "Build Core and ASSIST wheels from the exact pair",
-    ): "b0ecdd18b2b8f304dde2e2dd577cea58e57a45113d51c93d35671bcb966c68eb",
+    ): "66f4e271d07b83cce0b944c751fc6342a99b2b1104155d38dd73b198a4592f18",
     (
         "source-pair",
-        "Verify transitional workflow policy",
+        "Verify release-ready workflow policy",
     ): "50a51d5358b2c995ee1ad421cfe663df89c6201557ca3775a85c1aedc41638d7",
     (
         "source-pair",
@@ -120,12 +119,12 @@ REQUIRED_RUN_SHA256 = {
     ): "d88ab56c0c5025ae3cc64775839be5eec21b5c0a153ddacb1be125786dd0e23c",
     (
         "source-pair",
-        "Verify no generated lock or tracked mutation survived",
-    ): "3d7fc20fb73ddab51a7d4b84729d3c0e9452d380edc4c3776120d9a304567c57",
+        "Verify authentic locks and clean tracked state",
+    ): "0e8e74c6cd4895f7d8d829d391264d9696c5ef02fb322606be805b6cd0bdf0b3",
     (
         "rust-quality",
         "Verify source pair and run Rust gates",
-    ): "f91d2dfc08e6e1ae99d9edae9cd9cdb97ba6c3af6b39c0f1624576ff9b3a4ab0",
+    ): "15702fec0f685e2f85a6720e4833406bbd6053ebe8e280752a5ce04a90930448",
     (
         "benchmark",
         "Install the already-tested source-pair wheels",
@@ -142,7 +141,7 @@ REQUIRED_RUN_SHA256 = {
 
 
 class WorkflowPolicyError(ValueError):
-    """Raised when transitional CI could publish or skip required validation."""
+    """Raised when CI could publish without authorization or skip validation."""
 
 
 def _fail(location: str, message: str) -> None:
@@ -225,7 +224,7 @@ def _require_condition(step: Mapping[str, Any], expected: str | None) -> None:
 
 
 def _verify_checkout(job: Mapping[str, Any], location: str) -> None:
-    step = _step_by_name(job, "Checkout exact reviewed adam-core source pair")
+    step = _step_by_name(job, "Checkout exact public adam-core release")
     if step.get("uses") != "actions/checkout@v4" or step.get("with") != {
         "repository": CORE_REPOSITORY,
         "ref": "${{ env.ADAM_CORE_SOURCE_REF }}",
@@ -373,9 +372,9 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
     for name in (
         "Verify source-pair contract",
         "Build Core and ASSIST wheels from the exact pair",
-        "Verify transitional workflow policy",
+        "Verify release-ready workflow policy",
         "Verify installed versions and wheel dependency floor",
-        "Verify no generated lock or tracked mutation survived",
+        "Verify authentic locks and clean tracked state",
     ):
         _require_condition(_step_by_name(source, name), None)
     for name in ("Verify source pair and run Rust gates",):
@@ -395,7 +394,7 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
         "always()",
     )
 
-    policy = _step_by_name(source, "Verify transitional workflow policy")
+    policy = _step_by_name(source, "Verify release-ready workflow policy")
     if _run(policy).strip() != "python migration/scripts/verify_workflow_policy.py":
         _fail(NORMAL, "normal CI must execute this policy exactly")
     contract = _run(_step_by_name(source, "Verify source-pair contract"))
@@ -434,7 +433,7 @@ def _input_default(inputs: Mapping[str, Any], name: str, workflow: str) -> Any:
     return entry.get("default")
 
 
-def _verify_disabled_release_workflow(name: str, workflow: Mapping[str, Any]) -> None:
+def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> None:
     inputs = _dispatch_inputs(workflow, name)
     jobs = workflow.get("jobs")
     if not isinstance(jobs, Mapping) or not jobs:
@@ -454,6 +453,22 @@ def _verify_disabled_release_workflow(name: str, workflow: Mapping[str, Any]) ->
     for value in _walk(workflow):
         if isinstance(value, str) and SECRET_IDENTIFIER.search(value):
             _fail(name, "release workflows may not use repository secrets")
+
+    floor = jobs["compatibility-floor"]
+    source_pair = _step_by_name(floor, "Verify exact public-release source-pair state")
+    if (
+        _run(source_pair).strip()
+        != "python migration/scripts/verify_source_pair_contract.py"
+    ):
+        _fail(name, "compatibility floor must verify the exact public source pair")
+    locks = _run(_step_by_name(floor, "Verify authentic Core registry locks"))
+    if (
+        "verify_registry_locks.py" not in locks
+        or "--python-lock --rust-lock" not in locks
+    ):
+        _fail(name, "compatibility floor must verify both authentic registry locks")
+    if any(re.search(r"(?m)^\s*exit\s+1\s*$", _run(step)) for step in _steps(floor)):
+        _fail(name, "compatibility floor may not retain the intentional failure")
 
     if name == "publish-rust-crate.yml":
         expected = {
@@ -511,17 +526,17 @@ def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> Non
             _fail(NORMAL, "write/id-token permissions are forbidden in active CI")
     _verify_normal(workflow)
     for name in RELEASE_WORKFLOWS:
-        _verify_disabled_release_workflow(name, workflows[name])
+        _verify_gated_release_workflow(name, workflows[name])
 
 
 def verify(root: Path = ROOT) -> None:
     contract = json.loads(
         (root / "migration" / "source_pair_contract.json").read_text()
     )
-    if contract.get("registry_state") != "awaiting-core-0.7.0-publication":
+    if contract.get("registry_state") != "core-0.7.0-public-and-verified":
         _fail(
             "source_pair_contract",
-            "workflow policy applies only to registry transition",
+            "workflow policy requires the verified public Core release",
         )
     if contract.get("release_automation") != RELEASE_AUTOMATION_STATE:
         _fail(
@@ -542,7 +557,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args()
     verify(args.root.resolve())
-    print("verified active CI and gated release-workflow transition policy")
+    print("verified active CI and gated release-ready workflow policy")
 
 
 if __name__ == "__main__":

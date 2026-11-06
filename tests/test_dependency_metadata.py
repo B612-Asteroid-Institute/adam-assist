@@ -145,17 +145,16 @@ def test_dependencies_declare_core_070_floor() -> None:
     assert not (ROOT / "rust" / "vendor").exists()
 
 
-def test_prerelease_source_pair_has_no_stale_registry_locks() -> None:
-    assert not (ROOT / "pdm.lock").exists()
-    assert not (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").exists()
+def test_public_source_pair_has_authentic_registry_locks() -> None:
+    assert (ROOT / "pdm.lock").is_file()
+    assert (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").is_file()
     contract = verify_source_pair()
     assert contract["core_version"] == "0.7.0"
-    assert contract["core_commit"] == "0b49938eb0be04214a8d07b206227d31b248394a"
-    assert contract["lock_state"] == "absent-until-core-0.7.0-is-public"
-    assert contract["source_pair_status"] == "exact-reviewed-source"
-    assert contract["release_automation"] == (
-        "present-but-disabled-until-core-0.7.0-is-public-and-locked"
-    )
+    assert contract["core_commit"] == "a6478f2f280c266d7a5d1442997eb520fc20888f"
+    assert contract["lock_state"] == "registry-only-core-0.7.0-locked"
+    assert contract["registry_state"] == "core-0.7.0-public-and-verified"
+    assert contract["source_pair_status"] == "exact-public-release"
+    assert contract["release_automation"] == "present-and-release-eligible-when-enabled"
 
 
 def test_packaged_rust_fixture_matches_frozen_migration_evidence() -> None:
@@ -342,7 +341,7 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
 
 
 def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
-    core_ref = "0b49938eb0be04214a8d07b206227d31b248394a"
+    core_ref = "a6478f2f280c266d7a5d1442997eb520fc20888f"
     readme = (ROOT / "README.md").read_text()
     crate_readme = (ROOT / "rust" / "adam_assist_rs" / "README.md").read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
@@ -405,16 +404,12 @@ def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     assert "src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}" in migration
     assert "ADAM_ASSIST_RELEASES_ENABLED" in release_tooling
     assert "verify_source_pair_contract.py --core-tree" in release_tooling
-    for crate in (
-        "adam_core",
-        "adam_core_rs_coords",
-        "adam_core_rs_spice",
-        "adam_core_rs_kernel_data",
-    ):
-        assert f"patch.crates-io.{crate}.path" in release_tooling
-    assert "rm -f rust/adam_assist_rs/Cargo.lock" in release_tooling
+    assert "pdm lock --check" in release_tooling
+    assert "verify_registry_locks.py" in release_tooling
+    assert "cargo test --manifest-path" in release_tooling
+    assert "--locked" in release_tooling
     assert 'test -z "$(git status --porcelain)"' in release_tooling
-    assert "Exact Core source pair" in normal_ci
+    assert "Exact public Core release" in normal_ci
     assert "exit 1" not in normal_ci
     workflows = sorted(
         path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")

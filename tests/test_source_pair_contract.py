@@ -17,10 +17,10 @@ def test_source_pair_contract_accepts_current_tree() -> None:
     contract = verify()
     assert contract["assist_version"] == "0.6.0"
     assert contract["core_version"] == "0.7.0"
-    assert contract["source_pair_status"] == "exact-reviewed-source"
-    assert contract["release_automation"] == (
-        "present-but-disabled-until-core-0.7.0-is-public-and-locked"
-    )
+    assert contract["source_pair_status"] == "exact-public-release"
+    assert contract["lock_state"] == "registry-only-core-0.7.0-locked"
+    assert contract["registry_state"] == "core-0.7.0-public-and-verified"
+    assert contract["release_automation"] == "present-and-release-eligible-when-enabled"
 
 
 def test_every_cargo_dependency_table_rejects_mixed_core_versions() -> None:
@@ -122,7 +122,9 @@ def _copy_contract_tree(tmp_path: Path) -> Path:
     for relative in (
         Path("pyproject.toml"),
         Path("migration/source_pair_contract.json"),
+        Path("pdm.lock"),
         Path("rust/adam_assist_rs/Cargo.toml"),
+        Path("rust/adam_assist_rs/Cargo.lock"),
         Path(".github/workflows/pip-build-lint-test-coverage.yml"),
     ):
         destination = tmp_path / relative
@@ -310,6 +312,22 @@ SOURCE_CONTRACT_MUTATIONS = (
         _append(
             "pyproject.toml",
             '\n[tool.poetry.dependencies]\nadam-core = { git = "https://example.invalid/core" }\n',
+        ),
+    ),
+    (
+        "stale-public-core-ref",
+        _replace(
+            "migration/source_pair_contract.json",
+            "a6478f2f280c266d7a5d1442997eb520fc20888f",
+            "0b49938eb0be04214a8d07b206227d31b248394a",
+        ),
+    ),
+    (
+        "stale-absent-lock-state",
+        _replace(
+            "migration/source_pair_contract.json",
+            "registry-only-core-0.7.0-locked",
+            "absent-until-core-0.7.0-is-public",
         ),
     ),
     ("R01-stale-pdm-lock", _write("pdm.lock", "[metadata]\nlock_version = '4.5'\n")),

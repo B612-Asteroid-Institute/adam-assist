@@ -14,24 +14,25 @@ env:
   PIP_ONLY_BINARY: ":all:"
   MATURIN_PEP517_ARGS: "--locked"
   ADAM_CORE_RELEASE_VERSION: "0.7.0"
-  ADAM_CORE_ACCEPTANCE_REF: "0b49938eb0be04214a8d07b206227d31b248394a"
+  ADAM_CORE_ACCEPTANCE_REF: "a6478f2f280c266d7a5d1442997eb520fc20888f"
   ADAM_ASSIST_RELEASE_VERSION: "0.6.0"
 
 jobs:
-  # Transition gate: ADAM_ASSIST_RELEASES_ENABLED is intentionally unset. Set it
-  # only after public Core 0.7 artifacts, authentic reviewed registry locks,
-  # verified environments, and separate publication authorization exist.
+  # Release jobs stay manual and run only during the bounded readiness window
+  # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
   compatibility-floor:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
-    name: Block release until propagator-v2 Core release exists
+    name: Verify public Core 0.7 registry floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify explicit pre-release lock state
+      - name: Verify exact public-release source-pair state
         run: python migration/scripts/verify_source_pair_contract.py
-      - run: |
-          echo "Core 0.7.0 is not yet public; registry locks/checksums are unavailable" >&2
-          exit 1
+      - name: Verify authentic Core registry locks
+        run: |
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_RELEASE_VERSION" \
+            --python-lock --rust-lock
 
   artifact-acceptance:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
@@ -52,7 +53,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Checkout provisional adam-core acceptance tooling
+      - name: Checkout released adam-core acceptance tooling
         uses: actions/checkout@v4
         with:
           repository: B612-Asteroid-Institute/adam_core
@@ -75,7 +76,7 @@ jobs:
           if actual != expected:
               raise SystemExit(f"runner architecture mismatch: {actual} != {expected}")
           PY
-      - name: Verify provisional exact Core acceptance tooling
+      - name: Verify exact released Core acceptance tooling
         shell: bash
         run: |
           set -euo pipefail
@@ -89,7 +90,7 @@ jobs:
           root = Path("adam-core-acceptance/migration/scripts")
           expected = {
               "run_clean_room_artifact_acceptance.py": (
-                  "464859e82bd9aea975f1209b040a97299230dd37bf370ab0132beefcbc29435f"
+                  "e7c4286b3579c45e398f45814555d89fa836c46e638ae9840a3961b9916031da"
               ),
               "clean_room_artifact_smoke.py": (
                   "bb2df3751929b4e0391e8300d7e51eb5815f1b0b3c012b8a070052b362b24b77"

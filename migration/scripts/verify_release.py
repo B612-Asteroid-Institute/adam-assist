@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Inert post-Core-publication release metadata verifier.
-
-No enabled workflow invokes this module during the Core 0.7 transition.
-"""
+"""Verify Assist release metadata and public Core prerequisites."""
 
 from __future__ import annotations
 

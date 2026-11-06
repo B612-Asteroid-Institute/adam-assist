@@ -193,9 +193,9 @@ MUTATIONS = [
     ),
     Mutation(
         "checkout-drift",
-        lambda w: _step(
-            w, "source-pair", "Checkout exact reviewed adam-core source pair"
-        )["with"].__setitem__("ref", "main"),
+        lambda w: _step(w, "source-pair", "Checkout exact public adam-core release")[
+            "with"
+        ].__setitem__("ref", "main"),
     ),
     Mutation(
         "drop-source-contract",
@@ -234,7 +234,7 @@ MUTATIONS = [
 ]
 
 
-def test_transition_policy_accepts_active_ci_and_disabled_release_workflows() -> None:
+def test_release_ready_policy_accepts_active_ci_and_gated_release_workflows() -> None:
     verify_workflow_documents(BASE)
 
 
@@ -320,8 +320,31 @@ def test_release_workflows_reject_stale_core_versions(name: str) -> None:
         verify_workflow_documents(workflows)
 
 
+@pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
+def test_release_workflows_require_public_source_and_registry_floor(name: str) -> None:
+    workflows = deepcopy(BASE)
+    floor = workflows[name]["jobs"]["compatibility-floor"]
+    floor["steps"] = [
+        step
+        for step in floor["steps"]
+        if step.get("name") != "Verify authentic Core registry locks"
+    ]
+    with pytest.raises(WorkflowPolicyError, match="authentic Core registry locks"):
+        verify_workflow_documents(workflows)
+
+    workflows = deepcopy(BASE)
+    floor = workflows[name]["jobs"]["compatibility-floor"]
+    next(
+        step
+        for step in floor["steps"]
+        if step.get("name") == "Verify exact public-release source-pair state"
+    )["run"] = "echo skipped"
+    with pytest.raises(WorkflowPolicyError, match="exact public source pair"):
+        verify_workflow_documents(workflows)
+
+
 @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda value: value.id)
-def test_transition_policy_rejects_mutations(mutation: Mutation) -> None:
+def test_release_ready_policy_rejects_mutations(mutation: Mutation) -> None:
     workflows = deepcopy(BASE)
     mutation.apply(workflows)
     with pytest.raises(WorkflowPolicyError):
@@ -463,7 +486,7 @@ REVIEW_GAP_MUTATIONS = [
 
 
 @pytest.mark.parametrize("mutation", REVIEW_GAP_MUTATIONS, ids=lambda value: value.id)
-def test_transition_policy_rejects_review_gap_mutations(mutation: Mutation) -> None:
+def test_release_ready_policy_rejects_review_gap_mutations(mutation: Mutation) -> None:
     workflows = deepcopy(BASE)
     mutation.apply(workflows)
     with pytest.raises(WorkflowPolicyError):

@@ -12,20 +12,21 @@ env:
   RELEASE_CHANNEL: stable
 
 jobs:
-  # Transition gate: ADAM_ASSIST_RELEASES_ENABLED is intentionally unset. Set it
-  # only after public Core 0.7 artifacts, authentic reviewed registry locks,
-  # verified environments, and separate publication authorization exist.
+  # Release jobs stay manual and run only during the bounded readiness window
+  # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
   compatibility-floor:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
-    name: Block release until propagator-v2 Core crate exists
+    name: Verify public Core 0.7 registry floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify explicit pre-release lock state
+      - name: Verify exact public-release source-pair state
         run: python migration/scripts/verify_source_pair_contract.py
-      - run: |
-          echo "Core 0.7.0 is not yet public; registry locks/checksums are unavailable" >&2
-          exit 1
+      - name: Verify authentic Core registry locks
+        run: |
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$CORE_RUST_VERSION" \
+            --python-lock --rust-lock
 
   package-and-test:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}

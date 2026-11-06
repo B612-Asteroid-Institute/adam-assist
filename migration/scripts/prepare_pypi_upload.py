@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Inert post-Core-publication PyPI artifact-preparation helper.
-
-No enabled workflow invokes this module during the Core 0.7 transition.
-"""
+"""Validate and stage accepted wheels for bounded manual PyPI publication."""
 
 from __future__ import annotations
 

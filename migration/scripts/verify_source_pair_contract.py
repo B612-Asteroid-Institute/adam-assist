@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the exact reviewed-source adam-core/adam-assist pairing contract."""
+"""Verify the exact public adam-core/adam-assist release-pair contract."""
 
 from __future__ import annotations
 
@@ -159,13 +159,13 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "schema_version": 1,
         "assist_version": "0.6.0",
         "core_version": "0.7.0",
-        "core_commit": "0b49938eb0be04214a8d07b206227d31b248394a",
+        "core_commit": "a6478f2f280c266d7a5d1442997eb520fc20888f",
         "capsule": "adam_core.propagator.v2",
-        "registry_state": "awaiting-core-0.7.0-publication",
-        "lock_state": "absent-until-core-0.7.0-is-public",
-        "source_pair_status": "exact-reviewed-source",
-        "release_automation": "present-but-disabled-until-core-0.7.0-is-public-and-locked",
-        "workflow_sha256": "fe5124fac493fd064238e92a0887c41fe404ba091a5bd7843f3af49206006e6b",
+        "registry_state": "core-0.7.0-public-and-verified",
+        "lock_state": "registry-only-core-0.7.0-locked",
+        "source_pair_status": "exact-public-release",
+        "release_automation": "present-and-release-eligible-when-enabled",
+        "workflow_sha256": "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")
@@ -208,22 +208,42 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
     if overrides:
         raise ValueError(f"Cargo patch/replace tables are forbidden: {overrides!r}")
 
-    forbidden_locks = {
+    required_locks = {
         root / "pdm.lock",
-        root / "uv.lock",
-        root / "Cargo.lock",
         root / "rust" / "adam_assist_rs" / "Cargo.lock",
     }
-    forbidden_locks.update(root.glob("**/.cargo/config"))
-    forbidden_locks.update(root.glob("**/.cargo/config.toml"))
+    missing_locks = sorted(
+        str(path.relative_to(root)) for path in required_locks if not path.is_file()
+    )
+    if missing_locks:
+        raise ValueError(
+            "public release pairing requires authentic registry locks: "
+            + ", ".join(missing_locks)
+        )
+    forbidden_state = {root / "uv.lock", root / "Cargo.lock"}
+    forbidden_state.update(root.glob("**/.cargo/config"))
+    forbidden_state.update(root.glob("**/.cargo/config.toml"))
     present = sorted(
-        str(path.relative_to(root)) for path in forbidden_locks if path.exists()
+        str(path.relative_to(root)) for path in forbidden_state if path.exists()
     )
     if present:
         raise ValueError(
-            "pre-release source pairing must not retain registry locks or Cargo config overrides: "
+            "release pairing forbids alternate locks and Cargo config overrides: "
             + ", ".join(present)
         )
+
+    if __package__:
+        from .verify_registry_locks import verify_python_lock, verify_rust_lock
+    else:
+        import sys
+
+        sys.path.insert(0, str(root))
+        from migration.scripts.verify_registry_locks import (
+            verify_python_lock,
+            verify_rust_lock,
+        )
+    verify_python_lock(root, str(contract["core_version"]))
+    verify_rust_lock(root, str(contract["core_version"]))
 
     if core_tree is not None:
         core_tree = core_tree.resolve()

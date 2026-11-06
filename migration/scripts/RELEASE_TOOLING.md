@@ -1,42 +1,44 @@
-# Preserved but disabled release tooling
+# Registry-locked release tooling
 
-The release-related Python modules and reviewed GitHub Actions workflows remain
-in the repository so the release infrastructure is not discarded during the
-Core 0.7 transition. Exact-source CI is the only active workflow. Every release
-job requires the unset-by-default repository variable
+Adam-core `0.7.0` is public and independently verified at release commit
+`a6478f2f280c266d7a5d1442997eb520fc20888f`. The committed PDM and Cargo locks
+resolve only the corresponding public PyPI wheels and crates.io archives, with
+registry hashes/checksums and no path, Git, URL, patch, or replacement source.
+
+Release-candidate and publication workflows remain `workflow_dispatch`-only.
+Every release job requires the bounded repository variable
 `ADAM_ASSIST_RELEASES_ENABLED` to equal `true`; `publish-pypi` additionally
-retains its `dry_run == false` condition.
+retains its `dry_run == false` condition. The variable is configured only for
+the reviewed release window after environment protections and the exact final
+candidate are accepted. Enabling it does not itself authorize a registry
+upload, tag, or GitHub release.
 
-The variable is not configured. It may be enabled only after adam-core 0.7.0 is
-public, authentic PyPI and crates.io locks are committed and reviewed, release
-environment protections are verified, and separate publication authorization
-is granted. Enabling a workflow does not itself authorize a registry upload,
-tag, or GitHub release.
+## Public Core release and lock validation
 
-## Exact-source Core validation
-
-Before registry artifacts exist, use one detached adam-core tree at the exact
-reviewed commit for every Core crate. The source-pair verifier checks that tree
-and the package metadata before Cargo runs. Patched Cargo commands create a
-temporary untracked lock; remove it afterward and require a clean repository:
+Use the exact public Core release checkout as the source/provenance authority,
+then verify both committed locks and run Cargo without overrides:
 
 ```console
-git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-0b49938e
-git -C ../adam-core-0b49938e checkout --detach 0b49938eb0be04214a8d07b206227d31b248394a
-CORE="$(cd ../adam-core-0b49938e && pwd)"
-test "$(git -C "$CORE" rev-parse HEAD)" = 0b49938eb0be04214a8d07b206227d31b248394a
+git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-a6478f2f
+git -C ../adam-core-a6478f2f checkout --detach a6478f2f280c266d7a5d1442997eb520fc20888f
+CORE="$(cd ../adam-core-a6478f2f && pwd)"
+test "$(git -C "$CORE" rev-parse HEAD)" = a6478f2f280c266d7a5d1442997eb520fc20888f
+test "$(git -C "$CORE" rev-parse 'v0.7.0^{commit}')" = a6478f2f280c266d7a5d1442997eb520fc20888f
 python migration/scripts/verify_source_pair_contract.py --core-tree "$CORE"
 
+pdm lock --check
+python migration/scripts/verify_registry_locks.py \
+  --core-version 0.7.0 --python-lock --rust-lock
 cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
-  --all-targets --features python,extension-module \
-  --config "patch.crates-io.adam_core.path='$CORE/rust/adam_core'" \
-  --config "patch.crates-io.adam_core_rs_coords.path='$CORE/rust/adam_core_rs_coords'" \
-  --config "patch.crates-io.adam_core_rs_spice.path='$CORE/rust/adam_core_rs_spice'" \
-  --config "patch.crates-io.adam_core_rs_kernel_data.path='$CORE/rust/adam_core_rs_kernel_data'"
-rm -f rust/adam_assist_rs/Cargo.lock
+  --locked --all-targets --features python
+cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
+  --locked --lib --no-default-features
 test -z "$(git status --porcelain)"
 ```
 
-This command is a focused all-feature test lane, not the complete acceptance
-matrix. Active CI separately runs formatting, default/all/no-default checks,
-warning-denied Clippy, tests, doctests, and warning-denied documentation.
+The release-candidate workflows repeat these checks before building the one
+crate archive and 12 platform/Python wheel artifacts. Publication workflows
+accept only those successful exact-commit candidate runs, reverify checksums,
+and upload the accepted bytes without rebuilding. Rust 1.87 remains the
+authoritative MSRV for formatting, strict Clippy, tests, documentation,
+packaging, and clean consumers.
