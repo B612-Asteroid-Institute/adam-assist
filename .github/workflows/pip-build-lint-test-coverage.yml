@@ -9,111 +9,103 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  MATURIN_PEP517_ARGS: "--locked"
+  ADAM_CORE_VERSION: "0.7.0"
+  ADAM_CORE_SOURCE_REF: "a6478f2f280c266d7a5d1442997eb520fc20888f"
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
-      - name: Get git tags
-        run: git fetch --prune --unshallow --tags
-      - name: Set up PDM (cached)
-        if: ${{ hashFiles('**/pdm.lock') != '' }}
-        uses: pdm-project/setup-pdm@v4
-        with:
-          version: '2.29.2'
-          python-version: '3.12'
-          cache: true
-          cache-dependency-path: '**/pdm.lock'
-      - name: Set up PDM (no cache)
-        if: ${{ hashFiles('**/pdm.lock') == '' }}
-        uses: pdm-project/setup-pdm@v4
-        with:
-          version: '2.29.2'
-          python-version: '3.12'
-      - name: Install dev dependencies
-        run: pdm install --frozen-lockfile -G dev
-      - name: Lint
-        run: pdm run lint
-      - name: Typecheck
-        run: pdm run typecheck
-
-  rust-quality:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@1.87.0
-        with:
-          components: rustfmt, clippy
-      - name: Set up PDM
-        uses: pdm-project/setup-pdm@v4
-        with:
-          version: '2.29.2'
-          python-version: '3.12'
-      - name: Install dev dependencies
-        run: pdm install --frozen-lockfile -G dev
-      - name: Rust format, clippy, and tests
-        run: pdm run rust-quality
-
-  test:
+  source-pair:
+    name: Exact public Core release / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: [ '3.11', '3.12', '3.13' ]
-    defaults:
-      run:
-        shell: bash -l {0}
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
-      - name: Get git tags
-        run: git fetch --prune --unshallow --tags
-      - name: Set up PDM (cached)
-        if: ${{ hashFiles('**/pdm.lock') != '' }}
-        uses: pdm-project/setup-pdm@v4
+      - name: Checkout adam-assist
+        uses: actions/checkout@v4
+      - name: Checkout exact public adam-core release
+        uses: actions/checkout@v4
         with:
-          version: '2.29.2'
-          python-version: ${{ matrix.python-version }}
-          cache: true
-          cache-dependency-path: '**/pdm.lock'
-      - name: Set up PDM (no cache)
-        if: ${{ hashFiles('**/pdm.lock') == '' }}
-        uses: pdm-project/setup-pdm@v4
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_SOURCE_REF }}
+          path: .source-pair/adam-core
+      - uses: actions/setup-python@v5
         with:
-          version: '2.29.2'
           python-version: ${{ matrix.python-version }}
-      - name: Install dev dependencies
-        run: pdm install --frozen-lockfile -G dev
-      - name: Run tests (no coverage)
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Verify source-pair contract
+        run: |
+          test "$(git -C .source-pair/adam-core rev-parse HEAD)" = "$ADAM_CORE_SOURCE_REF"
+          python migration/scripts/verify_source_pair_contract.py \
+            --core-tree .source-pair/adam-core
+      - name: Install build and test tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "maturin>=1.7,<2"
+      - name: Build Core and ASSIST wheels from the exact pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/source-pair-wheels"
+          mkdir -p "$wheelhouse"
+          (cd .source-pair/adam-core && maturin build --release --out "$wheelhouse")
+          maturin build --release --locked --out "$wheelhouse"
+          core_wheel="$(find "$wheelhouse" -name 'adam_core-*.whl' -print -quit)"
+          assist_wheel="$(find "$wheelhouse" -name 'adam_assist-*.whl' -print -quit)"
+          test -n "$core_wheel" && test -n "$assist_wheel"
+          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          python migration/scripts/verify_dev_environment.py --require-wheel
+      - name: Verify release-ready workflow policy
+        run: python migration/scripts/verify_workflow_policy.py
+      - name: Verify installed versions and wheel dependency floor
+        run: |
+          python - <<'PY'
+          from importlib import metadata
+          from packaging.requirements import Requirement
+
+          assert metadata.version("adam-core") == "0.7.0"
+          assert metadata.version("adam-assist") == "0.6.0"
+          requirements = {
+              Requirement(value).name: Requirement(value)
+              for value in metadata.requires("adam-assist") or []
+          }
+          core = requirements["adam-core"]
+          assert str(core.specifier) == "<0.8.0,>=0.7.0"
+          assert "0.7.0" in core.specifier
+          assert "0.8.0" not in core.specifier
+          PY
+      - name: Run non-live wheel tests
         if: matrix.python-version != '3.12'
-        run: pdm run test
-      - name: Run tests with coverage
+        run: python -m pytest --benchmark-skip -q tests
+      - name: Run non-live wheel tests with coverage
         if: matrix.python-version == '3.12'
-        run: pdm run coverage
+        run: python -m pytest --benchmark-skip --cov=adam_assist --cov-report=xml -q tests
+      - name: Lint and typecheck the source
+        if: matrix.python-version == '3.12'
+        run: |
+          ruff check src/adam_assist tests
+          black --check src/adam_assist tests
+          isort --check-only src/adam_assist tests
+          mypy --strict src/adam_assist
+      - name: Verify authentic locks and clean tracked state
+        run: |
+          pdm lock --check
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_VERSION" --python-lock --rust-lock
+          git diff --exit-code
+      - name: Upload exact source-pair wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-pair-wheels-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/source-pair-wheels/*.whl
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12' && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
@@ -126,44 +118,88 @@ jobs:
         with:
           path-to-lcov: coverage.xml
 
+  rust-quality:
+    name: Public Core registry-locked Rust quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout adam-assist
+        uses: actions/checkout@v4
+      - name: Checkout exact public adam-core release
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_SOURCE_REF }}
+          path: .source-pair/adam-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Verify source pair and run Rust gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python migration/scripts/verify_source_pair_contract.py \
+            --core-tree .source-pair/adam-core
+          manifest=rust/adam_assist_rs/Cargo.toml
+          cargo fmt --manifest-path "$manifest" -- --check
+          cargo check --manifest-path "$manifest" --locked --all-targets
+          cargo check --manifest-path "$manifest" --locked --all-targets \
+            --no-default-features
+          cargo check --manifest-path "$manifest" --locked --all-targets \
+            --all-features
+          cargo clippy --manifest-path "$manifest" --locked --all-targets \
+            -- -D warnings
+          cargo clippy --manifest-path "$manifest" --locked --all-targets \
+            --no-default-features -- -D warnings
+          cargo clippy --manifest-path "$manifest" --locked --all-targets \
+            --all-features -- -D warnings
+          cargo test --manifest-path "$manifest" --locked --all-targets
+          cargo test --manifest-path "$manifest" --locked --all-targets \
+            --no-default-features
+          cargo test --manifest-path "$manifest" --locked --all-targets \
+            --all-features
+          cargo test --manifest-path "$manifest" --locked --doc
+          cargo test --manifest-path "$manifest" --locked --doc \
+            --no-default-features
+          cargo test --manifest-path "$manifest" --locked --doc \
+            --all-features
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
+            --locked --no-deps
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
+            --locked --no-deps --no-default-features
+          RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
+            --locked --no-deps --all-features
+          git diff --exit-code
+          git -C .source-pair/adam-core diff --exit-code
+
   benchmark:
     runs-on: ubuntu-latest
-    needs: [ test, rust-quality ]
-    permissions:
-      contents: write
-      pull-requests: write
-    defaults:
-      run:
-        shell: bash -l {0}
+    needs: [source-pair, rust-quality]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Verify registry-only Core locks
-        run: python migration/scripts/verify_registry_locks.py --core-version 0.6.1 --python-lock --rust-lock
-      - name: Get git tags
-        run: git fetch --prune --unshallow --tags
-      - name: Set up PDM (cached)
-        if: ${{ hashFiles('**/pdm.lock') != '' }}
-        uses: pdm-project/setup-pdm@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          version: '2.29.2'
-          python-version: '3.12'
-          cache: true
-          cache-dependency-path: '**/pdm.lock'
-      - name: Set up PDM (no cache)
-        if: ${{ hashFiles('**/pdm.lock') == '' }}
-        uses: pdm-project/setup-pdm@v4
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
         with:
-          version: '2.29.2'
-          python-version: '3.12'
-      - name: Install dev dependencies
-        run: pdm install --frozen-lockfile -G dev
+          name: source-pair-wheels-3.12
+          path: source-pair-wheels
+      - name: Install the already-tested source-pair wheels
+        run: |
+          python -m pip install --upgrade pip
+          core_wheel="$(find source-pair-wheels -name 'adam_core-*.whl' -print -quit)"
+          assist_wheel="$(find source-pair-wheels -name 'adam_assist-*.whl' -print -quit)"
+          test -n "$core_wheel" && test -n "$assist_wheel"
+          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          python migration/scripts/verify_dev_environment.py --require-wheel
       - name: Run benchmarks
-        run: pdm run benchmark --benchmark-json bench.json
+        run: python -m pytest --benchmark-only --benchmark-json bench.json tests
       - name: Run current public/native benchmark smoke
-        run: pdm run benchmark-current-ci
+        run: python -m migration.scripts.benchmark_current --lanes tiny small large --repeats 5 --warmups 1 --require-native --output migration/artifacts/benchmark_current_assist_ci.json --markdown migration/artifacts/benchmark_current_assist_ci.md
       - name: Upload current-only benchmark artifact
-        if: always() && github.event_name == 'pull_request'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: assist-current-benchmark
@@ -171,30 +207,8 @@ jobs:
             migration/artifacts/benchmark_current_assist_ci.json
             migration/artifacts/benchmark_current_assist_ci.md
       - name: Upload benchmark artifact
-        if: github.event_name == 'pull_request'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bench-json
           path: bench.json
-      - name: Store main benchmark result
-        if: github.ref == 'refs/heads/main'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: Python Benchmark
-          tool: 'pytest'
-          output-file-path: bench.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          auto-push: true
-          gh-pages-branch: gh-pages
-      - name: Compare benchmarks
-        if: github.event_name == 'pull_request'
-        uses: benchmark-action/github-action-benchmark@v1
-        with:
-          name: Python Benchmark
-          tool: 'pytest'
-          output-file-path: bench.json
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          comment-always: true
-          fail-threshold: '200%'
-          alert-threshold: '150%'
-          auto-push: false

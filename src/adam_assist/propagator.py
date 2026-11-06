@@ -15,7 +15,7 @@ import hashlib
 import random
 from ctypes import c_uint32
 from pathlib import Path
-from typing import Any, Literal, TypeAlias, cast
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -38,12 +38,14 @@ from adam_core.observers.observers import Observers
 from adam_core.orbits.ephemeris import Ephemeris
 from adam_core.orbits.orbits import Orbits
 from adam_core.orbits.variants import VariantOrbits
+from adam_core.propagator.propagator import NativeBackend as _NativeBackend
 from adam_core.propagator.propagator import Propagator
 from adam_core.propagator.utils import ensure_input_origin_and_frame
 from adam_core.time import Timestamp
 from jpl_small_bodies_de441_n16 import de441_n16
 from naif_de440 import de440
 
+from ._native import CARGO_VERSION as _NATIVE_CARGO_VERSION
 from ._native import NativeAssistPropagator
 from .version import __version__ as __version__  # noqa: PLC0414
 
@@ -289,6 +291,39 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
     ``detect_collisions``/``calculate_impacts`` work with this propagator.
     """
 
+    #: adam-core runs its orbit-determination stages natively with ASSIST
+    #: dynamics through the external-propagator capsule (no Python call per
+    #: prediction). A subclass overriding propagation is not covered.
+    native_backend = _NativeBackend(
+        name="adam_assist",
+        version=_NATIVE_CARGO_VERSION,
+        work_units=frozenset({"propagator_capsule"}),
+    )
+
+    def propagator_capsule(self) -> Any:
+        """Return Core's private propagation-only ABI-v2 capsule.
+
+        The native descriptor includes immutable fingerprints of all IAS15
+        settings and the exact planetary/small-body kernel contents. Kernel
+        files are immutable package-managed resources and must remain unchanged
+        for the provider's lifetime. Construction binds the DAF file record,
+        comments, complete summary chain, mapped length, and retained file
+        identity around ASSIST's eager parse. Ordinary propagation or this
+        capsule request verifies that binding and hashes a stable snapshot of
+        the complete retained bytes.
+
+        Ordinary detectable replacement, truncation, corruption, or changes
+        between construction and first use return an error; exact restoration
+        on the original mapping recovers. Concurrent mutation is unsupported,
+        and these checks are not an adversarial filesystem security boundary.
+        Legitimate kernel updates require a new provider. Chebyshev data bytes
+        unread at construction remain live through ASSIST's mapping and are
+        intentionally adopted by this first complete fingerprint when the
+        eager/mapping binding is intact. Core owns OD orchestration and records
+        these identities in workflow provenance.
+        """
+        return self._native.propagator_capsule()
+
     def __init__(
         self,
         *args: object,
@@ -380,20 +415,18 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         orbits: OrbitTable,
         times: Timestamp,
     ) -> OrbitTable:
-        """Satisfy the adam-core <=0.5.5 private propagator contract.
+        """Private compatibility alias retained for the public adam-assist surface.
 
-        The public method remains the single implementation and performs the
-        one native Rust crossing. Newer adam-core releases make the public
-        method itself the abstract contract, while the published 0.5.5 base
-        class still requires this private hook before the class can be
-        instantiated.
+        The public ``propagate_orbits`` method remains the single
+        implementation and performs the native Rust crossing.
         """
         return self.propagate_orbits(orbits, times)
 
     def benchmark_last_native(
         self, reps: int, trials: int = 1, warmup_reps: int = 1
     ) -> tuple[str, list[list[float]]]:
-        """Time the last prepared propagation, ephemeris, collision, OD, or IOD operation.
+        """Time the last prepared propagation, ephemeris, or collision
+        operation.
 
         Samples are owned by Rust ``std::time::Instant``; Python/PyO3 input and
         output conversion occurred during the preceding public call and is not
@@ -612,352 +645,6 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
             non_gravitational_parameters=non_gravitational_parameters,
         )
 
-    def fit_least_squares(
-        self,
-        orbit: Orbits,
-        observations: Any,
-        *,
-        xtol: float = 1e-12,
-        ftol: float = 1e-12,
-        max_iterations: int = 100,
-        lt_tol: float = 1.0e-12,
-        eph_max_iter: int = 1000,
-        eph_tol: float = 1.0e-15,
-        stellar_aberration: bool = False,
-        max_lt_iter: int = 10,
-    ) -> tuple[Orbits, float, int, bool]:
-        """Backend-generic Gauss-Newton OD with the ASSIST propagator.
-
-        Mirrors the semantics of
-        ``adam_core.orbit_determination.fit_least_squares(orbit, observations,
-        propagator)`` for a single orbit: differentially corrects the orbit
-        state at its epoch against ``observations``
-        (``OrbitDeterminationObservations``: spherical astrometry with
-        covariance + observers). The Gauss-Newton driver lives in the
-        permissive core; this GPL package only supplies the ASSIST propagator
-        (each iteration batches the base + six perturbed candidates into one
-        same-epoch multi-particle ephemeris crossing). Returns
-        ``(fitted_orbit, chi2, iterations, converged)`` where the fitted orbit
-        carries the ``inv(J^T J)`` covariance in the input frame/origin.
-        """
-        assert len(orbit) == 1, "Only one orbit can be differentially corrected"
-        coordinates = orbit.coordinates
-        orbit_scale, orbit_days, orbit_nanos = _time_parts(coordinates.time)
-        observed = observations.coordinates
-        observers = observations.observers
-        observer_coordinates = observers.coordinates
-        observer_scale, observer_days, observer_nanos = _time_parts(
-            observer_coordinates.time
-        )
-        state, covariance, chi2, iterations, converged = (
-            self._native.fit_orbit_least_squares(
-                _string_column_to_list(orbit.orbit_id),
-                _optional_string_column_to_list(orbit.object_id),
-                np.ascontiguousarray(coordinates.values, dtype=np.float64),
-                _string_column_to_list(coordinates.origin.code),
-                coordinates.frame,
-                orbit_scale,
-                orbit_days,
-                orbit_nanos,
-                np.ascontiguousarray(observed.values, dtype=np.float64),
-                np.ascontiguousarray(
-                    observed.covariance.to_matrix().reshape(len(observed), 36),
-                    dtype=np.float64,
-                ),
-                _string_column_to_list(observers.code),
-                np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
-                _string_column_to_list(observer_coordinates.origin.code),
-                observer_coordinates.frame,
-                observer_scale,
-                observer_days,
-                observer_nanos,
-                xtol=xtol,
-                ftol=ftol,
-                max_iterations=max_iterations,
-                lt_tol=lt_tol,
-                eph_max_iter=eph_max_iter,
-                eph_tol=eph_tol,
-                stellar_aberration=stellar_aberration,
-                max_lt_iter=max_lt_iter,
-            )
-        )
-        state = np.asarray(state, dtype=np.float64)
-        covariance = np.asarray(covariance, dtype=np.float64).reshape(1, 6, 6)
-        fitted = Orbits.from_kwargs(
-            orbit_id=orbit.orbit_id,
-            object_id=orbit.object_id,
-            coordinates=CartesianCoordinates.from_kwargs(
-                x=[state[0]],
-                y=[state[1]],
-                z=[state[2]],
-                vx=[state[3]],
-                vy=[state[4]],
-                vz=[state[5]],
-                time=coordinates.time,
-                covariance=CoordinateCovariances.from_matrix(covariance),
-                origin=coordinates.origin,
-                frame=coordinates.frame,
-            ),
-        )
-        return fitted, float(chi2), int(iterations), bool(converged)
-
-    def _od_problem_args(self, orbit: Orbits, observations: Any) -> tuple[Any, ...]:
-        """Marshal the shared OD-problem arguments used by the fused fit,
-        od, and Vallado native work units."""
-        assert len(orbit) == 1, "Only one orbit can be differentially corrected"
-        coordinates = orbit.coordinates
-        orbit_scale, orbit_days, orbit_nanos = _time_parts(coordinates.time)
-        observed = observations.coordinates
-        observers = observations.observers
-        observer_coordinates = observers.coordinates
-        observer_scale, observer_days, observer_nanos = _time_parts(
-            observer_coordinates.time
-        )
-        return (
-            _string_column_to_list(orbit.orbit_id),
-            _optional_string_column_to_list(orbit.object_id),
-            np.ascontiguousarray(coordinates.values, dtype=np.float64),
-            _string_column_to_list(coordinates.origin.code),
-            coordinates.frame,
-            orbit_scale,
-            orbit_days,
-            orbit_nanos,
-            np.ascontiguousarray(observed.values, dtype=np.float64),
-            np.ascontiguousarray(
-                observed.covariance.to_matrix().reshape(len(observed), 36),
-                dtype=np.float64,
-            ),
-            _string_column_to_list(observers.code),
-            np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
-            _string_column_to_list(observer_coordinates.origin.code),
-            observer_coordinates.frame,
-            observer_scale,
-            observer_days,
-            observer_nanos,
-        )
-
-    def fit_least_squares_evaluated(
-        self,
-        orbit: Orbits,
-        observations: Any,
-        ignore: list[bool] | None = None,
-        *,
-        xtol: float = 1e-12,
-        ftol: float = 1e-12,
-        max_iterations: int = 100,
-        lt_tol: float = 1.0e-12,
-        eph_max_iter: int = 1000,
-        eph_tol: float = 1.0e-15,
-        stellar_aberration: bool = False,
-        max_lt_iter: int = 10,
-    ) -> dict[str, Any]:
-        """Fused ``fit_least_squares`` work unit (bead personal-dqk): one
-        native crossing runs the Gauss-Newton fit on the non-ignored subset
-        followed by the final ``evaluate_orbits``-style residual/statistics
-        pass over the full observation set.
-
-        Returns a plain dict of arrays for the adam-core public veneer:
-        ``state``, ``covariance``, ``fit_chi2``, ``iterations``,
-        ``converged``, ``residual_values``, ``residual_chi2``,
-        ``residual_dof``, ``residual_probability``, ``chi2``,
-        ``reduced_chi2``, ``arc_length``, ``num_obs``, ``outlier``.
-        """
-        if ignore is None:
-            ignore = [False] * len(observations)
-        return cast(
-            dict[str, Any],
-            self._native.fit_orbit_least_squares_evaluated(
-                *self._od_problem_args(orbit, observations),
-                list(ignore),
-                xtol=xtol,
-                ftol=ftol,
-                max_iterations=max_iterations,
-                lt_tol=lt_tol,
-                eph_max_iter=eph_max_iter,
-                eph_tol=eph_tol,
-                stellar_aberration=stellar_aberration,
-                max_lt_iter=max_lt_iter,
-            ),
-        )
-
-    def od_fit(
-        self,
-        orbit: Orbits,
-        observations: Any,
-        *,
-        rchi2_threshold: float = 100.0,
-        min_obs: int = 5,
-        min_arc_length: float = 1.0,
-        contamination_percentage: float = 0.0,
-        delta: float = 1e-6,
-        max_iter: int = 20,
-        method: str = "central",
-        lt_tol: float = 1.0e-12,
-        eph_max_iter: int = 1000,
-        eph_tol: float = 1.0e-15,
-        stellar_aberration: bool = False,
-        max_lt_iter: int = 10,
-    ) -> dict[str, Any]:
-        """The full legacy ``adam_core.orbit_determination.od`` loop for one
-        orbit in one native crossing (bead personal-dqk): delta bounding,
-        finite/central perturbation batching, weighted normal equations,
-        condition/covariance sanity rejections, acceptance bookkeeping, and
-        chi2-ranked outlier retries.
-
-        Returns a plain dict of arrays for the adam-core public veneer:
-        ``found``, ``state``, ``covariance``, ``arc_length``, ``num_obs``,
-        ``chi2``, ``reduced_chi2``, ``iterations``, ``improved``,
-        ``residual_values``, ``residual_chi2``, ``residual_dof``,
-        ``residual_probability``, ``outlier``.
-        """
-        return cast(
-            dict[str, Any],
-            self._native.od_fit(
-                *self._od_problem_args(orbit, observations),
-                rchi2_threshold=rchi2_threshold,
-                min_obs=min_obs,
-                min_arc_length=min_arc_length,
-                contamination_percentage=contamination_percentage,
-                delta=delta,
-                max_iter=max_iter,
-                method=method,
-                lt_tol=lt_tol,
-                eph_max_iter=eph_max_iter,
-                eph_tol=eph_tol,
-                stellar_aberration=stellar_aberration,
-                max_lt_iter=max_lt_iter,
-            ),
-        )
-
-    def _iod_problem_args(self, observations: Any) -> tuple[Any, ...]:
-        observed = observations.coordinates
-        observed_scale, observed_days, observed_nanos = _time_parts(observed.time)
-        observers = observations.observers
-        observer_coordinates = observers.coordinates
-        observer_scale, observer_days, observer_nanos = _time_parts(
-            observer_coordinates.time
-        )
-        return (
-            _string_column_to_list(observations.id),
-            np.ascontiguousarray(observed.values, dtype=np.float64),
-            np.ascontiguousarray(
-                observed.covariance.to_matrix().reshape(len(observed), 36),
-                dtype=np.float64,
-            ),
-            _string_column_to_list(observed.origin.code),
-            observed.frame,
-            observed_scale,
-            observed_days,
-            observed_nanos,
-            _string_column_to_list(observers.code),
-            np.ascontiguousarray(observer_coordinates.values, dtype=np.float64),
-            _string_column_to_list(observer_coordinates.origin.code),
-            observer_coordinates.frame,
-            observer_scale,
-            observer_days,
-            observer_nanos,
-        )
-
-    def initial_orbit_determination(
-        self,
-        observations: Any,
-        linkage_ids: list[str],
-        member_linkage_ids: list[str],
-        member_obs_ids: list[str],
-        *,
-        min_obs: int = 6,
-        min_arc_length: float = 1.0,
-        contamination_percentage: float = 0.0,
-        rchi2_threshold: float = 200.0,
-        observation_selection_method: str = "combinations",
-        light_time: bool = True,
-        chunk_size: int = 1,
-        mu: float = 0.00029591220828411956,
-        speed_of_light: float = 173.14463267424034,
-        lt_tol: float = 1.0e-12,
-        eph_max_iter: int = 1000,
-        eph_tol: float = 1.0e-15,
-        stellar_aberration: bool = False,
-        max_lt_iter: int = 10,
-    ) -> dict[str, Any]:
-        """Run complete Gauss-IOD orchestration for every linkage in one
-        native crossing. Rust owns linkage/member indexing, chronological
-        ordering, triplet selection, candidate generation and ephemeris
-        scoring, outlier acceptance, exact-state deduplication, and final
-        linkage ordering. ``chunk_size`` is a Rust scheduling control.
-        ``mu`` and ``speed_of_light`` are supplied explicitly by adam-core so
-        the fused provider preserves the constants owned by the original
-        adam-core orchestration.
-        """
-        return cast(
-            dict[str, Any],
-            self._native.initial_orbit_determination(
-                *self._iod_problem_args(observations),
-                list(linkage_ids),
-                list(member_linkage_ids),
-                list(member_obs_ids),
-                min_obs=min_obs,
-                min_arc_length=min_arc_length,
-                contamination_percentage=contamination_percentage,
-                rchi2_threshold=rchi2_threshold,
-                observation_selection_method=observation_selection_method,
-                light_time=light_time,
-                chunk_size=chunk_size,
-                mu=mu,
-                speed_of_light=speed_of_light,
-                lt_tol=lt_tol,
-                eph_max_iter=eph_max_iter,
-                eph_tol=eph_tol,
-                stellar_aberration=stellar_aberration,
-                max_lt_iter=max_lt_iter,
-            ),
-        )
-
-    def vallado_least_squares(
-        self,
-        orbit: Orbits,
-        observations: Any,
-        *,
-        use_central_difference: bool,
-        perturbation_initial_fraction: float = 1e-6,
-        perturbation_multiplier: float = 0.5,
-        rms_epsilon: float = 1e-3,
-        max_iterations: int = 20,
-        lt_tol: float = 1.0e-12,
-        eph_max_iter: int = 1000,
-        eph_tol: float = 1.0e-15,
-        stellar_aberration: bool = False,
-        max_lt_iter: int = 10,
-    ) -> dict[str, Any]:
-        """The public ``LeastSquares.least_squares`` Vallado RMS algorithm in
-        one native crossing (bead personal-dqk), including the debug
-        iteration trace, rejected-update semantics, and perturbation
-        backoff.
-
-        Returns a plain dict for the adam-core public veneer: ``status``
-        (``updated``/``initial``/``not_improved``), ``state``,
-        ``covariance``, ``num_observations``, parallel iteration-trace lists
-        (``iterations_rchi2``, ``iterations_rms``, ``iterations_delta_rms``,
-        ``iterations_converged``, ``iterations_perturbation``,
-        ``iterations_error``), ``corrections``, and ``exit_message``.
-        """
-        return cast(
-            dict[str, Any],
-            self._native.vallado_least_squares(
-                *self._od_problem_args(orbit, observations),
-                use_central_difference=use_central_difference,
-                perturbation_initial_fraction=perturbation_initial_fraction,
-                perturbation_multiplier=perturbation_multiplier,
-                rms_epsilon=rms_epsilon,
-                max_iterations=max_iterations,
-                lt_tol=lt_tol,
-                eph_max_iter=eph_max_iter,
-                eph_tol=eph_tol,
-                stellar_aberration=stellar_aberration,
-                max_lt_iter=max_lt_iter,
-            ),
-        )
-
     def detect_collisions(
         self,
         orbits: OrbitTable,
@@ -966,15 +653,11 @@ class ASSISTPropagator(Propagator, ImpactMixin):  # type: ignore[misc]
         max_processes: int | None = 1,
         chunk_size: int | None = 100,
     ) -> tuple[OrbitTable, CollisionEvent]:
-        """Single-crossing Rust collision detection (bead personal-cmy.33.9).
+        """Detect same-epoch collisions in one native Rust crossing.
 
-        Standalone public entry: the Rust backend owns the whole same-epoch
-        detection in one crossing, so no Ray chunking is required.
-        ``max_processes``/``chunk_size`` are accepted for signature
-        compatibility with the abstract ``ImpactMixin.detect_collisions``
-        contract and are ignored (rayon handles internal parallelism). This
-        replaces the deleted adam_core ``ImpactMixin.detect_collisions`` Ray
-        composition that this propagator previously inherited.
+        ``max_processes`` and ``chunk_size`` remain accepted for public
+        signature compatibility and are ignored; Rayon owns internal
+        parallelism.
         """
         if conditions is None:
             conditions = CollisionConditions.from_kwargs(

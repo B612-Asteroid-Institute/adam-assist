@@ -1,17 +1,11 @@
-"""Canonical flat Arrow mapping for the W12 typed propagation adapter.
+"""Canonical flat Arrow mapping for the typed propagation adapter.
 
-This is the Python side of the typed adapter (bead personal-cmy.10). It maps a
-quivr ``Orbits`` table to the Rust-canonical ``OrbitBatch.cartesian.flat.v1``
-RecordBatch layout defined in ``adam_core_rs_coords::types::arrow`` and back.
-
-Slice (1) pins this mapping as a tested contract with no new Rust dependency.
-Slice (2) will hand the flat RecordBatch to Rust over the Arrow C data
-interface so ``OrbitBatch::try_from_record_batch`` owns schema validation and
-the typed contracts end to end, replacing the current dict/numpy boundary.
-
-The flat schema (field order, dtypes, nullability, metadata) intentionally
-mirrors ``orbit_schema`` in the Rust crate. The schema-name parity is checked
-against ``adam_core._rust`` ``orbit_schema_metadata`` in the contract test.
+Maps a quivr ``Orbits`` table to the Rust-canonical
+``OrbitBatch.cartesian.flat.v1`` RecordBatch layout defined in
+``adam_core_rs_coords::types::arrow`` and back. The flat schema's field order,
+dtypes, nullability, and metadata mirror ``orbit_schema`` in the Rust crate;
+contract tests check schema-name parity against ``adam_core._rust``
+``orbit_schema_metadata``.
 """
 
 from __future__ import annotations

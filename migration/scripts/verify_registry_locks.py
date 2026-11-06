@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that release locks select checksum-pinned public Core artifacts."""
+"""Verify the authentic public Core registry locks used by Assist 0.6."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import tomllib
 from pathlib import Path
 
 CORE_RUST_PACKAGES = {
+    "adam_core",
     "adam_core_rs_autodiff",
     "adam_core_rs_coords",
     "adam_core_rs_kernel_data",
@@ -15,27 +16,63 @@ CORE_RUST_PACKAGES = {
     "adam_core_rs_spice",
 }
 CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
-
-
-def _packages(path: Path) -> dict[str, dict[str, object]]:
-    with path.open("rb") as stream:
-        return {package["name"]: package for package in tomllib.load(stream)["package"]}
+PDM_NON_REGISTRY_SOURCE_KEYS = frozenset(
+    {
+        "git",
+        "hg",
+        "svn",
+        "bzr",
+        "vcs",
+        "ref",
+        "revision",
+        "subdirectory",
+        "path",
+        "file",
+        "editable",
+        "url",
+    }
+)
+RUST_ROOT_PACKAGE = "adam_assist"
 
 
 def verify_python_lock(repo: Path, core_version: str) -> None:
-    core = _packages(repo / "pdm.lock")["adam-core"]
+    lock_path = repo / "pdm.lock"
+    with lock_path.open("rb") as stream:
+        lock = tomllib.load(stream)
+    lock_packages = lock.get("package")
+    if not isinstance(lock_packages, list):
+        raise ValueError("pdm.lock package inventory is missing")  # noqa: TRY004
+    non_registry_sources = sorted(
+        (
+            str(package.get("name", "<unnamed>")),
+            sorted(PDM_NON_REGISTRY_SOURCE_KEYS.intersection(package)),
+        )
+        for package in lock_packages
+        if PDM_NON_REGISTRY_SOURCE_KEYS.intersection(package)
+    )
+    if non_registry_sources:
+        raise ValueError(
+            "pdm.lock must be registry-only; non-registry sources: "
+            f"{non_registry_sources}"
+        )
+    core_matches = [
+        package for package in lock_packages if package.get("name") == "adam-core"
+    ]
+    if len(core_matches) != 1:
+        raise ValueError(
+            f"pdm.lock must contain one adam-core, found {len(core_matches)}"
+        )
+    core = core_matches[0]
     if core.get("version") != core_version:
         raise ValueError(f"pdm.lock adam-core {core.get('version')} != {core_version}")
-    provisional = {key: core[key] for key in ("git", "path", "url") if key in core}
-    if provisional:
-        raise ValueError(
-            f"pdm.lock adam-core must be registry-only, found {provisional}"
-        )
     files = core.get("files")
-    if not isinstance(files, list) or not files:
-        raise ValueError("pdm.lock adam-core registry files are missing")
+    if not isinstance(files, list) or len(files) != 12:
+        raise ValueError("pdm.lock adam-core must contain the 12 release wheel hashes")
     prefix = f"adam_core-{core_version}-"
-    if any(not str(item.get("file", "")).startswith(prefix) for item in files):
+    file_names = [str(item.get("file", "")) for item in files]
+    if len(set(file_names)) != 12 or any(
+        not file_name.startswith(prefix) for file_name in file_names
+    ):
         raise ValueError("pdm.lock adam-core files do not match the release version")
     if any(not str(item.get("hash", "")).startswith("sha256:") for item in files):
         raise ValueError("pdm.lock adam-core registry hashes are missing")
@@ -45,8 +82,30 @@ def verify_rust_lock(repo: Path, core_version: str) -> None:
     lock_path = repo / "rust" / "adam_assist_rs" / "Cargo.lock"
     with lock_path.open("rb") as stream:
         lock = tomllib.load(stream)
+    lock_packages = lock.get("package")
+    if not isinstance(lock_packages, list):
+        raise ValueError("Cargo.lock package inventory is missing")  # noqa: TRY004
+    root_packages = [
+        package for package in lock_packages if package.get("name") == RUST_ROOT_PACKAGE
+    ]
+    if len(root_packages) != 1 or "source" in root_packages[0]:
+        raise ValueError(
+            f"Cargo.lock must contain exactly one source-less {RUST_ROOT_PACKAGE} root"
+        )
+    root_package = root_packages[0]
+    non_registry_packages = sorted(
+        str(package.get("name", "<unnamed>"))
+        for package in lock_packages
+        if package is not root_package
+        and (package.get("source") != CRATES_IO_SOURCE or not package.get("checksum"))
+    )
+    if non_registry_packages:
+        raise ValueError(
+            "Cargo.lock must be registry-only with checksums for every non-root "
+            f"package; invalid packages: {non_registry_packages}"
+        )
     packages: dict[str, list[dict[str, object]]] = {}
-    for package in lock["package"]:
+    for package in lock_packages:
         packages.setdefault(str(package["name"]), []).append(package)
     for name in sorted(CORE_RUST_PACKAGES):
         matches = packages.get(name, [])
@@ -62,13 +121,16 @@ def verify_rust_lock(repo: Path, core_version: str) -> None:
         if package.get("source") != CRATES_IO_SOURCE or not package.get("checksum"):
             raise ValueError(f"Cargo.lock {name} must be registry-only")
     unused = lock.get("patch", {}).get("unused", [])
-    provisional = sorted(
+    non_registry_core_patches = sorted(
         package.get("name", "")
         for package in unused
         if str(package.get("name", "")).startswith("adam_core")
     )
-    if provisional:
-        raise ValueError(f"Cargo.lock contains provisional Core patches: {provisional}")
+    if non_registry_core_patches:
+        raise ValueError(
+            "Cargo.lock contains non-registry Core patches: "
+            f"{non_registry_core_patches}"
+        )
     for forbidden in ("zip", "zopfli"):
         if packages.get(forbidden):
             raise ValueError(f"Cargo.lock contains forbidden dependency {forbidden}")

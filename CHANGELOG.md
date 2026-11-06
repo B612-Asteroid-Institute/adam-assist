@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.6.0] - Unreleased
+
+### Removed (breaking)
+
+- Removed provider-owned `fit_least_squares`,
+  `fit_least_squares_evaluated`, `od_fit`, `initial_orbit_determination`, and
+  `vallado_least_squares` methods and their native work units. Use adam-core's
+  nondeprecated `refine`, `run_iod`, and `run_od` entry points with an
+  `ASSISTPropagator`; see `MIGRATION.md` for exact policy mappings.
+
+### Fixed
+
+- Matched adam-core's per-field Marsden default contract: every null
+  `ALN`/`NK`/`NM`/`NN`/`R0` value on an active row independently takes the
+  asteroid default, including propagation and fixed-parameter STM paths.
+- Made release-pair CI install the wheel's complete `dev` extra and verify
+  `astropy`, frozen NAIF data versions, and installed-wheel provenance before
+  tests or benchmarks. Release-candidate and publication workflows remain
+  manual-only, and every job is gated by the bounded
+  `ADAM_ASSIST_RELEASES_ENABLED` repository variable.
+- Pinned active CI by content and required-command digests and pinned the exact
+  manually gated release-workflow inventory, including
+  its full Python matrix, Rust source-pair gates, read-only execution boundary,
+  and benchmark artifacts on every trigger. Python dependency-name checks now
+  apply full PEP 503 normalization.
+- Deferred the 765 MiB kernel content hash from provider construction to the
+  first actual kernel use (direct propagation, shard execution, or provider
+  metadata). Kernel files are immutable package-managed resources for the
+  provider lifetime. Construction binds the small eagerly parsed DAF region set
+  and retained mapping; first use verifies that binding and hashes the complete
+  bytes. Ordinary detectable replacement, truncation, corruption, or
+  construction-to-first-use changes return an error, and restoration on the
+  original mapping recovers. Concurrent mutation is unsupported and these
+  checks are not an adversarial filesystem security boundary. Chebyshev data
+  bytes unread at construction remain live and are intentionally adopted by the
+  first complete fingerprint when the eager/mapping binding is intact.
+- Moved process-global ASSIST SPK-parser construction serialization into the
+  exported raw `Ephemeris::from_paths` constructor, so raw and provider paths
+  share one lock without outer double-locking while propagation remains
+  parallel. Reworked stress coverage into a synchronized 64-constructor burst
+  followed by direct constant/mass/segment queries, avoiding a full 765 MiB hash
+  per constructor and making a lock-removal mutation fail.
+- Expanded exact-source validation to default/all/no-default Rust checks,
+  warning-denied Clippy, tests, doctests, docs, packaged-crate tests, and
+  independent capsule tamper/composition/batching/STM probes. Packaged unit
+  tests now carry their pinned science fixture inside the crate.
+
+### Changed
+
+- Reduced the Core integration surface to the private native
+  `adam_core.propagator.v2` capsule: batched ASSIST propagation, immutable
+  Cargo-SemVer identity, complete non-gravitational rows, row failures,
+  optional STMs, and the append-only configuration/data fingerprint suffix.
+  Standalone Rust callers receive the same provenance-complete provider through
+  `AssistPropagator::external_propagator()`. The dependency floor is Python `adam-core>=0.7.0,<0.8.0` and
+  coherent Rust `0.7`, validated against public Core `0.7.0` release commit
+  `a6478f2f280c266d7a5d1442997eb520fc20888f`. Authentic PDM and Cargo locks
+  resolve the 12 public Core wheels and all six public Core crates, respectively,
+  without path, Git, URL, patch, or replacement sources. Reviewed release
+  workflows remain manual-only, and every job is gated by the bounded
+  `ADAM_ASSIST_RELEASES_ENABLED` repository variable; publication remains a
+  separate authorized action.
+- Removed ASSIST OD workloads from the current benchmark and public-surface
+  classifications; OD algorithms, defaults, and reports are now exclusively
+  Core-owned. The stale generator that called removed methods is retired;
+  frozen benchmark output and isolated oracle evidence remain explicitly
+  historical.
+
 ## [0.5.0] - 2026-10-16
 
 ### Changed

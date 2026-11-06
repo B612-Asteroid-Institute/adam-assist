@@ -126,10 +126,13 @@ def _max_position_residual_km(propagated: Orbits, reference: Orbits) -> float:
     order = np.argsort(prop_mjd)
     ref_order = np.argsort(ref_mjd)
     np.testing.assert_allclose(prop_mjd[order], ref_mjd[ref_order], atol=1.2e-8)
-    delta = (
-        propagated.coordinates.r[order] - reference.coordinates.r[ref_order]
-    ) * KM_PER_AU
-    return float(np.linalg.norm(delta, axis=1).max())
+    actual = propagated.coordinates.r[order]
+    expected = reference.coordinates.r[ref_order]
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    delta = (actual - expected) * KM_PER_AU
+    residuals = np.linalg.norm(delta, axis=1)
+    assert np.isfinite(residuals).all()
+    return float(residuals.max())
 
 
 @pytest.mark.parametrize("object_id", list(CASES))

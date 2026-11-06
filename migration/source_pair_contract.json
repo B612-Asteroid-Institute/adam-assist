@@ -1,0 +1,12 @@
+{
+  "assist_version": "0.6.0",
+  "capsule": "adam_core.propagator.v2",
+  "core_commit": "a6478f2f280c266d7a5d1442997eb520fc20888f",
+  "core_version": "0.7.0",
+  "lock_state": "registry-only-core-0.7.0-locked",
+  "registry_state": "core-0.7.0-public-and-verified",
+  "release_automation": "present-and-release-eligible-when-enabled",
+  "schema_version": 1,
+  "source_pair_status": "exact-public-release",
+  "workflow_sha256": "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644"
+}

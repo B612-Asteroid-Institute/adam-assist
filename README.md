@@ -32,21 +32,26 @@ macOS Apple silicon/Intel. Windows is currently unsupported because
 ``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
 unsupported.
 
+### adam-core integration
+
+`adam-assist` is a propagation backend for adam-core. Python callers pass an
+`ASSISTPropagator` to Core-owned workflows through the private
+`adam_core.propagator.v2` capsule. Standalone Rust callers use the typed
+propagation traits or the owned external-provider view described below. ASSIST
+owns dynamics, propagation, STMs, and provider identity; adam-core owns orbit
+determination, fitting, rejection, linkage, and workflow orchestration.
+
+Install compatible releases through the normal Python or Cargo resolver. The
+Python requirement in `pyproject.toml` and the Rust requirements in
+`rust/adam_assist_rs/Cargo.toml` are the authoritative compatibility ranges.
+Maintainer-only pairing and release procedures are documented in
+`migration/scripts/RELEASE_TOOLING.md`, not in the runtime integration contract.
+
 ### Pure Rust
 
-Rust-only consumers can use the same backend from crates.io without Python:
-
-```toml
-[dependencies]
-adam_core = "0.6"
-adam_assist = "=0.5.0"
-```
-
-`adam-assist 0.5.0` supports the stable Core `0.6` contract. Python
-metadata accepts `adam-core>=0.6,<0.7`, while Cargo uses the idiomatic `0.6`
-line. Registry locks select Core `0.6.1`; release CI tests the same ASSIST
-wheel with public Python Core `0.6.0` and `0.6.1`, and validates fresh Rust
-1.87 consumers against the coherent public Core `0.6.1` graph.
+Rust-only consumers use `AssistPropagator` directly for propagation. For
+Core-owned canonical OD workflows, `AssistPropagator::external_propagator()`
+returns the owned ABI-v2 view accepted by `adam_core::od::OdPropagator::external`.
 
 ```rust,no_run
 use adam_assist::{AssistPropagator, AssistResult};
@@ -61,7 +66,29 @@ fn main() -> AssistResult<()> {
 The default resolver loads DE440 and SB441-n16 through adam-core's environment,
 installed-package, cache, and checksummed-fetch policy. Explicit/offline users
 can call `AssistPropagator::from_paths` and can disable default resolver support
-with `default-features = false`.
+with `default-features = false`. Kernel files are immutable package-managed
+resources and must remain unchanged for the provider's lifetime. Explicit-path
+construction does not hash the 765 MiB pair. It binds a small digest of the DAF
+file record, comments, complete summary chain, mapped length, and retained file
+identity immediately around ASSIST's eager parse. The first actual kernel use—
+ordinary propagation or external-provider metadata—checks that binding and
+hashes a stable snapshot of the complete retained bytes.
+
+Ordinary detectable replacement, truncation, corruption, or changes between
+construction and first use return an error; exact restoration on the original
+mapping recovers. These checks protect provenance for stable resources, not
+against a hostile process mutating an existing shared mapping. Concurrent
+mutation is unsupported, and a legitimate kernel update requires constructing
+a new provider. Chebyshev data-region bytes that ASSIST did not read during
+construction remain live through its mapping and are intentionally adopted by
+the first complete fingerprint when the eager/mapping binding is intact.
+
+All `adam_assist::Ephemeris::from_paths` calls in one linked crate instance,
+including those used by `AssistData`/`AssistPropagator`, share one
+process-global mutex around upstream ASSIST's non-reentrant SPK parser.
+Propagation and ephemeris queries are not serialized. This guarantee does not
+cover callers that construct `libassist_sys::Ephemeris` directly, a separately
+linked copy of the crate/library, or external C/FFI users of upstream ASSIST.
 
 ## Usage
 
@@ -119,12 +146,14 @@ propagated = propagator.propagate_orbits(orbits)
 
 Orbits whose `non_gravitational_parameters` carry Marsden-style `A1`/`A2`/`A3`
 accelerations (au/d^2) are propagated with ASSIST's non-gravitational force.
-The g(r) law is selected by the `ALN`/`NK`/`NM`/`NN`/`R0` columns: null
-constants mean the asteroid convention g(r) = (1 au / r)^2, and an explicit
-tuple (for example the standard Marsden comet law, or a custom shape such as
-1I/'Oumuamua's) is applied simulation-wide. Batches mixing different g(r)
-tuples are automatically split into one simulation per force law, since
-ASSIST holds the constants per simulation rather than per particle.
+The g(r) law is selected by the `ALN`/`NK`/`NM`/`NN`/`R0` columns. Each null
+field independently takes its asteroid default (`1`, `0`, `2`, `5.093`, `1`),
+so an all-null row means g(r) = (1 au / r)^2 and a partial row combines its
+present values with those defaults. An explicit tuple (for example the standard
+Marsden comet law, or a custom shape such as 1I/'Oumuamua's) is applied
+simulation-wide. Batches mixing different g(r) tuples are automatically split
+into one simulation per force law, since ASSIST holds the constants per
+simulation rather than per particle.
 
 **Supported** (regression-tested against JPL Horizons to tens–hundreds of
 metres over ±300 days): symmetric inverse-square asteroid solutions
@@ -136,7 +165,7 @@ a warning by adam-core's importers — solutions that estimate DT, such as
 67P or 81P, retain km-scale model error through perihelion and should not
 be treated as JPL-parity), thermophysical Yarkovsky (`AMRAT`/`RHO`) models,
 and estimated (rather than fixed) g(r) shape parameters. Non-finite
-A-values, partial constants tuples, and degenerate `ALN <= 0` / `R0 <= 0`
+A-values or present shape constants, and degenerate `ALN <= 0` / `R0 <= 0`
 values are rejected with a `ValueError` rather than silently altering the
 force.
 
@@ -169,22 +198,20 @@ pdm run benchmark-current
 ```
 
 It reuses the existing propagation, nongrav, ephemeris/covariance, and
-collision workload builders, plus five provider-capability checks used by
-adam-core's public OD workflows. Orbit determination remains an adam-core
-product rather than a separate adam-assist surface. Results include current
-public Python timings, genuine Rust-owned `std::time::Instant` timings where
-available, public/native overhead, and exact workload shapes. It does not
-require a frozen Python environment or baseline timing cache, and all ASSIST
-workloads use `max_processes=1`. Use `--quick` for a smoke run or select, for
-example, `--domains nongrav ephemeris covariance --lanes tiny small`. Release
-CI runs 30 ASSIST product workloads plus the five Core-OD backend-capability
-checks, all with native timing required. After wheel acceptance, release
-candidates also run all 54 live JPL Horizons propagation and
-ephemeris accuracy cases.
+collision workload builders. Orbit determination remains exclusively an
+adam-core product; adam-assist supplies its private batched propagation capsule
+instead of provider-owned OD work units. Results include current public Python
+timings, genuine Rust-owned `std::time::Instant` timings where available,
+public/native overhead, and exact workload shapes. It does not require a frozen
+Python environment or baseline timing cache, and all ASSIST workloads use
+`max_processes=1`. Use `--quick` for a smoke run or select, for example,
+`--domains nongrav ephemeris covariance --lanes tiny small`. Optional live JPL
+Horizons propagation and ephemeris accuracy cases are marked `live` and remain
+separate from the deterministic benchmark suite.
 
-The deterministic test suite uses reviewed, hash-pinned frozen outputs for all
-formerly two-runtime propagation, covariance, ephemeris, collision, typed
-mapping, and OD/Vallado parity cases. Normal pytest and the current benchmark
+The deterministic test suite uses hash-pinned frozen outputs for
+propagation, covariance, ephemeris, collision, typed mapping, and the minimal
+Core-owned capsule integration fixture. Normal pytest and the current benchmark
 suite do not import or launch the archived ASSIST oracle and never skip because
 a legacy virtual environment is absent.
 

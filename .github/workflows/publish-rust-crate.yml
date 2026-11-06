@@ -10,12 +10,12 @@ on:
       expected_version:
         description: Exact Cargo release version
         required: true
-        default: 0.5.0
+        default: 0.6.0
         type: string
       expected_core_version:
         description: Exact public adam-core Rust version
         required: true
-        default: 0.6.1
+        default: 0.7.0
         type: string
       release_channel:
         description: Registry release channel
@@ -28,7 +28,7 @@ on:
       expected_python_version:
         description: Exact matching PEP 440 version used by the immutable Git tag
         required: true
-        default: 0.5.0
+        default: 0.6.0
         type: string
       authentication:
         description: crates.io OIDC trusted publishing (bootstrap token is no longer used)
@@ -48,7 +48,25 @@ permissions:
   id-token: write
 
 jobs:
+  # Release jobs stay manual and run only during the bounded readiness window
+  # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
+  compatibility-floor:
+    if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
+    name: Verify public Core 0.7 registry floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact public-release source-pair state
+        run: python migration/scripts/verify_source_pair_contract.py
+      - name: Verify authentic Core registry locks
+        run: |
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "${{ inputs.expected_core_version }}" \
+            --python-lock --rust-lock
+
   publish:
+    if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
+    needs: compatibility-floor
     runs-on: ubuntu-latest
     environment: ${{ inputs.release_channel == 'stable' && 'crates-io' || 'crates-io-preview' }}
     steps:

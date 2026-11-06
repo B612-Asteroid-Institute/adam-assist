@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare only missing, checksum-verified files for an exact PyPI release."""
+"""Validate and stage accepted wheels for bounded manual PyPI publication."""
 
 from __future__ import annotations
 

@@ -9,10 +9,10 @@
 //! `libassist-sys` and `librebound-sys` binding layers.
 
 use adam_core_rs_coords::propagation::{
-    CovariancePropagation, EpochPolicy, OrbitRow, PropagationConvergence,
-    PropagationConvergenceStatus, PropagationDiagnostics, PropagationError, PropagationFailureCode,
-    PropagationRequest, PropagationResult, PropagationResultValue, Propagator, PropagatorShard,
-    RowOutput,
+    CovariancePropagation, EpochPolicy, ExternalPropagator, OrbitRow, OwnedExternalPropagator,
+    PropagationConvergence, PropagationConvergenceStatus, PropagationDiagnostics, PropagationError,
+    PropagationFailureCode, PropagationRequest, PropagationResult, PropagationResultValue,
+    Propagator, PropagatorShard, RowOutput,
 };
 use adam_core_rs_coords::types::Frame;
 use adam_core_rs_coords::{
@@ -22,16 +22,18 @@ use adam_core_rs_coords::{
     OrbitVariantBatch, OriginArray, OriginId, OriginTranslationProvider, TimeArray, TimeScale,
     TimeScaleProvider, Validity, KM_PER_AU, NANOS_PER_DAY,
 };
-pub use libassist_sys::Ephemeris;
 use libassist_sys::{ffi, AssistSim};
 use librebound_sys::Simulation;
 pub use librebound_sys::{Ias15AdaptiveMode, IntegratorConfig};
 use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
 mod assist_error;
 pub use assist_error::{AssistError, AssistResult};
+mod ephemeris;
+pub use ephemeris::Ephemeris;
 
 pub mod assist_propagation;
 pub use assist_propagation::AssistData;
@@ -51,6 +53,31 @@ const BACKEND_NAME: &str = "assist_rs";
 pub struct AssistPropagator {
     data: Arc<AssistData>,
     integrator: IntegratorConfig,
+}
+
+/// Stable owner and validated view of ASSIST's propagation-only ABI-v2 table.
+///
+/// Keep this value alive while borrowing [`Self::external`]. Standalone Rust
+/// callers can pass that view to `adam_core::od::OdPropagator::external` and
+/// invoke Core's canonical `run_iod`, `run_od`, `refine`, or
+/// `evaluate_orbits` workflow without Python or PyO3.
+///
+/// The table captures the fingerprint of the exact retained kernel handles
+/// used to construct ASSIST. Kernel files are immutable resources for the
+/// provider lifetime; ordinary detectable changes are rejected before
+/// dynamics. Concurrent mutation is unsupported and these consistency checks
+/// are not an adversarial filesystem security boundary. Construct a new
+/// provider after any legitimate kernel update.
+pub struct AssistExternalPropagator {
+    external: ExternalPropagator,
+    _owner: Box<OwnedExternalPropagator<AssistPropagator>>,
+}
+
+impl AssistExternalPropagator {
+    /// Borrow the validated external provider for adam-core integration.
+    pub fn external(&self) -> &ExternalPropagator {
+        &self.external
+    }
 }
 
 impl AssistPropagator {
@@ -97,6 +124,44 @@ impl AssistPropagator {
         self.integrator
     }
 
+    /// Return the canonical identity of every dynamics-affecting IAS15 option.
+    pub fn configuration_fingerprint(&self) -> String {
+        integrator_configuration_fingerprint(self.integrator)
+    }
+
+    /// Return the lazily computed content identity of the loaded kernel bytes.
+    ///
+    /// The first actual propagation, shard call, or explicit fingerprint
+    /// request hashes a stable snapshot of both retained handles and matching
+    /// paths. Kernel files must remain immutable for the provider lifetime.
+    /// Later calls reuse that digest after consistency checks for ordinary
+    /// detectable changes; concurrent mutation is unsupported.
+    pub fn data_fingerprint(&self) -> AssistResult<&str> {
+        self.data.data_fingerprint()
+    }
+
+    /// Build a provenance-complete ABI-v2 provider for standalone adam-core OD.
+    pub fn external_propagator(&self) -> AssistResult<AssistExternalPropagator> {
+        let configuration_fingerprint = self.configuration_fingerprint();
+        let data_fingerprint = self.data_fingerprint()?;
+        let owner = Box::new(OwnedExternalPropagator::new_with_fingerprints(
+            self.clone(),
+            "adam_assist",
+            env!("CARGO_PKG_VERSION"),
+            &configuration_fingerprint,
+            data_fingerprint,
+        ));
+        // SAFETY: `owner` is boxed before decoding, so its table and context
+        // remain at stable addresses until the returned wrapper is dropped.
+        // The wrapper keeps `owner` alive longer than `external`.
+        let external = unsafe { ExternalPropagator::from_raw(owner.table()) }
+            .map_err(|error| AssistError::Other(error.to_string()))?;
+        Ok(AssistExternalPropagator {
+            external,
+            _owner: owner,
+        })
+    }
+
     fn propagate_with_stm(
         &self,
         request: &PropagationRequest<'_>,
@@ -105,6 +170,7 @@ impl AssistPropagator {
         target_output_times: &TimeArray,
         compute_stm: bool,
     ) -> PropagationResultValue<PropagationResult> {
+        verify_claimed_kernel_identity(&self.data)?;
         validate_request_scope(request, compute_stm)?;
         let input_coordinates = request.input.coordinates();
         let states = input_coordinates.values.cartesian().ok_or_else(|| {
@@ -186,6 +252,86 @@ impl AssistPropagator {
 
 impl Propagator for AssistPropagator {
     type Shard = AssistShard;
+
+    fn backend(&self) -> adam_core_rs_coords::propagation::BackendIdentity {
+        adam_core_rs_coords::propagation::BackendIdentity {
+            name: "adam_assist".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            two_body_dynamics: false,
+        }
+    }
+
+    fn supports_stm(&self) -> bool {
+        true
+    }
+
+    fn supports_non_gravitational_parameters(&self) -> bool {
+        true
+    }
+
+    /// ASSIST's variational equations: the heliocentric ecliptic state at
+    /// each target time with its state-transition matrix (REBOUND's
+    /// first-order variational particles). Targets are integrated in time
+    /// order and returned in the caller's order.
+    fn propagate_stm(
+        &self,
+        state: [f64; 6],
+        non_gravitational_parameters: Option<NonGravitationalParametersRow>,
+        epoch_tdb: Epoch,
+        times_tdb: &[Epoch],
+    ) -> PropagationResultValue<Vec<adam_core_rs_coords::propagation::StmRow>> {
+        verify_claimed_kernel_identity(&self.data)?;
+        if !state_is_finite(&state) {
+            return Err(PropagationError::InvalidRequest(
+                "assist-rs STM propagation input state was non-finite".to_string(),
+            ));
+        }
+        let non_gravitational_parameters =
+            assist_non_gravitational_parameters(non_gravitational_parameters, "STM state")?;
+        let orbit = match non_gravitational_parameters {
+            Some(parameters) => AssistOrbit::with_non_grav(state, epoch_tdb.mjd(), parameters),
+            None => AssistOrbit::new(state, epoch_tdb.mjd()),
+        };
+        let mut order: Vec<usize> = (0..times_tdb.len()).collect();
+        order.sort_by(|&a, &b| times_tdb[a].mjd().total_cmp(&times_tdb[b].mjd()));
+        let sorted: Vec<f64> = order.iter().map(|&i| times_tdb[i].mjd()).collect();
+        let propagated = assist_propagation::assist_propagate_single(
+            &self.data,
+            &orbit,
+            &sorted,
+            true,
+            &self.integrator,
+        )
+        .map_err(|err| PropagationError::Backend(format!("assist-rs STM propagation: {err}")))?;
+        if propagated.len() != sorted.len() {
+            return Err(PropagationError::BackendProtocol(format!(
+                "assist-rs returned {} STM rows for {} target epochs",
+                propagated.len(),
+                sorted.len()
+            )));
+        }
+        let mut rows = vec![
+            adam_core_rs_coords::propagation::StmRow {
+                state: [f64::NAN; 6],
+                stm: [f64::NAN; 36],
+                valid: false,
+            };
+            times_tdb.len()
+        ];
+        for (position, row) in propagated.into_iter().enumerate() {
+            let stm: [f64; 36] = match row.stm {
+                Some(matrix) => std::array::from_fn(|index| matrix[index / 6][index % 6]),
+                None => [f64::NAN; 36],
+            };
+            let valid = state_is_finite(&row.state) && stm.iter().all(|v| v.is_finite());
+            rows[order[position]] = adam_core_rs_coords::propagation::StmRow {
+                state: row.state,
+                stm,
+                valid,
+            };
+        }
+        Ok(rows)
+    }
 
     fn integration_time_scale(&self) -> TimeScale {
         TimeScale::Tdb
@@ -526,7 +672,7 @@ pub struct CollisionConditionSpec {
 /// Survivors are reported at the final executed step time, which overshoots
 /// the requested horizon exactly as the legacy step loop does.
 ///
-/// IMPACT-TIME RESOLUTION (personal-tse): `impact_times_jd_tdb` is the IAS15
+/// IMPACT-TIME RESOLUTION: `impact_times_jd_tdb` is the IAS15
 /// step time at which a particle was *first observed* inside a collision
 /// body's radius, not the exact distance-crossing instant. It is therefore
 /// step-resolution-limited, not physics-limited: the reported epoch can lag
@@ -656,6 +802,7 @@ impl AssistPropagator {
         final_jd_tdb: f64,
         conditions: &[CollisionConditionSpec],
     ) -> Result<CollisionDetectionOutput, AssistError> {
+        self.data.verify_claimed_kernel_identity()?;
         if non_gravitational_parameters.len() != states_bary_eq.len() {
             return Err(AssistError::Other(
                 "collision non-gravitational parameter rows must match state rows".to_string(),
@@ -723,7 +870,7 @@ impl AssistPropagator {
                         // Step-resolution-limited impact epoch: `t` is the
                         // first IAS15 step at which the particle is inside the
                         // body radius, not the exact crossing time. See the
-                        // CollisionDetectionOutput docs (personal-tse).
+                        // CollisionDetectionOutput docs.
                         output.impact_times_jd_tdb.push(t + jd_ref);
                         if condition.stopping {
                             remove[slot] = true;
@@ -830,31 +977,29 @@ fn assist_non_gravitational_parameters(
     if a1 == 0.0 && a2 == 0.0 && a3 == 0.0 {
         return Ok(None);
     }
-    let constants = [row.aln, row.nk, row.nm, row.nn, row.r0];
-    let set_count = constants.iter().filter(|value| value.is_some()).count();
-    if set_count != 0 && set_count != constants.len() {
+    // Match adam-core's `marsden_constants_array`: every null shape
+    // constant independently takes the asteroid g(r) default. This matters
+    // for partially populated source rows as well as the all-null case.
+    let aln = row.aln.unwrap_or(1.0);
+    let nk = row.nk.unwrap_or(0.0);
+    let nm = row.nm.unwrap_or(2.0);
+    let nn = row.nn.unwrap_or(5.093);
+    let r0 = row.r0.unwrap_or(1.0);
+    if ![aln, nk, nm, nn, r0].iter().all(|value| value.is_finite()) || aln <= 0.0 || r0 <= 0.0 {
         return Err(PropagationError::InvalidRequest(format!(
-            "Partially-specified Marsden g(r) constants for orbit {orbit_id}: set all of (ALN, NK, NM, NN, R0) or none (null selects the asteroid (1 au / r)^2 convention)."
+            "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
         )));
     }
-    if let [Some(aln), Some(nk), Some(nm), Some(nn), Some(r0)] = constants {
-        if ![aln, nk, nm, nn, r0].iter().all(|value| value.is_finite()) || aln <= 0.0 || r0 <= 0.0 {
-            return Err(PropagationError::InvalidRequest(format!(
-                "Invalid Marsden g(r) constants for orbit {orbit_id}: all values must be finite with ALN > 0 and R0 > 0."
-            )));
-        }
-        return Ok(Some(NonGravParams {
-            a1,
-            a2,
-            a3,
-            alpha: Some(aln),
-            nk: Some(nk),
-            nm: Some(nm),
-            nn: Some(nn),
-            r0: Some(r0),
-        }));
-    }
-    Ok(Some(NonGravParams::new(a1, a2, a3)))
+    Ok(Some(NonGravParams {
+        a1,
+        a2,
+        a3,
+        alpha: Some(aln),
+        nk: Some(nk),
+        nm: Some(nm),
+        nn: Some(nn),
+        r0: Some(r0),
+    }))
 }
 
 /// Mutable per-worker ASSIST propagation state implementing adam-core's
@@ -884,6 +1029,7 @@ impl PropagatorShard for AssistShard {
         orbit: OrbitRow<'_>,
         times: &[Epoch],
     ) -> PropagationResultValue<RowOutput> {
+        verify_claimed_kernel_identity(&self.data)?;
         let covariance_requested = self.compute_stm && orbit.covariance.is_some();
         if !state_is_finite(&orbit.state) {
             return Ok(row_failure_output(
@@ -1013,6 +1159,31 @@ fn python_default_integrator() -> IntegratorConfig {
     }
 }
 
+fn integrator_configuration_fingerprint(config: IntegratorConfig) -> String {
+    fn float_option(value: Option<f64>) -> String {
+        value.map_or_else(
+            || "none".to_string(),
+            |value| format!("some:{:016x}", value.to_bits()),
+        )
+    }
+
+    let adaptive_mode = match config.adaptive_mode {
+        None => "none",
+        Some(Ias15AdaptiveMode::Individual) => "individual",
+        Some(Ias15AdaptiveMode::Global) => "global",
+        Some(Ias15AdaptiveMode::Prs23) => "prs23",
+        Some(Ias15AdaptiveMode::Aarseth85) => "aarseth85",
+    };
+    let canonical = format!(
+        "adam-assist-configuration-v1\nintegrator=ias15\ninitial_dt={}\nmin_dt={}\nadaptive_mode={}\nepsilon={}",
+        float_option(config.initial_dt),
+        float_option(config.min_dt),
+        adaptive_mode,
+        float_option(config.epsilon),
+    );
+    format!("{:x}", Sha256::digest(canonical.as_bytes()))
+}
+
 fn rescale_for_assist(
     times: &TimeArray,
     provider: &dyn TimeScaleProvider,
@@ -1139,6 +1310,14 @@ fn is_sun_origin(origin: &OriginId) -> bool {
 fn is_solar_system_barycenter_origin(origin: &OriginId) -> bool {
     matches!(origin, OriginId::SolarSystemBarycenter | OriginId::Naif(0))
         || matches!(origin, OriginId::Named(code) if code.eq_ignore_ascii_case("SOLAR_SYSTEM_BARYCENTER") || code.eq_ignore_ascii_case("SSB"))
+}
+
+fn verify_claimed_kernel_identity(data: &AssistData) -> PropagationResultValue<()> {
+    data.verify_claimed_kernel_identity().map_err(|error| {
+        PropagationError::Backend(format!(
+            "ASSIST kernel provenance verification failed: {error}"
+        ))
+    })
 }
 
 fn normalize_input_states(
@@ -1889,6 +2068,11 @@ mod tests {
 
     fn assert_state_close(actual: &[f64; 6], expected: &[f64; 6]) {
         for (left, right) in actual.iter().zip(expected.iter()) {
+            assert!(left.is_finite(), "actual state is non-finite: {actual:?}");
+            assert!(
+                right.is_finite(),
+                "expected state is non-finite: {expected:?}"
+            );
             assert!((left - right).abs() < 1.0e-14, "{actual:?} != {expected:?}");
         }
     }
@@ -1900,6 +2084,177 @@ mod tests {
         assert_eq!(config.min_dt, Some(1.0e-9));
         assert_eq!(config.adaptive_mode, Some(Ias15AdaptiveMode::Global));
         assert_eq!(config.epsilon, Some(1.0e-6));
+    }
+
+    #[test]
+    fn configuration_fingerprint_is_complete_and_bit_canonical() {
+        let defaults = python_default_integrator();
+        assert_eq!(
+            integrator_configuration_fingerprint(defaults),
+            "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f"
+        );
+        for changed in [
+            IntegratorConfig {
+                initial_dt: Some(2.0e-6),
+                ..defaults
+            },
+            IntegratorConfig {
+                min_dt: Some(2.0e-9),
+                ..defaults
+            },
+            IntegratorConfig {
+                adaptive_mode: Some(Ias15AdaptiveMode::Individual),
+                ..defaults
+            },
+            IntegratorConfig {
+                epsilon: Some(2.0e-6),
+                ..defaults
+            },
+        ] {
+            assert_ne!(
+                integrator_configuration_fingerprint(defaults),
+                integrator_configuration_fingerprint(changed)
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "live public-API fingerprint test requires ASSIST kernel data"]
+    fn public_configuration_fingerprint_changes_for_every_ias15_field() {
+        let defaults = live_propagator_from_env();
+        let default_integrator = defaults.integrator();
+        let default_fingerprint = defaults.configuration_fingerprint();
+        assert_eq!(
+            default_fingerprint,
+            "a41a7bec3265e1dded511415b0991eb838f207230b1fd0a50cfcc4ac743aa70f"
+        );
+        for changed in [
+            IntegratorConfig {
+                initial_dt: Some(2.0e-6),
+                ..default_integrator
+            },
+            IntegratorConfig {
+                min_dt: Some(2.0e-9),
+                ..default_integrator
+            },
+            IntegratorConfig {
+                adaptive_mode: Some(Ias15AdaptiveMode::Individual),
+                ..default_integrator
+            },
+            IntegratorConfig {
+                epsilon: Some(2.0e-6),
+                ..default_integrator
+            },
+        ] {
+            let changed = AssistPropagator::with_integrator(Arc::clone(defaults.data()), changed);
+            assert_ne!(changed.configuration_fingerprint(), default_fingerprint);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "live retained-handle capsule contract requires ASSIST kernel data"]
+    fn retained_capsule_keeps_identity_but_callbacks_and_new_capsules_reject_tamper() {
+        let (planets_source, asteroids_source) = live_kernel_paths();
+        let directory = std::env::temp_dir().join(format!(
+            "adam-assist-retained-capsule-{}",
+            std::process::id()
+        ));
+        if directory.exists() {
+            std::fs::remove_dir_all(&directory).unwrap();
+        }
+        std::fs::create_dir_all(&directory).unwrap();
+        let planets = directory.join("planets.bsp");
+        let asteroids = directory.join("asteroids.bsp");
+        std::fs::copy(&planets_source, &planets)
+            .expect("failed to make a private planetary-kernel copy");
+        std::fs::copy(&asteroids_source, &asteroids)
+            .expect("failed to make a private small-body-kernel copy");
+
+        let assist = AssistPropagator::from_paths(&planets, &asteroids).unwrap();
+        let fingerprint = assist.data_fingerprint().unwrap().to_string();
+        let retained = assist.external_propagator().unwrap();
+        let retained_metadata =
+            adam_core::od::algorithms::external_provider_metadata(retained.external()).unwrap();
+        assert_eq!(retained_metadata.data_fingerprint, fingerprint);
+
+        // Rename preserves the exact inode/bytes mapped by ASSIST; replacing
+        // only the canonical path cannot mutate that loaded handle.
+        let loaded_planets = directory.join("planets.loaded.bsp");
+        std::fs::rename(&planets, &loaded_planets).unwrap();
+        std::fs::write(&planets, b"tampered kernel path").unwrap();
+
+        let metadata_after_tamper =
+            adam_core::od::algorithms::external_provider_metadata(retained.external()).unwrap();
+        assert_eq!(
+            metadata_after_tamper.data_fingerprint,
+            retained_metadata.data_fingerprint
+        );
+        assert_eq!(
+            metadata_after_tamper.configuration_fingerprint,
+            retained_metadata.configuration_fingerprint
+        );
+        let new_adapter_error = match assist.external_propagator() {
+            Ok(_) => panic!("tampered kernel path unexpectedly produced a new adapter"),
+            Err(error) => error.to_string(),
+        };
+        assert!(
+            new_adapter_error.contains("mapping identity changed")
+                || new_adapter_error.contains("kernel bytes changed"),
+            "{new_adapter_error}"
+        );
+
+        let orbits = sample_orbits(
+            Frame::Ecliptic,
+            OriginId::Named("SUN".to_string()),
+            TimeScale::Tdb,
+        );
+        let targets = TimeArray::from_parts(TimeScale::Tdb, vec![60_010], vec![0]).unwrap();
+        let request =
+            PropagationRequest::new(&orbits, &targets, PropagationOptions::default()).unwrap();
+        let callback_error = assist.propagate(&request, &NoopProvider).unwrap_err();
+        assert!(
+            matches!(callback_error, PropagationError::Backend(message) if message.contains("kernel provenance verification failed"))
+        );
+
+        std::fs::remove_file(&planets).unwrap();
+        std::fs::rename(&loaded_planets, &planets).unwrap();
+        assert_eq!(assist.data_fingerprint().unwrap(), fingerprint);
+        assist.external_propagator().unwrap();
+
+        drop(retained);
+        drop(assist);
+        std::fs::remove_file(planets).unwrap();
+        std::fs::remove_file(asteroids).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn partial_marsden_constants_fill_asteroid_defaults_per_field() {
+        let parameters = assist_non_gravitational_parameters(
+            Some(NonGravitationalParametersRow {
+                a1: Some(1.0e-9),
+                a2: None,
+                a3: None,
+                aln: Some(0.25),
+                nk: None,
+                nm: None,
+                nn: Some(4.0),
+                r0: None,
+            }),
+            "partial",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(parameters.a1, 1.0e-9);
+        assert_eq!(parameters.a2, 0.0);
+        assert_eq!(parameters.a3, 0.0);
+        assert_eq!(parameters.alpha, Some(0.25));
+        assert_eq!(parameters.nk, Some(0.0));
+        assert_eq!(parameters.nm, Some(2.0));
+        assert_eq!(parameters.nn, Some(4.0));
+        assert_eq!(parameters.r0, Some(1.0));
     }
 
     #[test]
@@ -2262,7 +2617,7 @@ mod tests {
 
     fn fixture() -> Value {
         serde_json::from_str(include_str!(
-            "../../../migration/artifacts/assist_public_semantics_fixture_2026-05-20.json"
+            "../testdata/assist_public_semantics_fixture_2026-05-20.json"
         ))
         .expect("fixture JSON must parse")
     }
@@ -2359,6 +2714,42 @@ mod tests {
                 ]
             })
             .collect()
+    }
+
+    fn finite_spherical_residual(
+        actual_states: &[[f64; 6]],
+        expected_states: &[[f64; 6]],
+        case_id: &str,
+    ) -> (f64, [f64; 6]) {
+        assert_eq!(actual_states.len(), expected_states.len(), "{case_id} rows");
+        let mut max_abs = 0.0_f64;
+        let mut per_axis = [0.0_f64; 6];
+        for (actual, expected) in actual_states.iter().zip(expected_states.iter()) {
+            assert!(
+                actual.iter().all(|value| value.is_finite()),
+                "{case_id} actual spherical state is non-finite: {actual:?}"
+            );
+            assert!(
+                expected.iter().all(|value| value.is_finite()),
+                "{case_id} expected spherical state is non-finite: {expected:?}"
+            );
+            for axis in 0..6 {
+                let diff = (actual[axis] - expected[axis]).abs();
+                assert!(
+                    diff.is_finite(),
+                    "{case_id} spherical residual axis {axis} is non-finite"
+                );
+                per_axis[axis] = per_axis[axis].max(diff);
+                max_abs = max_abs.max(diff);
+            }
+        }
+        (max_abs, per_axis)
+    }
+
+    #[test]
+    #[should_panic(expected = "actual spherical state is non-finite")]
+    fn all_nan_ephemeris_output_cannot_pass_residual_gate() {
+        finite_spherical_residual(&[[f64::NAN; 6]], &[[0.0; 6]], "all-nan-control");
     }
 
     fn json_cartesian_coordinates(value: &Value) -> CoordinateBatch {
@@ -2483,6 +2874,14 @@ mod tests {
         let mut max_position_abs: f64 = 0.0;
         let mut max_velocity_abs: f64 = 0.0;
         for (actual, expected) in actual_states.iter().zip(expected_states.iter()) {
+            assert!(
+                actual.iter().all(|value| value.is_finite()),
+                "{case_id} actual state is non-finite: {actual:?}"
+            );
+            assert!(
+                expected.iter().all(|value| value.is_finite()),
+                "{case_id} expected state is non-finite: {expected:?}"
+            );
             for axis in 0..3 {
                 max_position_abs = max_position_abs.max((actual[axis] - expected[axis]).abs());
             }
@@ -2517,6 +2916,13 @@ mod tests {
     }
 
     fn assert_residuals_within_acceptance(residuals: &[FixtureResidual]) {
+        assert!(
+            residuals.iter().all(|residual| {
+                residual.max_position_abs_au.is_finite()
+                    && residual.max_velocity_abs_au_per_day.is_finite()
+            }),
+            "fixture residuals must all be finite: {residuals:?}"
+        );
         let max_position_abs = residuals
             .iter()
             .map(|residual| residual.max_position_abs_au)
@@ -2536,6 +2942,13 @@ mod tests {
     }
 
     fn write_residual_artifact(fixture: &Value, residuals: &[FixtureResidual]) {
+        assert!(
+            residuals.iter().all(|residual| {
+                residual.max_position_abs_au.is_finite()
+                    && residual.max_velocity_abs_au_per_day.is_finite()
+            }),
+            "refusing to write non-finite fixture residuals: {residuals:?}"
+        );
         let Ok(path) = std::env::var("ADAM_CORE_RS_ASSIST_RESIDUALS_PATH") else {
             return;
         };
@@ -2868,15 +3281,8 @@ mod tests {
                 &expected_times,
                 "{case_id} times"
             );
-            let mut max_abs = 0.0_f64;
-            let mut per_axis = [0.0_f64; 6];
-            for (actual, expected) in actual_states.iter().zip(expected_states.iter()) {
-                for axis in 0..6 {
-                    let diff = (actual[axis] - expected[axis]).abs();
-                    per_axis[axis] = per_axis[axis].max(diff);
-                    max_abs = max_abs.max(diff);
-                }
-            }
+            let (max_abs, per_axis) =
+                finite_spherical_residual(actual_states, &expected_states, case_id);
             println!(
                 "{case_id}: ephemeris max abs spherical residual = {max_abs:e}; per-axis [rho,lon,lat,vrho,vlon,vlat] = {per_axis:?}"
             );

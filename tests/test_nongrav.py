@@ -81,10 +81,12 @@ def test_non_gravitational_coefficients_change_trajectory_and_survive_output():
     propagated = _propagate(active)
     control = _propagate(gravity_only)
 
-    assert (
-        np.max(np.abs(propagated.coordinates.values - control.coordinates.values))
-        > 1e-8
-    )
+    actual = propagated.coordinates.values
+    expected = control.coordinates.values
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    residual = np.abs(actual - expected)
+    assert np.isfinite(residual).all()
+    assert np.max(residual) > 1e-8
     assert propagated.non_gravitational_parameters.source.to_pylist() == [
         "SBDB",
         "NEOCC",
@@ -132,9 +134,11 @@ def test_explicit_marsden_constants_change_force_law():
         ),
     )
 
-    delta = (
-        _propagate(comet).coordinates.values - _propagate(default).coordinates.values
-    )
+    actual = _propagate(comet).coordinates.values
+    expected = _propagate(default).coordinates.values
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    delta = actual - expected
+    assert np.isfinite(delta).all()
     assert np.max(np.abs(delta)) > 1e-8
 
 
@@ -152,9 +156,13 @@ def test_same_model_nongrav_batch_matches_solo_propagations():
         [_propagate(batched_input[i : i + 1], mjd=60150.0) for i in range(2)]
     ).sort_by(["orbit_id", "coordinates.time.days", "coordinates.time.nanos"])
 
-    position_residual_km = (
-        np.max(np.abs(batched.coordinates.r - solos.coordinates.r)) * 149597870.7
-    )
+    actual = batched.coordinates.r
+    expected = solos.coordinates.r
+    assert np.isfinite(actual).all() and np.isfinite(expected).all()
+    residual = np.abs(actual - expected)
+    assert np.isfinite(residual).all()
+    position_residual_km = np.max(residual) * 149597870.7
+    assert np.isfinite(position_residual_km)
     assert position_residual_km < 1e-4
 
 
@@ -230,22 +238,38 @@ def test_collision_detection_groups_mixed_marsden_models_and_restores_rows():
     )
 
 
-def test_partial_constants_are_rejected_for_active_force():
-    orbits = make_orbits_with_nongrav(
+def test_partial_constants_fill_asteroid_defaults_per_field():
+    partial = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
             A1=[1.07e-9, None],
             A2=[None, -2.9e-14],
             A3=[None, None],
             ALN=[COMET_CONSTANTS["ALN"], None],
-            NK=[COMET_CONSTANTS["NK"], None],
-            NM=[None, None],
-            NN=[None, None],
-            R0=[COMET_CONSTANTS["R0"], None],
+            NK=[None, COMET_CONSTANTS["NK"]],
+            NM=[None, COMET_CONSTANTS["NM"]],
+            NN=[4.5, None],
+            R0=[None, COMET_CONSTANTS["R0"]],
         )
     )
-    with pytest.raises(ValueError, match="Partially-specified Marsden"):
-        _propagate(orbits)
+    filled = make_orbits_with_nongrav(
+        NonGravitationalParameters.from_kwargs(
+            source=["SBDB", "SBDB"],
+            A1=[1.07e-9, None],
+            A2=[None, -2.9e-14],
+            A3=[None, None],
+            ALN=[COMET_CONSTANTS["ALN"], 1.0],
+            NK=[0.0, COMET_CONSTANTS["NK"]],
+            NM=[2.0, COMET_CONSTANTS["NM"]],
+            NN=[4.5, 5.093],
+            R0=[1.0, COMET_CONSTANTS["R0"]],
+        )
+    )
+
+    np.testing.assert_array_equal(
+        _propagate(partial).coordinates.values,
+        _propagate(filled).coordinates.values,
+    )
 
 
 def test_partial_constants_are_ignored_on_force_free_rows():
@@ -283,21 +307,23 @@ def test_non_finite_acceleration_is_rejected():
     [
         {"ALN": 0.0},
         {"ALN": -1.0},
-        {"R0": 0.0},
-        {"R0": -2.808},
+        {"ALN": float("nan")},
+        {"NK": float("inf")},
         {"NM": float("nan")},
         {"NN": float("inf")},
+        {"R0": 0.0},
+        {"R0": -2.808},
+        {"R0": float("nan")},
     ],
 )
 def test_invalid_marsden_constants_are_rejected(overrides):
-    constants = {**COMET_CONSTANTS, **overrides}
     orbits = make_orbits_with_nongrav(
         NonGravitationalParameters.from_kwargs(
             source=["SBDB", "SBDB"],
             A1=[1.07e-9, 8.9e-10],
             A2=[-3.6e-11, -2.1e-11],
             A3=[None, None],
-            **{name: [value, value] for name, value in constants.items()},
+            **{name: [value, value] for name, value in overrides.items()},
         )
     )
     with pytest.raises(ValueError, match="Invalid Marsden"):
