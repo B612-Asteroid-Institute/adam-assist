@@ -505,6 +505,15 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             "RELEASE_CHANNEL": "stable",
         }:
             _fail(name, "Rust release identities drifted")
+        for job_id in ("package-and-test", "latest-stable-compatibility"):
+            setup = _step_by_name(jobs[job_id], "Set up supported Python")
+            if setup.get("uses") != "actions/setup-python@v5" or setup.get("with") != {
+                "python-version": "3.13"
+            }:
+                _fail(
+                    f"{name}:{job_id}",
+                    "Python-feature Rust checks require exact CPython 3.13",
+                )
 
 
 def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> None:
