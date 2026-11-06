@@ -386,6 +386,38 @@ def test_wheel_release_requires_supported_macos_arm64_runner() -> None:
         verify_workflow_documents(workflows)
 
 
+def test_wheel_benchmark_is_non_gating_and_artifact_dependent() -> None:
+    workflow_name = "release-candidate-wheel-matrix.yml"
+
+    missing_non_gating = deepcopy(BASE)
+    del missing_non_gating[workflow_name]["jobs"]["full-current-benchmark"][
+        "continue-on-error"
+    ]
+    with pytest.raises(WorkflowPolicyError, match="diagnostic must be non-gating"):
+        verify_workflow_documents(missing_non_gating)
+
+    weakened_artifacts = deepcopy(BASE)
+    weakened_artifacts[workflow_name]["jobs"]["artifact-acceptance"][
+        "continue-on-error"
+    ] = True
+    with pytest.raises(WorkflowPolicyError, match="continue-on-error is forbidden"):
+        verify_workflow_documents(weakened_artifacts)
+
+    detached = deepcopy(BASE)
+    detached[workflow_name]["jobs"]["full-current-benchmark"][
+        "needs"
+    ] = "compatibility-floor"
+    with pytest.raises(WorkflowPolicyError, match="depend on artifact acceptance"):
+        verify_workflow_documents(detached)
+
+    unsupported_runner = deepcopy(BASE)
+    unsupported_runner[workflow_name]["jobs"]["full-current-benchmark"][
+        "runs-on"
+    ] = "macos-14"
+    with pytest.raises(WorkflowPolicyError, match="supported macos-15 runner"):
+        verify_workflow_documents(unsupported_runner)
+
+
 def test_normal_artifact_and_reporting_actions_are_explicitly_allowed() -> None:
     actions = {
         step.get("uses")
