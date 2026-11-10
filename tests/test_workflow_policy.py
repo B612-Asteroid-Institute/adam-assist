@@ -352,7 +352,7 @@ def test_release_ready_policy_rejects_mutations(mutation: Mutation) -> None:
 
 
 @pytest.mark.parametrize("job", ["package-and-test", "latest-stable-compatibility"])
-def test_rust_release_python_feature_jobs_require_cpython_313(job: str) -> None:
+def test_rust_release_python_feature_jobs_require_cpython_314(job: str) -> None:
     workflow = "rust-crate-release-candidate.yml"
 
     missing = deepcopy(BASE)
@@ -367,9 +367,63 @@ def test_rust_release_python_feature_jobs_require_cpython_313(job: str) -> None:
         for step in unsupported[workflow]["jobs"][job]["steps"]
         if step.get("name") == "Set up supported Python"
     )
-    setup["with"]["python-version"] = "3.14"
+    setup["with"]["python-version"] = "3.13"
     with pytest.raises(WorkflowPolicyError):
         verify_workflow_documents(unsupported)
+
+
+@pytest.mark.parametrize(
+    "step_name",
+    (
+        "Prepare only missing checksum-verified files",
+        "Verify the complete public release matches accepted bytes",
+    ),
+)
+def test_publication_expected_counts_follow_acceptance_matrix(step_name: str) -> None:
+    workflows = deepcopy(BASE)
+    step = next(
+        item
+        for item in workflows["publish.yml"]["jobs"]["publish-pypi"]["steps"]
+        if item.get("name") == step_name
+    )
+    step["run"] = step["run"].replace("--expected-count 16", "--expected-count 12")
+    with pytest.raises(WorkflowPolicyError, match="every publication expected count"):
+        verify_workflow_documents(workflows)
+
+
+def test_publication_aggregation_count_and_tags_follow_acceptance_matrix() -> None:
+    aggregate_drift = deepcopy(BASE)
+    step = next(
+        item
+        for item in aggregate_drift["publish.yml"]["jobs"]["collect-tested-artifacts"][
+            "steps"
+        ]
+        if item.get("name")
+        == "Aggregate and verify adam-assist wheels without rebuilding"
+    )
+    step["run"] = step["run"].replace(')" = 16', ')" = 12', 1)
+    with pytest.raises(WorkflowPolicyError, match="aggregate wheel count"):
+        verify_workflow_documents(aggregate_drift)
+
+    tags_drift = deepcopy(BASE)
+    step = next(
+        item
+        for item in tags_drift["publish.yml"]["jobs"]["collect-tested-artifacts"][
+            "steps"
+        ]
+        if item.get("name")
+        == "Aggregate and verify adam-assist wheels without rebuilding"
+    )
+    step["run"] = step["run"].replace(', "cp314"', "", 1)
+    with pytest.raises(WorkflowPolicyError, match="publication Python tags"):
+        verify_workflow_documents(tags_drift)
+
+    matrix_drift = deepcopy(BASE)
+    matrix_drift["release-candidate-wheel-matrix.yml"]["jobs"]["artifact-acceptance"][
+        "strategy"
+    ]["matrix"]["platform"].pop()
+    with pytest.raises(WorkflowPolicyError, match="acceptance matrix size"):
+        verify_workflow_documents(matrix_drift)
 
 
 def test_wheel_release_requires_supported_macos_arm64_runner() -> None:

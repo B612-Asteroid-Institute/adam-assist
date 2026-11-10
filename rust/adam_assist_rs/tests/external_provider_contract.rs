@@ -1,17 +1,19 @@
 //! Standalone-Rust boundary checks for the propagation-only Core adapter.
 
-use adam_assist::{AssistData, AssistExternalPropagator, AssistPropagator, Ephemeris};
+use adam_assist::{AssistData, AssistExternalPropagator, AssistPropagator, AssistShard, Ephemeris};
 use adam_core::od::OdPropagator;
-use adam_core_rs_coords::propagation::Propagator;
+use adam_core_rs_coords::propagation::{Propagator, PropagatorShard};
 use std::path::Path;
 use std::sync::Arc;
 
 fn assert_direct_provider<T: Propagator + Clone + Send + Sync>() {}
+fn assert_provider_shard<T: PropagatorShard>() {}
 fn assert_owned_adapter<T: Send>() {}
 
 #[test]
 fn public_types_preserve_direct_and_adapter_boundaries() {
     assert_direct_provider::<AssistPropagator>();
+    assert_provider_shard::<AssistShard>();
     assert_owned_adapter::<AssistExternalPropagator>();
 }
 
@@ -54,10 +56,11 @@ fn adapter_owns_context_and_bare_ephemeris_cannot_claim_provenance() {
     drop(assist);
 
     let handle = std::thread::spawn(move || {
-        let metadata =
-            adam_core::od::algorithms::external_provider_metadata(external.external()).unwrap();
-        assert_eq!(metadata.configuration_fingerprint, configuration);
-        assert_eq!(metadata.data_fingerprint, data);
+        assert_eq!(
+            external.external().configuration_fingerprint(),
+            Some(configuration.as_str())
+        );
+        assert_eq!(external.external().data_fingerprint(), Some(data.as_str()));
         let _provider = OdPropagator::external(external.external());
     });
     handle.join().unwrap();

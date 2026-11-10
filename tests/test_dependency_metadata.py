@@ -108,6 +108,61 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     }.isdisjoint(dependencies)
 
 
+def test_cpython_314_binding_and_distribution_metadata() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        pyproject = tomllib.load(pyproject_file)
+    project = pyproject["project"]
+    assert project["requires-python"] == ">=3.11,<3.15"
+    assert {
+        f"Programming Language :: Python :: 3.{minor}" for minor in range(11, 15)
+    } <= set(project["classifiers"])
+
+    manifest = _cargo_manifest()
+    assert manifest["dependencies"]["pyo3"] == {
+        "version": "0.28",
+        "optional": True,
+    }
+    assert manifest["dependencies"]["numpy"] == {
+        "version": "0.28",
+        "optional": True,
+    }
+    python_source = (ROOT / "rust" / "adam_assist_rs" / "src" / "python.rs").read_text()
+    assert "#[pymodule(gil_used = true)]" in python_source
+    assert "allow_threads" not in python_source
+    assert "new_bound" not in python_source
+    assert "into_pyarray_bound" not in python_source
+
+    normal_ci = (
+        ROOT / ".github/workflows/pip-build-lint-test-coverage.yml"
+    ).read_text()
+    release_matrix = (
+        ROOT / ".github/workflows/release-candidate-wheel-matrix.yml"
+    ).read_text()
+    publish = (ROOT / ".github/workflows/publish.yml").read_text()
+    assert 'python-version: "3.14"' in normal_ci
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in release_matrix
+    assert 'expected_python = {"cp311", "cp312", "cp313", "cp314"}' in publish
+
+
+def test_unreleased_python314_work_records_immutable_release_boundaries() -> None:
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    release_tooling = (
+        ROOT / "migration" / "scripts" / "RELEASE_TOOLING.md"
+    ).read_text()
+    migration = (ROOT / "MIGRATION.md").read_text()
+    assert changelog.index("## [Unreleased]") < changelog.index(
+        "## [0.6.0] - 2026-11-06"
+    )
+    for source in (changelog, release_tooling, migration):
+        assert "0.6.0" in source
+        assert "immutable" in source
+        assert "separately authorized" in source
+        assert "version bump" in source
+        assert "likely 0.8" in source
+    assert "intentionally freezes Assist publication" in changelog
+    assert "freezes every Assist publication" in release_tooling
+
+
 def test_dev_lint_tool_is_pinned() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)

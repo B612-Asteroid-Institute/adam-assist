@@ -1,5 +1,3 @@
-#![allow(clippy::useless_conversion)] // PyO3 0.22 macro expansion trips this lint on generated wrappers.
-
 use crate::AssistData;
 use crate::AssistPropagator as RustAssistPropagator;
 use crate::{map_origin_code_to_assist_body, CollisionConditionSpec, CollisionDetectionOutput};
@@ -157,7 +155,7 @@ impl NativeAssistPropagator {
             .inner
             .data_fingerprint()
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        PyCapsule::new_bound(
+        PyCapsule::new(
             py,
             adam_core_rs_coords::propagation::OwnedExternalPropagator::new_with_fingerprints(
                 self.inner.clone(),
@@ -195,7 +193,7 @@ impl NativeAssistPropagator {
             })?;
         let operation = benchmark.operation().to_string();
         let samples = py
-            .allow_threads(|| {
+            .detach(|| {
                 let mut trial_samples = Vec::with_capacity(trials);
                 for _ in 0..trials {
                     for _ in 0..warmup_reps {
@@ -409,7 +407,7 @@ impl NativeAssistPropagator {
             sampled_covariance: covariance,
         };
         let result = py
-            .allow_threads(|| run_ephemeris_benchmark(self, &benchmark))
+            .detach(|| run_ephemeris_benchmark(self, &benchmark))
             .map_err(py_propagation_error)?;
         self.store_benchmark(benchmark)?;
         ephemeris_result_to_dict(py, &result)
@@ -521,11 +519,11 @@ impl NativeAssistPropagator {
             conditions,
         };
         let output = py
-            .allow_threads(|| run_collision_benchmark(self, &benchmark))
+            .detach(|| run_collision_benchmark(self, &benchmark))
             .map_err(py_runtime_error)?;
         self.store_benchmark(benchmark)?;
 
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
         dict.set_item(
             "final_indices",
             output
@@ -726,7 +724,7 @@ impl NativeAssistPropagator {
             sampled_covariance: covariance,
         };
         let result = py
-            .allow_threads(|| run_propagation_benchmark(self, &benchmark))
+            .detach(|| run_propagation_benchmark(self, &benchmark))
             .map_err(py_propagation_error)?;
         self.store_benchmark(benchmark)?;
         propagation_result_to_dict(py, &result)
@@ -1048,7 +1046,7 @@ fn shaped_states_array<'py>(
         .collect();
     let shaped = ndarray::Array2::from_shape_vec((states.len(), 6), flat)
         .map_err(|err| PyRuntimeError::new_err(format!("failed to shape states: {err}")))?;
-    Ok(shaped.into_pyarray_bound(py))
+    Ok(shaped.into_pyarray(py))
 }
 
 fn states_from_pyarray(states: PyReadonlyArray2<'_, f64>) -> PyResult<Vec<[f64; 6]>> {
@@ -1156,7 +1154,7 @@ fn propagation_result_to_dict<'py>(
     py: Python<'py>,
     result: &adam_core_rs_coords::propagation::PropagationResult,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     let (orbit_ids, object_ids, variant_ids, weights, weights_cov, coordinates) =
         if let Some(variants) = &result.variants {
             (
@@ -1235,7 +1233,7 @@ fn propagation_result_to_dict<'py>(
     dict.set_item("variant_id", variant_ids)?;
     dict.set_item("weights", weights)?;
     dict.set_item("weights_cov", weights_cov)?;
-    dict.set_item("states", shaped_states.into_pyarray_bound(py))?;
+    dict.set_item("states", shaped_states.into_pyarray(py))?;
     match &coordinates.covariance {
         Some(covariance) => {
             let shaped_covariance = ndarray::Array2::from_shape_vec(
@@ -1243,7 +1241,7 @@ fn propagation_result_to_dict<'py>(
                 covariance.values_row_major.clone(),
             )
             .map_err(|err| PyRuntimeError::new_err(format!("failed to shape covariance: {err}")))?;
-            dict.set_item("covariances", shaped_covariance.into_pyarray_bound(py))?;
+            dict.set_item("covariances", shaped_covariance.into_pyarray(py))?;
         }
         None => dict.set_item("covariances", py.None())?,
     }
@@ -1284,7 +1282,7 @@ fn ephemeris_result_to_dict<'py>(
     py: Python<'py>,
     result: &EphemerisResult,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new_bound(py);
+    let dict = PyDict::new(py);
     let ephemeris = &result.ephemeris;
     dict.set_item(
         "orbit_id",
@@ -1314,7 +1312,7 @@ fn ephemeris_result_to_dict<'py>(
     let shaped = ndarray::Array2::from_shape_vec((states.len(), 6), flat).map_err(|err| {
         PyRuntimeError::new_err(format!("failed to shape ephemeris states: {err}"))
     })?;
-    dict.set_item("states", shaped.into_pyarray_bound(py))?;
+    dict.set_item("states", shaped.into_pyarray(py))?;
     match &coordinates.covariance {
         Some(cov) => {
             let cov_shaped = ndarray::Array2::from_shape_vec(
@@ -1324,7 +1322,7 @@ fn ephemeris_result_to_dict<'py>(
             .map_err(|err| {
                 PyRuntimeError::new_err(format!("failed to shape ephemeris covariance: {err}"))
             })?;
-            dict.set_item("covariance", cov_shaped.into_pyarray_bound(py))?;
+            dict.set_item("covariance", cov_shaped.into_pyarray(py))?;
         }
         None => {
             dict.set_item("covariance", py.None())?;
@@ -1384,7 +1382,7 @@ fn ephemeris_result_to_dict<'py>(
                     .map_err(|err| {
                         PyRuntimeError::new_err(format!("failed to shape aberrated states: {err}"))
                     })?;
-            dict.set_item("aberrated_states", aberrated_shaped.into_pyarray_bound(py))?;
+            dict.set_item("aberrated_states", aberrated_shaped.into_pyarray(py))?;
             dict.set_item(
                 "aberrated_origin_codes",
                 aberrated
@@ -1426,7 +1424,7 @@ fn ephemeris_result_to_dict<'py>(
                             "failed to shape aberrated covariance: {err}"
                         ))
                     })?;
-                    dict.set_item("aberrated_covariance", cov_shaped.into_pyarray_bound(py))?;
+                    dict.set_item("aberrated_covariance", cov_shaped.into_pyarray(py))?;
                 }
                 None => {
                     dict.set_item("aberrated_covariance", py.None())?;
@@ -1466,7 +1464,7 @@ fn py_propagation_error(error: impl std::fmt::Display) -> PyErr {
     }
 }
 
-#[pymodule]
+#[pymodule(gil_used = true)]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("CARGO_VERSION", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<NativeAssistPropagator>()?;

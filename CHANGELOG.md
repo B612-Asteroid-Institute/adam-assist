@@ -1,6 +1,29 @@
 # Changelog
 
-## [0.6.0] - Unreleased
+## [Unreleased]
+
+### Changed
+
+- Upgraded the optional native bindings to PyO3/NumPy 0.28 and declared
+  CPython 3.11-3.14 support. Ordinary CI loads a non-release Python Core wheel
+  built from `cd4b24f9` beside an Assist wheel built with Assist's registry-only
+  Cargo lock; the Assist extension therefore embeds registry Core 0.7 Rust
+  crates. The two extensions exercise the unchanged external capsule ABI. A
+  separate direct-Rust check path-patches all six Core crates to `cd4b24f9`.
+  The four-platform release-candidate matrix now covers 16 wheels. Published
+  adam-assist 0.6.0 artifacts are immutable; releasing these changes requires a
+  separately authorized Assist version bump and matching workflow/assertion
+  updates, and no successor version is selected here. The paired Core source
+  removes the public `external_provider_metadata` Rust API and moves
+  Arrow/Parquet 54 to 58, so a SemVer-compliant Core successor is likely 0.8 and
+  outside every current Assist range. Assist range, lock, workflow, and version
+  alignment therefore require separate authorization before PyPI wheel
+  publication; merging this candidate intentionally freezes Assist publication
+  to PyPI until those prerequisites land. The wheel matrix does not gate
+  crates.io, but changed crate bytes cannot be republished as immutable 0.6.0
+  and likewise require separately authorized version and Core-range alignment.
+
+## [0.6.0] - 2026-11-06
 
 ### Removed (breaking)
 

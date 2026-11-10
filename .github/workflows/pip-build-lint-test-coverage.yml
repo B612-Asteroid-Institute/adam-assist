@@ -17,6 +17,7 @@ concurrency:
 env:
   ADAM_CORE_VERSION: "0.7.0"
   ADAM_CORE_SOURCE_REF: "a6478f2f280c266d7a5d1442997eb520fc20888f"
+  ADAM_CORE_PYTHON314_REF: "cd4b24f923d048e8538af88dd8c24b1c10b5e770"
 
 jobs:
   source-pair:
@@ -118,6 +119,126 @@ jobs:
         with:
           path-to-lcov: coverage.xml
 
+  python-314-source-pair:
+    name: Exact CPython 3.14 candidate pair
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout adam-assist
+        uses: actions/checkout@v4
+      - name: Checkout exact CPython 3.14 adam-core candidate
+        uses: actions/checkout@v4
+        with:
+          repository: B612-Asteroid-Institute/adam_core
+          ref: ${{ env.ADAM_CORE_PYTHON314_REF }}
+          path: .python314-pair/adam-core
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          components: rustfmt, clippy
+      - name: Verify exact CPython 3.14 candidate identities
+        run: |
+          set -euo pipefail
+          core=.python314-pair/adam-core
+          test "$(git -C "$core" rev-parse HEAD)" = "$ADAM_CORE_PYTHON314_REF"
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          core = Path(".python314-pair/adam-core")
+          with (core / "pyproject.toml").open("rb") as stream:
+              core_python = tomllib.load(stream)
+          with (core / "rust/adam_core_py/Cargo.toml").open("rb") as stream:
+              core_rust = tomllib.load(stream)
+          with Path("pyproject.toml").open("rb") as stream:
+              assist_python = tomllib.load(stream)
+          with Path("rust/adam_assist_rs/Cargo.toml").open("rb") as stream:
+              assist_rust = tomllib.load(stream)
+          assert core_python["project"]["requires-python"] == ">=3.11,<3.15"
+          assert assist_python["project"]["requires-python"] == ">=3.11,<3.15"
+          assert core_rust["dependencies"]["pyo3"]["version"] == "0.28"
+          assert core_rust["dependencies"]["numpy"] == "0.28"
+          assert assist_rust["dependencies"]["pyo3"]["version"] == "0.28"
+          assert assist_rust["dependencies"]["numpy"]["version"] == "0.28"
+          PY
+      - name: Install CPython 3.14 build and test tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "maturin>=1.7,<2"
+      - name: Verify exact direct Rust source pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          core="$GITHUB_WORKSPACE/.python314-pair/adam-core"
+          pair="$RUNNER_TEMP/adam-assist-direct-rust-pair"
+          python migration/scripts/verify_python314_pair_lock.py
+          cp -R rust/adam_assist_rs "$pair"
+          cp migration/locks/adam-assist-core-cd4b24f9.Cargo.lock \
+            "$pair/Cargo.lock"
+          mkdir -p "$pair/.cargo"
+          cat > "$pair/.cargo/config.toml" <<EOF
+          [patch.crates-io]
+          adam_core = { path = "$core/rust/adam_core" }
+          adam_core_rs_autodiff = { path = "$core/rust/adam_core_rs_autodiff" }
+          adam_core_rs_coords = { path = "$core/rust/adam_core_rs_coords" }
+          adam_core_rs_kernel_data = { path = "$core/rust/adam_core_rs_kernel_data" }
+          adam_core_rs_orbit_determination = { path = "$core/rust/adam_core_rs_orbit_determination" }
+          adam_core_rs_spice = { path = "$core/rust/adam_core_rs_spice" }
+          EOF
+          (
+            cd "$pair"
+            cargo test --locked --all-targets
+            cargo run --locked --example core_owned_od
+          )
+          git diff --exit-code
+          git -C "$core" diff --exit-code
+      - name: Build and install exact CPython 3.14 wheel pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheelhouse="$RUNNER_TEMP/python314-source-built-pair-wheels"
+          mkdir -p "$wheelhouse"
+          (cd .python314-pair/adam-core && \
+            maturin build --release --locked --out "$wheelhouse")
+          maturin build --release --locked --out "$wheelhouse"
+          core_wheel="$(find "$wheelhouse" -name 'adam_core-*.whl' -print -quit)"
+          assist_wheel="$(find "$wheelhouse" -name 'adam_assist-*.whl' -print -quit)"
+          test -n "$core_wheel" && test -n "$assist_wheel"
+          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          python migration/scripts/verify_dev_environment.py --require-wheel
+      - name: Run exact direct Rust runtime and provenance checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          pair="$RUNNER_TEMP/adam-assist-direct-rust-pair"
+          export ADAM_CORE_RS_ASSIST_PLANETS_PATH="$(python -c \
+            'from naif_de440 import de440; print(de440)')"
+          export ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH="$(python -c \
+            'from jpl_small_bodies_de441_n16 import de441_n16; print(de441_n16)')"
+          test -f "$ADAM_CORE_RS_ASSIST_PLANETS_PATH"
+          test -f "$ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH"
+          (
+            cd "$pair"
+            cargo test --locked --all-targets -- --ignored
+          )
+      - name: Run CPython 3.14 capsule and full-suite checks
+        run: |
+          python -m compileall -q src tests migration
+          python -m pytest --benchmark-skip -q tests
+      - name: Verify CPython 3.14 tracked state
+        run: |
+          pdm lock --check
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_VERSION" --python-lock --rust-lock
+          git diff --exit-code
+          git -C .python314-pair/adam-core diff --exit-code
+      - name: Upload exact CPython 3.14 source-built non-release pair evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: python314-source-built-nonrelease-pair-wheels
+          path: ${{ runner.temp }}/python314-source-built-pair-wheels/*.whl
+
   rust-quality:
     name: Public Core registry-locked Rust quality
     runs-on: ubuntu-latest
@@ -176,7 +297,7 @@ jobs:
 
   benchmark:
     runs-on: ubuntu-latest
-    needs: [source-pair, rust-quality]
+    needs: [source-pair, python-314-source-pair, rust-quality]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -17,6 +17,7 @@ def test_exact_workflow_inventory_and_gated_release_jobs() -> None:
     assert set(workflows) == set(WORKFLOW_INVENTORY)
     assert set(workflows[NORMAL]["jobs"]) == {
         "source-pair",
+        "python-314-source-pair",
         "rust-quality",
         "benchmark",
     }
@@ -63,6 +64,9 @@ def test_critical_ci_commands_and_benchmark_evidence_are_pinned() -> None:
     source_runs = "\n".join(
         step.get("run", "") for step in jobs["source-pair"]["steps"]
     )
+    python314_runs = "\n".join(
+        step.get("run", "") for step in jobs["python-314-source-pair"]["steps"]
+    )
     rust_run = next(
         step["run"]
         for step in jobs["rust-quality"]["steps"]
@@ -80,6 +84,24 @@ def test_critical_ci_commands_and_benchmark_evidence_are_pinned() -> None:
         "--core-tree .source-pair/adam-core",
     ):
         assert command in source_runs
+    python314_setup = next(
+        step
+        for step in jobs["python-314-source-pair"]["steps"]
+        if step.get("uses") == "actions/setup-python@v5"
+    )
+    assert python314_setup["with"] == {"python-version": "3.14"}
+    for command in (
+        "ADAM_CORE_PYTHON314_REF",
+        "verify_python314_pair_lock.py",
+        "adam-assist-core-cd4b24f9.Cargo.lock",
+        "cargo test --locked --all-targets",
+        "core_owned_od",
+        "-- --ignored",
+        "ADAM_CORE_RS_ASSIST_PLANETS_PATH",
+        "ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH",
+        "python -m pytest --benchmark-skip -q tests",
+    ):
+        assert command in python314_runs
     for command in ("cargo fmt", "cargo check", "cargo clippy", "cargo test"):
         assert command in rust_run
     assert "--locked" in rust_run

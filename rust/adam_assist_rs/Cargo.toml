@@ -28,8 +28,8 @@ libassist-sys = "=1.2.1"
 librebound-sys = "=4.6.0"
 thiserror = "2"
 ndarray = { version = "0.16", optional = true }
-numpy = { version = "0.22", optional = true }
-pyo3 = { version = "0.22", optional = true }
+numpy = { version = "0.28", optional = true }
+pyo3 = { version = "0.28", optional = true }
 rayon = "1.11"
 sha2 = "0.10"
 

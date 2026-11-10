@@ -221,9 +221,13 @@ Repository validation covers:
   including an all-NaN capsule control that must fail;
 - default, all-feature, and no-default-feature `check`, warning-denied Clippy,
   tests, doctests, and warning-denied docs on Rust 1.87;
-- Python 3.11–3.13 source-pair wheels, lint, formatting, import compilation,
-  strict mypy, installed versions, wheel dependency floors, workflow policy,
-  public-surface governance, and current propagation-only benchmarks;
+- Python 3.11–3.13 Assist-wheel testing with Core wheels built from the exact
+  public Core 0.7 release source. For CPython 3.14, the Assist wheel is built
+  from its registry-only Cargo lock and loaded beside a non-release Python Core
+  wheel built from exact candidate `cd4b24f9`; lint, formatting, import
+  compilation, strict mypy, installed versions, wheel dependency floors,
+  workflow policy, public-surface governance, and current propagation-only
+  benchmarks;
 - source-tree and packaged-crate consumers. The science fixture needed by
   crate unit tests is duplicated under `rust/adam_assist_rs/testdata`; a test
   pins it byte-for-byte to the historical migration artifact so packaged
@@ -231,10 +235,41 @@ Repository validation covers:
 
 The machine-readable source-pair state is `exact-public-release`; its
 `lock_state` and `registry_state` require public Core 0.7.0 and authentic
-registry-only locks. CI verifies release commit `a6478f2f…`, builds the matching
-Core wheel, and consumes all Rust Core crates from the exact checksummed Cargo
-lock. Package manifests and locks contain no path, Git, URL, patch, replacement,
-or fabricated checksum state.
+registry-only locks. CI verifies release commit `a6478f2f…`, builds a wheel
+from that exact released source for testing, and consumes all Rust Core crates
+from the exact checksummed Cargo lock. That source-built wheel is not a new
+registry artifact; the immutable public Core 0.7 wheel set remains the release
+authority. Package manifests and registry locks contain no path, Git, URL,
+patch, replacement, or fabricated checksum state.
+
+A separate ordinary-CI lane checks out adam-core
+`cd4b24f923d048e8538af88dd8c24b1c10b5e770`, builds a non-release Python Core
+wheel from that ref, and builds the Assist wheel from this tree with Assist's
+registry-only Cargo lock. The Assist native extension embeds registry Core 0.7
+Rust crates, not the candidate Core source; the separately loaded Python Core
+extension comes from `cd4b24f9`. The two extensions exercise the unchanged
+external capsule ABI and the full Python suite. Separately, the lane copies the
+Assist crate into a disposable directory and path-patches all six Core crates to
+`cd4b24f9` for direct Rust and Core-owned OD checks. A dedicated committed pair
+lock makes that direct-Rust patched build reproducible on Rust 1.87; installed
+DE440/SB441 paths then drive every ignored direct-Rust runtime/provenance
+contract. The uploaded CI artifact is explicitly source-built evidence, not an
+immutable registry release.
+
+That Core source removes the public
+`adam_core::od::algorithms::external_provider_metadata` API and moves the public
+Arrow/Parquet stack from 54 to 58 while retaining a 0.7.0 source label. A
+SemVer-compliant Core successor is therefore likely 0.8, outside current Assist
+Python and Rust ranges. Future PyPI wheel publication requires separately
+authorized Core wheels plus an Assist version bump and matching range,
+registry-lock, and workflow alignment.
+Published Assist 0.6.0 is immutable, and no successor Assist version is selected
+here. The mandatory 16-cell matrix intentionally freezes all Assist Python/PyPI
+wheel publication when this candidate merges until those prerequisites land;
+source-pair evidence does not substitute for registry artifacts. The wheel
+matrix does not gate crates.io, but the changed crate bytes cannot be republished
+under immutable 0.6.0 and require separately authorized Assist version and Rust
+Core range/lock alignment.
 
 ### Upstream parser follow-up
 
@@ -287,7 +322,7 @@ inconvenient:
 | `tests/rust/test_adam_assist_rust_od.py::test_vallado_least_squares_matches_frozen_parity` | Removed with the noncanonical Vallado hook; the frozen oracle remains migration evidence and Core `refine` is the documented replacement. |
 | `tests/test_ci_contract.py::test_every_rust_workflow_uses_the_msrv_toolchain_and_components` | Adapted into the active read-only CI policy plus default/all/no-default Rust 1.87 matrix checks; preserved release workflows remain controlled by bounded release-variable authorization. |
 | `tests/test_ci_contract.py::test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark` | Adapted into `test_exact_workflow_inventory_and_gated_release_jobs` and `test_critical_ci_commands_and_benchmark_evidence_are_pinned`. |
-| `tests/test_ci_contract.py::test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels` | Restored through the manual 12-lane registry-wheel acceptance workflow, now backed by authentic Core 0.7 locks and exact release tooling. |
+| `tests/test_ci_contract.py::test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels` | Restored through the manual 16-lane registry-wheel acceptance workflow, now backed by authentic Core 0.7 locks and exact release tooling. |
 | `tests/test_ci_contract.py::test_rust_crate_workflows_package_once_and_publish_tested_bytes` | Restored through the manual build-once crate candidate/publisher workflow with the authentic Core lock; publication still requires separate authorization. |
 | `tests/test_core_compatibility_gates.py::test_same_wheel_reports_accept_compatible_core_06_outputs` | Replaced by `test_same_wheel_reports_accept_compatible_core_07_outputs`; Core 0.6 is intentionally incompatible with ABI-v2 provenance. |
 | `tests/test_dependency_metadata.py::test_cargo_lock_uses_public_core_registry_artifacts` | Restored as registry-lock verification for all six checksummed Core 0.7 crates. |

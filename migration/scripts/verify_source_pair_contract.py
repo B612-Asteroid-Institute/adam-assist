@@ -165,7 +165,7 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
         "lock_state": "registry-only-core-0.7.0-locked",
         "source_pair_status": "exact-public-release",
         "release_automation": "present-and-release-eligible-when-enabled",
-        "workflow_sha256": "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644",
+        "workflow_sha256": "0e12f0031b08b49c2f493a6555b89de5818bb87f3fa884ef60f5345c1149f315",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")

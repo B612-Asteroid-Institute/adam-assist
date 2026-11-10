@@ -8,5 +8,5 @@
   "release_automation": "present-and-release-eligible-when-enabled",
   "schema_version": 1,
   "source_pair_status": "exact-public-release",
-  "workflow_sha256": "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644"
+  "workflow_sha256": "0e12f0031b08b49c2f493a6555b89de5818bb87f3fa884ef60f5345c1149f315"
 }

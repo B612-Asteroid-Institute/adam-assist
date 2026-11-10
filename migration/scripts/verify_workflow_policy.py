@@ -56,6 +56,7 @@ EXPECTED_RELEASE_JOB_CONDITIONS = {
 }
 RELEASE_AUTOMATION_STATE = "present-and-release-eligible-when-enabled"
 CORE_REF = "a6478f2f280c266d7a5d1442997eb520fc20888f"
+CORE_PYTHON314_REF = "cd4b24f923d048e8538af88dd8c24b1c10b5e770"
 CORE_REPOSITORY = "B612-Asteroid-Institute/adam_core"
 ALLOWED_ACTIONS = {
     "actions/checkout@v4",
@@ -83,7 +84,7 @@ INERT_RELEASE_HELPERS = (
     "publish_crate_archive",
     "verify_release",
 )
-WORKFLOW_SHA256 = "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644"
+WORKFLOW_SHA256 = "0e12f0031b08b49c2f493a6555b89de5818bb87f3fa884ef60f5345c1149f315"
 REQUIRED_RUN_SHA256 = {
     (
         "source-pair",
@@ -121,6 +122,34 @@ REQUIRED_RUN_SHA256 = {
         "source-pair",
         "Verify authentic locks and clean tracked state",
     ): "0e8e74c6cd4895f7d8d829d391264d9696c5ef02fb322606be805b6cd0bdf0b3",
+    (
+        "python-314-source-pair",
+        "Verify exact CPython 3.14 candidate identities",
+    ): "536855faa19d6bc2f532a221d1634785b228ed232d49a1508b61e932dfbc8197",
+    (
+        "python-314-source-pair",
+        "Install CPython 3.14 build and test tooling",
+    ): "f086e46169b1d26b49ea59ef0b7865f5467accd5ab79d2e6450151e9f139d01c",
+    (
+        "python-314-source-pair",
+        "Verify exact direct Rust source pair",
+    ): "4a17c8963195a0a8137e525a876245e17d6912116fa6f2a482c59ecfa4e0d2e8",
+    (
+        "python-314-source-pair",
+        "Build and install exact CPython 3.14 wheel pair",
+    ): "a625d80b15727c1433daa6828879a8965abc288bbbef211de147241dd02f4f5d",
+    (
+        "python-314-source-pair",
+        "Run exact direct Rust runtime and provenance checks",
+    ): "d33ea61dc2e690edbcb7dec63f0c8fc481cb3cf1b58fb834a2d620fe45f2858f",
+    (
+        "python-314-source-pair",
+        "Run CPython 3.14 capsule and full-suite checks",
+    ): "18c04363e549ea21fb2b26e2753699a86de2a4bd2f9136d0485dc078aaaea6cf",
+    (
+        "python-314-source-pair",
+        "Verify CPython 3.14 tracked state",
+    ): "abdad4b0f5ec09d7d366199749626eead8d81d9a034956972078666bf3016751",
     (
         "rust-quality",
         "Verify source pair and run Rust gates",
@@ -245,6 +274,7 @@ def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:
     jobs = workflow["jobs"]
     allowed_job_keys = {
         "source-pair": {"name", "runs-on", "strategy", "steps", "timeout-minutes"},
+        "python-314-source-pair": {"name", "runs-on", "steps", "timeout-minutes"},
         "rust-quality": {"name", "runs-on", "steps", "timeout-minutes"},
         "benchmark": {"runs-on", "needs", "steps", "timeout-minutes"},
     }
@@ -272,6 +302,12 @@ def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:
                 if (job_id, step.get("name"))
                 in {
                     ("source-pair", "Build Core and ASSIST wheels from the exact pair"),
+                    ("python-314-source-pair", "Verify exact direct Rust source pair"),
+                    ("python-314-source-pair", "Build and install exact CPython 3.14 wheel pair"),
+                    (
+                        "python-314-source-pair",
+                        "Run exact direct Rust runtime and provenance checks",
+                    ),
                     ("rust-quality", "Verify source pair and run Rust gates"),
                 }
                 else None
@@ -318,11 +354,21 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
     if workflow.get("env") != {
         "ADAM_CORE_VERSION": "0.7.0",
         "ADAM_CORE_SOURCE_REF": CORE_REF,
+        "ADAM_CORE_PYTHON314_REF": CORE_PYTHON314_REF,
     }:
         _fail(NORMAL, "Core version/ref drifted from the exact reviewed source pair")
     jobs = workflow["jobs"]
-    if set(jobs) != {"source-pair", "rust-quality", "benchmark"}:
-        _fail(NORMAL, "required job inventory is source-pair, rust-quality, benchmark")
+    if set(jobs) != {
+        "source-pair",
+        "python-314-source-pair",
+        "rust-quality",
+        "benchmark",
+    }:
+        _fail(
+            NORMAL,
+            "required job inventory is source-pair, python-314-source-pair, "
+            "rust-quality, benchmark",
+        )
     for job_id, job in jobs.items():
         location = f"{NORMAL}:{job_id}"
         if any(key in job for key in ("if", "continue-on-error", "permissions")):
@@ -348,6 +394,7 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
                 )
     _verify_exact_structure(workflow)
     source = jobs["source-pair"]
+    python314 = jobs["python-314-source-pair"]
     rust = jobs["rust-quality"]
     benchmark = jobs["benchmark"]
     if source.get("strategy") != {
@@ -355,10 +402,35 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
         "matrix": {"python-version": ["3.11", "3.12", "3.13"]},
     }:
         _fail(NORMAL, "Python source-pair strategy must remain exactly 3.11-3.13")
-    if benchmark.get("needs") != ["source-pair", "rust-quality"]:
-        _fail(NORMAL, "benchmark must require source-pair and rust-quality")
+    if benchmark.get("needs") != [
+        "source-pair",
+        "python-314-source-pair",
+        "rust-quality",
+    ]:
+        _fail(
+            NORMAL,
+            "benchmark must require public and CPython 3.14 source pairs plus Rust quality",
+        )
     _verify_checkout(source, "source-pair")
     _verify_checkout(rust, "rust-quality")
+    candidate_checkout = _step_by_name(
+        python314, "Checkout exact CPython 3.14 adam-core candidate"
+    )
+    if candidate_checkout.get("uses") != "actions/checkout@v4" or candidate_checkout.get(
+        "with"
+    ) != {
+        "repository": CORE_REPOSITORY,
+        "ref": "${{ env.ADAM_CORE_PYTHON314_REF }}",
+        "path": ".python314-pair/adam-core",
+    }:
+        _fail("python-314-source-pair", "candidate checkout must use the exact reviewed ref")
+    setup_python = next(
+        step
+        for step in _steps(python314)
+        if step.get("uses") == "actions/setup-python@v5"
+    )
+    if setup_python.get("with") != {"python-version": "3.14"}:
+        _fail("python-314-source-pair", "candidate pair must run on CPython 3.14")
 
     required_conditions = {
         "Run non-live wheel tests": "matrix.python-version != '3.12'",
@@ -377,6 +449,15 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
         "Verify authentic locks and clean tracked state",
     ):
         _require_condition(_step_by_name(source, name), None)
+    for name in (
+        "Verify exact CPython 3.14 candidate identities",
+        "Verify exact direct Rust source pair",
+        "Build and install exact CPython 3.14 wheel pair",
+        "Run exact direct Rust runtime and provenance checks",
+        "Run CPython 3.14 capsule and full-suite checks",
+        "Verify CPython 3.14 tracked state",
+    ):
+        _require_condition(_step_by_name(python314, name), None)
     for name in ("Verify source pair and run Rust gates",):
         _require_condition(_step_by_name(rust, name), None)
     for name in (
@@ -405,7 +486,7 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
         or "--core-tree .source-pair/adam-core" not in contract
     ):
         _fail(NORMAL, "source-pair contract/commit verification is incomplete")
-    for job in (source, benchmark):
+    for job in (source, python314, benchmark):
         combined = "\n".join(_run(step) for step in _steps(job))
         if 'python -m pip install "$core_wheel" "${assist_wheel}[dev]"' not in combined:
             _fail(NORMAL, "wheel-backed jobs must install the Assist dev extra")
@@ -512,6 +593,8 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             for platform in platforms
             if isinstance(platform, Mapping) and platform.get("name") == "macos-arm64"
         ]
+        if matrix.get("python-version") != ["3.11", "3.12", "3.13", "3.14"]:
+            _fail(name, "wheel release matrix must cover CPython 3.11-3.14")
         if len(macos_arm64) != 1 or macos_arm64[0].get("runner") != "macos-15":
             _fail(name, "macOS arm64 wheels require the supported macos-15 runner")
         benchmark = jobs["full-current-benchmark"]
@@ -529,12 +612,67 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
         for job_id in ("package-and-test", "latest-stable-compatibility"):
             setup = _step_by_name(jobs[job_id], "Set up supported Python")
             if setup.get("uses") != "actions/setup-python@v5" or setup.get("with") != {
-                "python-version": "3.13"
+                "python-version": "3.14"
             }:
                 _fail(
                     f"{name}:{job_id}",
-                    "Python-feature Rust checks require exact CPython 3.13",
+                    "Python-feature Rust checks require exact CPython 3.14",
                 )
+
+
+def _verify_publication_wheel_inventory(
+    workflows: Mapping[str, Mapping[str, Any]],
+) -> None:
+    release = workflows["release-candidate-wheel-matrix.yml"]
+    matrix = release["jobs"]["artifact-acceptance"].get("strategy", {}).get(
+        "matrix", {}
+    )
+    python_versions = matrix.get("python-version", [])
+    platforms = matrix.get("platform", [])
+    if not isinstance(python_versions, list) or not isinstance(platforms, list):
+        _fail("release-candidate-wheel-matrix.yml", "wheel matrix must use lists")
+    expected_count = len(python_versions) * len(platforms)
+    expected_python = {f"cp{str(version).replace('.', '')}" for version in python_versions}
+
+    publish = workflows["publish.yml"]
+    collect = _run(
+        _step_by_name(
+            publish["jobs"]["collect-tested-artifacts"],
+            "Aggregate and verify adam-assist wheels without rebuilding",
+        )
+    )
+    aggregate = re.search(
+        r"test \"\$\(find dist [^\n]+\)\" = (\d+)", collect
+    )
+    if aggregate is None or int(aggregate.group(1)) != expected_count:
+        _fail(
+            "publish.yml:collect-tested-artifacts",
+            f"aggregate wheel count must equal acceptance matrix size {expected_count}",
+        )
+    python_literal = re.search(r"expected_python\s*=\s*\{([^}]*)\}", collect)
+    actual_python = (
+        set(re.findall(r'"(cp\d+)"', python_literal.group(1)))
+        if python_literal is not None
+        else set()
+    )
+    if actual_python != expected_python:
+        _fail(
+            "publish.yml:collect-tested-artifacts",
+            f"publication Python tags {actual_python} != {expected_python}",
+        )
+
+    publisher = publish["jobs"]["publish-pypi"]
+    publication_counts = [
+        int(match)
+        for step in _steps(publisher)
+        for match in re.findall(r"--expected-count\s+(\d+)", _run(step))
+    ]
+    if publication_counts != [expected_count, expected_count]:
+        _fail(
+            "publish.yml:publish-pypi",
+            "every publication expected count must equal the acceptance matrix "
+            f"size {expected_count}; got {publication_counts}",
+        )
 
 
 def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> None:
@@ -557,9 +695,23 @@ def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> Non
     _verify_normal(workflow)
     for name in RELEASE_WORKFLOWS:
         _verify_gated_release_workflow(name, workflows[name])
+    _verify_publication_wheel_inventory(workflows)
 
 
 def verify(root: Path = ROOT) -> None:
+    if __package__:
+        from .verify_python314_pair_lock import verify as verify_pair_lock
+    else:
+        import sys
+
+        sys.path.insert(0, str(root))
+        from migration.scripts.verify_python314_pair_lock import (
+            verify as verify_pair_lock,
+        )
+
+    verify_pair_lock(
+        root / "migration" / "locks" / "adam-assist-core-cd4b24f9.Cargo.lock"
+    )
     contract = json.loads(
         (root / "migration" / "source_pair_contract.json").read_text()
     )
