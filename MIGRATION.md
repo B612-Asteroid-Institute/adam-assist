@@ -221,13 +221,9 @@ Repository validation covers:
   including an all-NaN capsule control that must fail;
 - default, all-feature, and no-default-feature `check`, warning-denied Clippy,
   tests, doctests, and warning-denied docs on Rust 1.87;
-- Python 3.11–3.13 Assist-wheel testing with Core wheels built from the exact
-  public Core 0.7 release source. For CPython 3.14, the Assist wheel is built
-  from its registry-only Cargo lock and loaded beside a non-release Python Core
-  wheel built from merged Core main `8dc01202`; lint, formatting, import
-  compilation, strict mypy, installed versions, wheel dependency floors,
-  workflow policy, public-surface governance, and current propagation-only
-  benchmarks;
+- Python 3.11-3.14 source-pair wheel testing, plus lint, formatting, import
+  compilation, strict mypy, installed-version and dependency checks, workflow
+  policy, public-surface governance, and current propagation-only benchmarks;
 - source-tree and packaged-crate consumers. The science fixture needed by
   crate unit tests is duplicated under `rust/adam_assist_rs/testdata`; a test
   pins it byte-for-byte to the historical migration artifact so packaged
@@ -235,45 +231,22 @@ Repository validation covers:
 
 The machine-readable source-pair state is `exact-public-release`; its
 `lock_state` and `registry_state` require public Core 0.7.0 and authentic
-registry-only locks. CI verifies release commit `a6478f2f…`, builds a wheel
-from that exact released source for testing, and consumes all Rust Core crates
-from the exact checksummed Cargo lock. That source-built wheel is not a new
-registry artifact; the immutable public Core 0.7 wheel set remains the release
-authority. Package manifests and registry locks contain no path, Git, URL,
-patch, replacement, or fabricated checksum state.
+registry-only locks. CI verifies release commit `a6478f2f…`, builds the matching
+Core wheel, and consumes all Rust Core crates from the exact checksummed Cargo
+lock. Package manifests and locks contain no path, Git, URL, patch, replacement,
+or fabricated checksum state.
 
-One ordinary-CI source-pair matrix covers Python 3.11-3.14 with common checkout,
-build, install, version, full-suite, lock, and artifact steps. Its 3.11-3.13 rows
-use public Core release `a6478f2f`; its 3.14 row checks out merged Core main
-`8dc01202545c34b152249e7e4674915cd07f57fa`, builds a non-release Python Core
-wheel from that ref, and builds the Assist wheel from this tree with Assist's
-registry-only Cargo lock. The Assist native extension embeds registry Core 0.7
-Rust crates, not merged Core source; the separately loaded Python Core extension
-comes from `8dc01202`. The two extensions exercise the unchanged external
-capsule ABI and the same full Python suite. Focused conditional integration
-steps on the merged-Core row copy the Assist crate into a disposable directory
-and path-patch all six Core crates to `8dc01202` for direct Rust and Core-owned
-OD checks. A dedicated committed pair lock makes that direct-Rust patched build
-reproducible on Rust 1.87; installed DE440/SB441 paths then drive every ignored
-direct-Rust runtime/provenance contract. Every row uploads the same generic
-per-Python source-pair artifact shape; this evidence is not an immutable
-registry release. Core source support is merged, but public Core 0.7 registry
-wheels still stop at CPython 3.13 and Arrow/Parquet 54.
+One CI matrix covers Python 3.11-3.14 with the same wheel and test steps in
+every row. Python 3.11-3.13 use public Core release `a6478f2f`; Python 3.14
+builds Core from merged commit
+`8dc01202545c34b152249e7e4674915cd07f57fa`. The Assist extension still uses
+the registry-only Core 0.7 Cargo lock, while the separately loaded Python Core
+extension comes from that merged commit. The full suite exercises their capsule
+boundary.
 
-Merged Core main removes the public
-`adam_core::od::algorithms::external_provider_metadata` API and moves the public
-Arrow/Parquet stack from 54 to 58 while retaining a 0.7.0 source label. A
-SemVer-compliant Core successor is therefore likely 0.8, outside current Assist
-Python and Rust ranges. Future PyPI wheel publication requires separately
-authorized Core wheels plus an Assist version bump and matching range,
-registry-lock, and workflow alignment.
-Published Assist 0.6.0 is immutable, and no successor Assist version is selected
-here. The mandatory 16-cell matrix intentionally freezes all Assist Python/PyPI
-wheel publication when this candidate merges until those prerequisites land;
-source-pair evidence does not substitute for registry artifacts. The wheel
-matrix does not gate crates.io, but the changed crate bytes cannot be republished
-under immutable 0.6.0 and require separately authorized Assist version and Rust
-Core range/lock alignment.
+The merged-source row also path-patches all six Core crates in a disposable
+Rust build, using `migration/locks/adam-assist-core-8dc01202.Cargo.lock`, and
+runs the direct-Rust and installed-kernel contracts on Rust 1.87.
 
 ### Upstream parser follow-up
 

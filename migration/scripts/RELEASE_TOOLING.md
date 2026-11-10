@@ -5,46 +5,20 @@ Adam-core `0.7.0` is public and independently verified at release commit
 resolve only the corresponding public PyPI wheels and crates.io archives, with
 registry hashes/checksums and no path, Git, URL, patch, or replacement source.
 
-## PyPI wheel publication is intentionally frozen
+## CPython 3.14 validation
 
-Adam-assist `0.6.0` is already published on PyPI and crates.io; its files and
-tag are immutable. This CPython 3.14 source candidate cannot be released under
-that version. Any release of these bytes requires a separately authorized
-Assist version bump plus matching package, workflow, input, assertion, and
-artifact-identity updates. This change does not select that version.
+The Python 3.11-3.14 CI matrix uses public Core `a6478f2f` for Python
+3.11-3.13. Its 3.14 row builds Python Core from merged commit `8dc01202` and
+builds Assist with the registry-only Cargo lock. The same row validates a
+direct Rust pairing of all six Core crates with
+`migration/locks/adam-assist-core-8dc01202.Cargo.lock`.
 
-CPython 3.14 source support is merged into Core main at `8dc01202`, but public
-Core 0.7 registry wheels still stop at CPython 3.13 and Arrow/Parquet 54. The
-merged source removes the public
-`adam_core::od::algorithms::external_provider_metadata` Rust API and moves the
-public Arrow/Parquet boundary from 54 to 58 while still carrying a 0.7.0 source
-label. A SemVer-compliant Core successor is therefore likely 0.8, outside every
-current Assist Python and Rust range. A future PyPI wheel release requires
-separately authorized Core wheels and Assist range, lock, workflow, and version
-alignment. Until all of those prerequisites land, the mandatory 16-cell
-acceptance matrix freezes every Assist publication to PyPI, including
-3.11-3.13-only patches. It does not gate crates.io; nevertheless, changed crate
-bytes cannot be republished under immutable 0.6.0 and require a separately
-authorized Assist version plus Rust Core range/lock alignment.
+The mandatory 16-wheel matrix includes Python 3.14, so a wheel publication run
+requires matching Core artifacts and aligned Assist versions and dependencies.
 
-The same four-row source-pair matrix handles Python 3.11-3.14. In its 3.14 row,
-the Assist wheel is built with its registry-only Cargo lock and embeds registry
-Core 0.7 Rust crates. The separately loaded non-release Python Core wheel is
-built from merged Core main `8dc01202`; the external capsule ABI between the
-extensions is unchanged. Focused conditional integration steps on that row
-path-patch all six Core crates to `8dc01202`. Exact source-built wheel and
-direct-Rust evidence never substitutes for immutable registry artifacts. The
-dedicated `migration/locks/adam-assist-core-8dc01202.Cargo.lock` is used only
-for this exact disposable direct-Rust pairing; the registry-only crate lock
-remains the release authority.
-
-Release-candidate and publication workflows remain `workflow_dispatch`-only.
-Every release job requires the bounded repository variable
-`ADAM_ASSIST_RELEASES_ENABLED` to equal `true`; `publish-pypi` additionally
-retains its `dry_run == false` condition. The variable is configured only for
-the reviewed release window after environment protections and the exact final
-candidate are accepted. Enabling it does not itself authorize a registry
-upload, tag, or GitHub release.
+Release workflows are `workflow_dispatch`-only and require
+`ADAM_ASSIST_RELEASES_ENABLED == 'true'`. The PyPI upload job also requires
+`dry_run == false`.
 
 ## Public Core release and lock validation
 
@@ -69,10 +43,8 @@ cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
 test -z "$(git status --porcelain)"
 ```
 
-The release-candidate workflows repeat these checks before building the one
-crate archive and 16 platform/Python wheel artifacts. The CPython 3.14 cells
-fail closed while the authorized Core and Assist release alignment above is
-absent. Publication workflows accept only successful exact-commit candidate
-runs, reverify checksums, and upload the accepted bytes without rebuilding.
-Rust 1.87 remains the authoritative MSRV for formatting, strict Clippy, tests, documentation,
-packaging, and clean consumers.
+The release-candidate workflows repeat these checks before building one crate
+archive and 16 platform/Python wheels. Publication workflows reverify the
+accepted artifacts and upload them without rebuilding. Rust 1.87 remains the
+MSRV for formatting, Clippy, tests, documentation, packaging, and clean
+consumers.

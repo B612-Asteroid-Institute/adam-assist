@@ -4,28 +4,12 @@
 
 ### Changed
 
-- Upgraded the optional native bindings to PyO3/NumPy 0.28 and declared
-  CPython 3.11-3.14 support. One four-row source-pair matrix tests Python
-  3.11-3.13 against public Core 0.7 and, for 3.14, loads a non-release Python
-  Core wheel built from merged Core main `8dc01202` beside an Assist wheel built
-  with Assist's registry-only Cargo lock. The Assist extension therefore embeds
-  registry Core 0.7 Rust crates, and the two extensions exercise the unchanged
-  external capsule ABI. A focused integration step on the merged-Core row
-  path-patches all six Core crates to `8dc01202`. Core source support is now
-  merged, but public Core 0.7 registry wheels still stop at CPython 3.13 and
-  Arrow/Parquet 54. The four-platform release-candidate matrix now covers 16
-  wheels. Published
-  adam-assist 0.6.0 artifacts are immutable; releasing these changes requires a
-  separately authorized Assist version bump and matching workflow/assertion
-  updates, and no successor version is selected here. The merged Core source
-  removes the public `external_provider_metadata` Rust API and moves
-  Arrow/Parquet 54 to 58, so a SemVer-compliant Core successor is likely 0.8 and
-  outside every current Assist range. Assist range, lock, workflow, and version
-  alignment therefore require separate authorization before PyPI wheel
-  publication; merging this candidate intentionally freezes Assist publication
-  to PyPI until those prerequisites land. The wheel matrix does not gate
-  crates.io, but changed crate bytes cannot be republished as immutable 0.6.0
-  and likewise require separately authorized version and Core-range alignment.
+- Added CPython 3.14 support and upgraded the optional native bindings to
+  PyO3/NumPy 0.28.
+- Expanded Python 3.11-3.13 source-pair CI to Python 3.14. The 3.14 row builds
+  Python Core from merged commit `8dc01202`, keeps Assist on its registry lock,
+  and validates the direct Rust pair and capsule boundary.
+- Expanded the four-platform release-candidate matrix from 12 to 16 wheels.
 
 ## [0.6.0] - 2026-11-06
 

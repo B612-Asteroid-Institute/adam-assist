@@ -27,10 +27,8 @@ pip install adam-assist
 ```
 
 Native builds support CPython 3.11-3.14 on manylinux 2.17+ x86-64/AArch64 and
-macOS Apple silicon/Intel. CPython 3.14 registry installation is not currently
-available; maintainers must complete the separately governed Core and Assist
-release alignment documented in `migration/scripts/RELEASE_TOOLING.md`.
-Windows is currently unsupported because
+macOS Apple silicon/Intel. The current PyPI wheel set supports CPython
+3.11-3.13. Windows is currently unsupported because
 ``libassist-sys 1.2.1`` wraps upstream ASSIST code that requires POSIX
 ``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
 unsupported.
