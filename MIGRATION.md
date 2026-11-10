@@ -41,12 +41,14 @@ This breaking removal starts the adam-assist `0.6.0` source line. Released
 `0.5.0` artifacts retain their historical methods; the `0.6` line is not
 `0.5`-compatible.
 
-This line exports only `adam_core.propagator.v2`, declares Python
-`adam-core>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements, and is validated
-against public Core `0.7.0` release commit
-`a6478f2f280c266d7a5d1442997eb520fc20888f`. Authentic PDM and Cargo locks
-resolve the public Core wheels and crates with their registry hashes/checksums;
-release automation remains manual and bounded by the repository readiness gate.
+Published adam-assist 0.6.0 retains its immutable Core 0.7 dependency line.
+The current unreleased source exports only `adam_core.propagator.v2`, declares
+Python `adam-core>=0.8.0,<0.9.0` and coherent Rust `0.8` requirements, and is
+validated against public Core 0.8.0 release commit
+`37fcd1c6f5d38d70335e56c3b095658a466d1f50`. Authentic PDM and Cargo locks
+resolve all 16 public Core wheels and all six public Core crates with registry
+hashes/checksums; release automation remains manual and bounded by the
+repository readiness gate.
 
 The migration-era methods below were provider implementation hooks, not an
 adam-assist OD product, and are removed from `ASSISTPropagator`:
@@ -71,10 +73,10 @@ use `AssistPropagator::external_propagator()`, borrow its validated external
 view into `adam_core::od::OdPropagator::external`, and call the same Core-owned
 `run_iod`, `run_od`, `refine`, or `evaluate_orbits` functions.
 
-## Core 0.7 / ASSIST 0.6 change inventory
+## Current Core 0.8 compatibility inventory
 
 This section is the PR-level migration and validation inventory for the exact
-public Core release pair. It records Core 0.7.0 registry identity and authentic
+public Core release pair. It records Core 0.8.0 registry identity and authentic
 locks; it is not an Assist 0.6.0 artifact-qualification or publication claim.
 
 ### Lineage and replay accounting
@@ -100,7 +102,7 @@ semantic candidate. The 12 accepted commits ending at
 | Correct the capsule-only migration | Retained. |
 | Adopt Core propagator-v2 | Adapted to the append-only provenance suffix required by public Core `a6478f2f`. |
 | Align Marsden defaults with Core v2 | Retained field-by-field for `ALN`, `NK`, `NM`, `NN`, and `R0`. |
-| Set the Core 0.7 floor | Retained as Python `>=0.7.0,<0.8.0` and coherent Rust `0.7` requirements. |
+| Set the then-current Core 0.7 floor | Retained in the historical replay; the current source later supersedes it with the Core 0.8 requirements and locks described above. |
 | Harden source-pair and release gates | Retained and strengthened with exact-commit wheel and Rust lanes. |
 | Enforce structural release policy | Retained. |
 | Remove prerelease publication workflows | Superseded by owner policy: the reviewed workflows remain manual-only and every job is controlled by the bounded `ADAM_ASSIST_RELEASES_ENABLED` repository variable. |
@@ -110,10 +112,11 @@ semantic candidate. The 12 accepted commits ending at
 Stable patch IDs match for 11 of the 12 replayed commits. The sole patch-ID
 difference was the initially deleted `Cargo.lock` hunk in the Core-floor
 change: current main had already advanced `spicekit` from
-`0.2.2`/`17c159ac…` to `0.2.3`/`be636b2f…` in `8eba85d`. After Core 0.7.0
-publication, the authentic registry-only lock was generated with that resolved
-line. The replay parent tree `6ef5c5a^{tree}` is exactly the accepted
-`00ec21e^{tree}` (`4b1ec10b63fd95e3c99e6ac565b20fb841afd468`), so the
+`0.2.2`/`17c159ac…` to `0.2.3`/`be636b2f…` in `8eba85d`. During that historical
+replay, after Core 0.7.0 publication, the authentic registry-only lock was
+generated with that resolved line. The replay parent tree `6ef5c5a^{tree}` is
+exactly the accepted `00ec21e^{tree}`
+(`4b1ec10b63fd95e3c99e6ac565b20fb841afd468`), so the
 current-main lock correction is preserved without semantic drift. Except for
 the deliberate surface/workflow/test removals itemized below, every other file
 and behavior already present at the current-main base remains inherited; the
@@ -195,7 +198,9 @@ that lifetime boundary.
 
 Repository validation covers:
 
-- direct Rust propagation contracts plus compiled standalone Core-owned OD;
+- direct Rust `AssistPropagator`/`Propagator` runtime contracts, plus
+  compile/type-checks of `AssistShard`/`PropagatorShard` composition and the
+  standalone Core-owned OD route;
 - the external owner/lifetime and direct-trait/adapter boundaries;
 - all malformed capsule suffix, size, ABI, reserved-word, capability,
   callback, name/version, and two-body-flag tamper classes;
@@ -221,7 +226,7 @@ Repository validation covers:
   including an all-NaN capsule control that must fail;
 - default, all-feature, and no-default-feature `check`, warning-denied Clippy,
   tests, doctests, and warning-denied docs on Rust 1.87;
-- Python 3.11-3.14 source-pair wheel testing, plus lint, formatting, import
+- Python 3.11-3.14 released-Core wheel testing, plus lint, formatting, import
   compilation, strict mypy, installed-version and dependency checks, workflow
   policy, public-surface governance, and current propagation-only benchmarks;
 - source-tree and packaged-crate consumers. The science fixture needed by
@@ -229,24 +234,32 @@ Repository validation covers:
   pins it byte-for-byte to the historical migration artifact so packaged
   `--all-targets` does not depend on repository-external files.
 
-The machine-readable source-pair state is `exact-public-release`; its
-`lock_state` and `registry_state` require public Core 0.7.0 and authentic
-registry-only locks. CI verifies release commit `a6478f2f…`, builds the matching
-Core wheel, and consumes all Rust Core crates from the exact checksummed Cargo
-lock. Package manifests and locks contain no path, Git, URL, patch, replacement,
-or fabricated checksum state.
+The machine-readable pair state is `exact-public-release`; its `lock_state` and
+`registry_state` require public Core 0.8.0 and authentic registry-only locks.
+Its `present-and-version-alignment-required` release-automation value is
+descriptive status, not an executable gate. Publication stays fail-closed
+because jobs require the readiness variable, publishers use the immutable
+`v0.6.0` tag checkout and matching release-version inputs, and registries do
+not permit replacing the existing 0.6.0 artifacts. A Core 0.8 Assist release
+therefore requires a separately reviewed new Assist version. Package manifests
+and locks contain no path, Git, URL, patch, replacement, or fabricated checksum
+state.
 
-One CI matrix covers Python 3.11-3.14 with the same wheel and test steps in
-every row. Python 3.11-3.13 use public Core release `a6478f2f`; Python 3.14
-builds Core from merged commit
-`8dc01202545c34b152249e7e4674915cd07f57fa`. The Assist extension still uses
-the registry-only Core 0.7 Cargo lock, while the separately loaded Python Core
-extension comes from that merged commit. The full suite exercises their capsule
-boundary.
+One CI matrix covers Python 3.11-3.14 with the same wheel and test steps in every
+row. Each row builds only the Assist wheel and installs the public binary Core
+0.8.0 wheel, checking its exact native release identity before the full suite.
+The separately loaded Core and Assist extensions exercise capsule identity,
+capabilities, propagation, STM, lifetime, and row-error behavior.
 
-The merged-source row also path-patches all six Core crates in a disposable
-Rust build, using `migration/locks/adam-assist-core-8dc01202.Cargo.lock`, and
-runs the direct-Rust and installed-kernel contracts on Rust 1.87.
+The generic Rust-quality lane consumes all six Core 0.8.0 crates from the
+checksummed Cargo lock on Rust 1.87. It executes direct `AssistPropagator`/
+`Propagator` runtime contracts and installed-kernel/provider-provenance
+behavior. Direct `AssistShard`/`PropagatorShard` composition and trait bounds
+are compile/type-checked, as is the standalone Rust OD composition route in the
+`core_owned_od` example. The Python capsule suite separately executes
+propagation, STM, lifetime, and error contracts plus Core `run_iod`, `refine`,
+`run_od`, and `evaluate_orbits` with the Assist provider. Neither lane uses path
+patches or a Core source checkout.
 
 ### Upstream parser follow-up
 
@@ -299,13 +312,13 @@ inconvenient:
 | `tests/rust/test_adam_assist_rust_od.py::test_vallado_least_squares_matches_frozen_parity` | Removed with the noncanonical Vallado hook; the frozen oracle remains migration evidence and Core `refine` is the documented replacement. |
 | `tests/test_ci_contract.py::test_every_rust_workflow_uses_the_msrv_toolchain_and_components` | Adapted into the active read-only CI policy plus default/all/no-default Rust 1.87 matrix checks; preserved release workflows remain controlled by bounded release-variable authorization. |
 | `tests/test_ci_contract.py::test_normal_ci_runs_direct_rust_quality_and_current_only_benchmark` | Adapted into `test_exact_workflow_inventory_and_gated_release_jobs` and `test_critical_ci_commands_and_benchmark_evidence_are_pinned`. |
-| `tests/test_ci_contract.py::test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels` | Restored through the manual 16-lane registry-wheel acceptance workflow, now backed by authentic Core 0.7 locks and exact release tooling. |
+| `tests/test_ci_contract.py::test_release_matrix_builds_once_and_clean_room_accepts_registry_wheels` | Restored through the manual 16-lane registry-wheel acceptance workflow, now backed by authentic Core 0.8 locks and exact release tooling. |
 | `tests/test_ci_contract.py::test_rust_crate_workflows_package_once_and_publish_tested_bytes` | Restored through the manual build-once crate candidate/publisher workflow with the authentic Core lock; publication still requires separate authorization. |
 | `tests/test_core_compatibility_gates.py::test_same_wheel_reports_accept_compatible_core_06_outputs` | Replaced by `test_same_wheel_reports_accept_compatible_core_07_outputs`; Core 0.6 is intentionally incompatible with ABI-v2 provenance. |
-| `tests/test_dependency_metadata.py::test_cargo_lock_uses_public_core_registry_artifacts` | Restored as registry-lock verification for all six checksummed Core 0.7 crates. |
+| `tests/test_dependency_metadata.py::test_cargo_lock_uses_public_core_registry_artifacts` | Restored as registry-lock verification for all six checksummed Core 0.8 crates. |
 | `tests/test_dependency_metadata.py::test_current_benchmark_ci_covers_product_and_core_od_backend_workloads` | Adapted to `test_current_benchmark_ci_covers_provider_product_workloads`; Assist-owned OD workloads are retired. |
-| `tests/test_dependency_metadata.py::test_python_lock_uses_public_core_registry_artifacts` | Restored as registry-lock verification for the 12 hashed Core 0.7 wheels. |
-| `tests/test_dependency_metadata.py::test_stable_dependencies_declare_core_06_compatibility` | Replaced by `test_dependencies_declare_core_070_floor` and exact source-pair metadata assertions. |
+| `tests/test_dependency_metadata.py::test_python_lock_uses_public_core_registry_artifacts` | Restored as registry-lock verification for the 16 hashed Core 0.8 wheels. |
+| `tests/test_dependency_metadata.py::test_stable_dependencies_declare_core_06_compatibility` | Replaced by `test_dependencies_declare_core_080_floor` and exact public-release metadata assertions. |
 | `tests/test_nongrav.py::test_partial_constants_are_rejected_for_active_force` | Adapted to reviewed field-wise asteroid defaults in `test_partial_constants_fill_asteroid_defaults_per_field` and capsule/default-equivalence tests. |
 | `tests/test_public_surface_compatibility.py::test_stable_version_module_is_preserved` | Adapted to `test_next_source_version_module_is_preserved`, preserving the module while asserting the breaking-line version `0.6.0`. |
 
@@ -320,7 +333,7 @@ claims. Current CI benchmarks only propagation, ephemeris, covariance,
 collision, non-gravitational dynamics, and the native adapter boundary.
 
 No Windows or musllinux support is added; upstream ASSIST still requires POSIX
-memory mapping. Core 0.7.0 publication and the authentic lock transition are
+memory mapping. Core 0.8.0 publication and the authentic lock transition are
 recorded here; Assist tagging, artifact qualification, and publication remain
 separate owner-authorized release operations.
 
@@ -349,8 +362,8 @@ PyPI: adam-assist==0.4.0rc7
 ```
 
 Cargo and pip exclude these from ordinary stable resolution. Historical public
-crates used trusted publishing. Core `0.7.0` is now public and authentic
-registry-only locks are committed. Release-candidate and publication workflows
+crates used trusted publishing. Core `0.7.0` became public during that
+historical release sequence, and authentic registry-only locks were committed. Release-candidate and publication workflows
 remain workflow-dispatch-only, and every job requires the bounded repository
 variable `ADAM_ASSIST_RELEASES_ENABLED == 'true'`. The variable may be enabled
 only for the reviewed release window after environment protections are verified;

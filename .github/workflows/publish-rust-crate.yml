@@ -15,7 +15,7 @@ on:
       expected_core_version:
         description: Exact public adam-core Rust version
         required: true
-        default: 0.7.0
+        default: 0.8.0
         type: string
       release_channel:
         description: Registry release channel
@@ -52,7 +52,7 @@ jobs:
   # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
   compatibility-floor:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
-    name: Verify public Core 0.7 registry floor
+    name: Verify public Core 0.8 registry floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

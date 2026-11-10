@@ -1,12 +1,12 @@
 {
   "assist_version": "0.6.0",
   "capsule": "adam_core.propagator.v2",
-  "core_commit": "a6478f2f280c266d7a5d1442997eb520fc20888f",
-  "core_version": "0.7.0",
-  "lock_state": "registry-only-core-0.7.0-locked",
-  "registry_state": "core-0.7.0-public-and-verified",
-  "release_automation": "present-and-release-eligible-when-enabled",
+  "core_commit": "37fcd1c6f5d38d70335e56c3b095658a466d1f50",
+  "core_version": "0.8.0",
+  "lock_state": "registry-only-core-0.8.0-locked",
+  "registry_state": "core-0.8.0-public-and-verified",
+  "release_automation": "present-and-version-alignment-required",
   "schema_version": 1,
   "source_pair_status": "exact-public-release",
-  "workflow_sha256": "337ed1fefafa4cb988ec6c19274fadc23d1397c9a2207494a58187095e51e2fc"
+  "workflow_sha256": "4e4b5a8100dc7ff1ba24187ec3819441d67edb3ef745f3cf5321b6725409a838"
 }

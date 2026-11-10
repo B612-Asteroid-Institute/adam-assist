@@ -15,166 +15,84 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ADAM_CORE_VERSION: "0.7.0"
-  ADAM_CORE_PUBLIC_REF: "a6478f2f280c266d7a5d1442997eb520fc20888f"
-  ADAM_CORE_MERGED_REF: "8dc01202545c34b152249e7e4674915cd07f57fa"
+  ADAM_CORE_VERSION: "0.8.0"
+  ADAM_CORE_RELEASE_COMMIT: "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
 
 jobs:
-  source-pair:
+  released-core:
     name: Core ${{ matrix.core-kind }} / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - python-version: "3.11"
-            core-ref: "a6478f2f280c266d7a5d1442997eb520fc20888f"
-            core-kind: public-release
-          - python-version: "3.12"
-            core-ref: "a6478f2f280c266d7a5d1442997eb520fc20888f"
-            core-kind: public-release
-          - python-version: "3.13"
-            core-ref: "a6478f2f280c266d7a5d1442997eb520fc20888f"
-            core-kind: public-release
-          - python-version: "3.14"
-            core-ref: "8dc01202545c34b152249e7e4674915cd07f57fa"
-            core-kind: merged-source
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        core-kind: [released-registry]
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout exact adam-core source
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ matrix.core-ref }}
-          path: .source-pair/adam-core
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
-      - name: Verify exact source-pair identity
+      - name: Verify exact released-Core pair contract
         shell: bash
         run: |
           set -euo pipefail
-          core=.source-pair/adam-core
-          test "$(git -C "$core" rev-parse HEAD)" = "${{ matrix.core-ref }}"
-          case "${{ matrix.core-kind }}" in
-            public-release)
-              test "${{ matrix.core-ref }}" = "$ADAM_CORE_PUBLIC_REF"
-              python migration/scripts/verify_source_pair_contract.py \
-                --core-tree "$core"
-              ;;
-            merged-source)
-              test "${{ matrix.core-ref }}" = "$ADAM_CORE_MERGED_REF"
-              python - <<'PY'
-          import tomllib
-          from pathlib import Path
-
-          core = Path(".source-pair/adam-core")
-          with (core / "pyproject.toml").open("rb") as stream:
-              core_python = tomllib.load(stream)
-          with (core / "rust/adam_core_py/Cargo.toml").open("rb") as stream:
-              core_rust = tomllib.load(stream)
-          with Path("pyproject.toml").open("rb") as stream:
-              assist_python = tomllib.load(stream)
-          with Path("rust/adam_assist_rs/Cargo.toml").open("rb") as stream:
-              assist_rust = tomllib.load(stream)
-          assert core_python["project"]["requires-python"] == ">=3.11,<3.15"
-          assert assist_python["project"]["requires-python"] == ">=3.11,<3.15"
-          assert core_rust["dependencies"]["pyo3"]["version"] == "0.28"
-          assert core_rust["dependencies"]["numpy"] == "0.28"
-          assert assist_rust["dependencies"]["pyo3"]["version"] == "0.28"
-          assert assist_rust["dependencies"]["numpy"]["version"] == "0.28"
-          PY
-              ;;
-            *)
-              echo "unsupported Core source kind" >&2
-              false
-              ;;
-          esac
+          test "${{ matrix.core-kind }}" = released-registry
+          python migration/scripts/verify_source_pair_contract.py
       - name: Install build and test tooling
         run: |
           python -m pip install --upgrade pip
           python -m pip install "maturin>=1.7,<2"
-      - name: Verify merged-Core direct Rust source pair
-        if: matrix.core-kind == 'merged-source'
+      - name: Build Assist and install released Core wheel pair
         shell: bash
         run: |
           set -euo pipefail
-          core="$GITHUB_WORKSPACE/.source-pair/adam-core"
-          pair="$RUNNER_TEMP/adam-assist-direct-rust-pair"
-          python migration/scripts/verify_core_pair_lock.py
-          cp -R rust/adam_assist_rs "$pair"
-          cp migration/locks/adam-assist-core-8dc01202.Cargo.lock \
-            "$pair/Cargo.lock"
-          mkdir -p "$pair/.cargo"
-          cat > "$pair/.cargo/config.toml" <<EOF
-          [patch.crates-io]
-          adam_core = { path = "$core/rust/adam_core" }
-          adam_core_rs_autodiff = { path = "$core/rust/adam_core_rs_autodiff" }
-          adam_core_rs_coords = { path = "$core/rust/adam_core_rs_coords" }
-          adam_core_rs_kernel_data = { path = "$core/rust/adam_core_rs_kernel_data" }
-          adam_core_rs_orbit_determination = { path = "$core/rust/adam_core_rs_orbit_determination" }
-          adam_core_rs_spice = { path = "$core/rust/adam_core_rs_spice" }
-          EOF
-          (
-            cd "$pair"
-            cargo test --locked --all-targets
-            cargo run --locked --example core_owned_od
-          )
-          git diff --exit-code
-          git -C "$core" diff --exit-code
-      - name: Build and install exact source-pair wheels
-        shell: bash
-        run: |
-          set -euo pipefail
-          wheelhouse="$RUNNER_TEMP/source-pair-wheels"
+          wheelhouse="$RUNNER_TEMP/released-core-wheels"
           mkdir -p "$wheelhouse"
-          (cd .source-pair/adam-core && \
-            maturin build --release --locked --out "$wheelhouse")
           maturin build --release --locked --out "$wheelhouse"
-          core_wheel="$(find "$wheelhouse" -name 'adam_core-*.whl' -print -quit)"
           assist_wheel="$(find "$wheelhouse" -name 'adam_assist-*.whl' -print -quit)"
-          test -n "$core_wheel" && test -n "$assist_wheel"
-          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          test -n "$assist_wheel"
+          test "$(find "$wheelhouse" -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 1
+          python -m pip install --only-binary=:all: \
+            "adam-core==$ADAM_CORE_VERSION" "${assist_wheel}[dev]"
+          python -m pip check
           python migration/scripts/verify_dev_environment.py --require-wheel
-      - name: Run merged-Core direct Rust runtime and provenance checks
-        if: matrix.core-kind == 'merged-source'
-        shell: bash
-        run: |
-          set -euo pipefail
-          pair="$RUNNER_TEMP/adam-assist-direct-rust-pair"
-          export ADAM_CORE_RS_ASSIST_PLANETS_PATH="$(python -c \
-            'from naif_de440 import de440; print(de440)')"
-          export ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH="$(python -c \
-            'from jpl_small_bodies_de441_n16 import de441_n16; print(de441_n16)')"
-          test -f "$ADAM_CORE_RS_ASSIST_PLANETS_PATH"
-          test -f "$ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH"
-          (
-            cd "$pair"
-            cargo test --locked --all-targets -- --ignored
-          )
-      - name: Verify release-ready workflow policy
-        run: python migration/scripts/verify_workflow_policy.py
-      - name: Verify installed versions and wheel dependency floor
+      - name: Verify released Core identity and wheel dependency range
         run: |
           python - <<'PY'
           from importlib import metadata
+          from pathlib import Path
+
+          import adam_assist._native as assist_native
+          from adam_core import _rust_native as core_native
           from packaging.requirements import Requirement
 
-          assert metadata.version("adam-core") == "0.7.0"
+          assert metadata.version("adam-core") == "0.8.0"
           assert metadata.version("adam-assist") == "0.6.0"
+          assert core_native.build_identity() == (
+              "0.8.0",
+              "37fcd1c6f5d38d70335e56c3b095658a466d1f50",
+          )
+          assert Path(core_native.__file__).resolve() != Path(assist_native.__file__).resolve()
           requirements = {
               Requirement(value).name: Requirement(value)
               for value in metadata.requires("adam-assist") or []
           }
           core = requirements["adam-core"]
-          assert str(core.specifier) == "<0.8.0,>=0.7.0"
-          assert "0.7.0" in core.specifier
-          assert "0.8.0" not in core.specifier
+          assert str(core.specifier) == "<0.9.0,>=0.8.0"
+          assert "0.8.0" in core.specifier
+          assert "0.9.0" not in core.specifier
           PY
+      - name: Run released-pair capsule contracts
+        run: |
+          python -m pytest --benchmark-skip -q \
+            tests/rust/test_adam_assist_rust_capsule.py \
+            -k 'native_backend_is_capsule_only or capsule_propagation_preserves_order_nongrav_and_row_failures or capsule_stm_honors_custom_and_inactive_nongrav or capsule_owns_provider_lifetime'
+      - name: Verify release-ready workflow policy
+        run: python migration/scripts/verify_workflow_policy.py
       - name: Run non-live wheel tests
         if: matrix.python-version != '3.12'
         run: |
@@ -192,19 +110,17 @@ jobs:
           black --check src/adam_assist tests
           isort --check-only src/adam_assist tests
           mypy --strict src/adam_assist
-      - name: Verify authentic locks and clean tracked state
+      - name: Verify authentic registry locks and clean tracked state
         run: |
           pdm lock --check
           python migration/scripts/verify_registry_locks.py \
             --core-version "$ADAM_CORE_VERSION" --python-lock --rust-lock
-          python migration/scripts/verify_core_pair_lock.py
           git diff --exit-code
-          git -C .source-pair/adam-core diff --exit-code
-      - name: Upload exact source-pair wheels
+      - name: Upload released-Core Assist wheel
         uses: actions/upload-artifact@v4
         with:
-          name: source-pair-wheels-${{ matrix.python-version }}
-          path: ${{ runner.temp }}/source-pair-wheels/*.whl
+          name: released-core-wheels-${{ matrix.python-version }}
+          path: ${{ runner.temp }}/released-core-wheels/*.whl
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12' && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
@@ -218,29 +134,31 @@ jobs:
           path-to-lcov: coverage.xml
 
   rust-quality:
-    name: Public Core registry-locked Rust quality
+    name: Core released-registry Rust/runtime quality
     runs-on: ubuntu-latest
     steps:
       - name: Checkout adam-assist
         uses: actions/checkout@v4
-      - name: Checkout exact public adam-core release
-        uses: actions/checkout@v4
-        with:
-          repository: B612-Asteroid-Institute/adam_core
-          ref: ${{ env.ADAM_CORE_PUBLIC_REF }}
-          path: .source-pair/adam-core
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
-      - name: Verify source pair and run Rust gates
+      - name: Install released Core runtime and kernels
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: \
+            "adam-core==$ADAM_CORE_VERSION" \
+            "jpl-small-bodies-de441-n16==2021.3.31.1"
+          python -m pip check
+      - name: Verify released registry pair and run Rust gates
         shell: bash
         run: |
           set -euo pipefail
-          python migration/scripts/verify_source_pair_contract.py \
-            --core-tree .source-pair/adam-core
+          python migration/scripts/verify_source_pair_contract.py
+          python migration/scripts/verify_registry_locks.py \
+            --core-version "$ADAM_CORE_VERSION" --rust-lock
           manifest=rust/adam_assist_rs/Cargo.toml
           cargo fmt --manifest-path "$manifest" -- --check
           cargo check --manifest-path "$manifest" --locked --all-targets
@@ -264,18 +182,35 @@ jobs:
             --no-default-features
           cargo test --manifest-path "$manifest" --locked --doc \
             --all-features
+          cargo run --manifest-path "$manifest" --locked --example core_owned_od
+          cargo metadata --manifest-path "$manifest" --locked \
+            --format-version 1 > "$RUNNER_TEMP/cargo-metadata.json"
+          python migration/scripts/verify_rust_core_line.py \
+            --metadata "$RUNNER_TEMP/cargo-metadata.json" \
+            --core-version "$ADAM_CORE_VERSION"
           RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
             --locked --no-deps
           RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
             --locked --no-deps --no-default-features
           RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path "$manifest" \
             --locked --no-deps --all-features
+      - name: Run direct Rust runtime and provenance contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ADAM_CORE_RS_ASSIST_PLANETS_PATH="$(python -c \
+            'from naif_de440 import de440; print(de440)')"
+          export ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH="$(python -c \
+            'from jpl_small_bodies_de441_n16 import de441_n16; print(de441_n16)')"
+          test -f "$ADAM_CORE_RS_ASSIST_PLANETS_PATH"
+          test -f "$ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH"
+          cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
+            --locked --all-targets -- --ignored
           git diff --exit-code
-          git -C .source-pair/adam-core diff --exit-code
 
   benchmark:
     runs-on: ubuntu-latest
-    needs: [source-pair, rust-quality]
+    needs: [released-core, rust-quality]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -283,15 +218,16 @@ jobs:
           python-version: "3.12"
       - uses: actions/download-artifact@v4
         with:
-          name: source-pair-wheels-3.12
-          path: source-pair-wheels
-      - name: Install the already-tested source-pair wheels
+          name: released-core-wheels-3.12
+          path: released-core-wheels
+      - name: Install the already-tested released-Core wheel pair
         run: |
           python -m pip install --upgrade pip
-          core_wheel="$(find source-pair-wheels -name 'adam_core-*.whl' -print -quit)"
-          assist_wheel="$(find source-pair-wheels -name 'adam_assist-*.whl' -print -quit)"
-          test -n "$core_wheel" && test -n "$assist_wheel"
-          python -m pip install "$core_wheel" "${assist_wheel}[dev]"
+          assist_wheel="$(find released-core-wheels -name 'adam_assist-*.whl' -print -quit)"
+          test -n "$assist_wheel"
+          python -m pip install --only-binary=:all: \
+            "adam-core==$ADAM_CORE_VERSION" "${assist_wheel}[dev]"
+          python -m pip check
           python migration/scripts/verify_dev_environment.py --require-wheel
       - name: Run benchmarks
         run: python -m pytest --benchmark-only --benchmark-json bench.json tests

@@ -59,7 +59,7 @@ def test_publish_body_preserves_metadata_and_exact_archive_bytes() -> None:
 
 def test_package_validation_requires_msrv_channel_and_core_pins() -> None:
     publish_crate_archive.validate_package(_package(), VERSION, CORE_VERSION, "preview")
-    for core_version in ("0.7.0", "0.7.1", "0.7.99"):
+    for core_version in ("0.8.0", "0.8.1", "0.8.99"):
         publish_crate_archive.validate_package(
             _package("0.4.0", core_version, "stable"),
             "0.4.0",
@@ -81,18 +81,18 @@ def test_package_validation_requires_msrv_channel_and_core_pins() -> None:
             unpinned, VERSION, CORE_VERSION, "preview"
         )
 
-    stable_exact = _package("0.6.0", "0.7.0", "stable")
+    stable_exact = _package("0.6.0", "0.8.0", "stable")
     stable_dependencies = stable_exact["dependencies"]
     assert isinstance(stable_dependencies, list)
-    stable_dependencies[0]["req"] = "=0.7.0"
+    stable_dependencies[0]["req"] = "=0.8.0"
     with pytest.raises(ValueError, match="must use"):
-        publish_crate_archive.validate_package(stable_exact, "0.6.0", "0.7.0", "stable")
+        publish_crate_archive.validate_package(stable_exact, "0.6.0", "0.8.0", "stable")
 
-    with pytest.raises(ValueError, match=">=0.7.0, <0.8.0"):
+    with pytest.raises(ValueError, match=">=0.8.0, <0.9.0"):
         publish_crate_archive.validate_package(
-            _package("0.6.0", "0.8.0", "stable"),
+            _package("0.6.0", "0.9.0", "stable"),
             "0.6.0",
-            "0.8.0",
+            "0.9.0",
             "stable",
         )
 

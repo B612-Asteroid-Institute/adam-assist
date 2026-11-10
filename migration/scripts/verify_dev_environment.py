@@ -43,8 +43,8 @@ def verify(*, require_wheel: bool = False) -> None:
         actual = importlib.metadata.version(name)
         if actual != expected:
             raise ValueError(f"installed {name} {actual} != {expected}")
-    if importlib.metadata.version("adam-core") != "0.7.0":
-        raise ValueError("installed adam-core must be exact source-paired 0.7.0")
+    if importlib.metadata.version("adam-core") != "0.8.0":
+        raise ValueError("installed adam-core must be the exact released 0.8.0 pair")
     if importlib.metadata.version("adam-assist") != "0.6.0":
         raise ValueError("installed adam-assist must remain 0.6.0")
 

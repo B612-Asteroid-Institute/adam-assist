@@ -6,9 +6,13 @@
 
 - Added CPython 3.14 support and upgraded the optional native bindings to
   PyO3/NumPy 0.28.
-- Expanded Python 3.11-3.13 source-pair CI to Python 3.14. The 3.14 row builds
-  Python Core from merged commit `8dc01202`, keeps Assist on its registry lock,
-  and validates the direct Rust pair and capsule boundary.
+- Moved the current source compatibility floor to public `adam-core>=0.8.0,<0.9.0`
+  and coherent Rust `0.8` crates, with authentic registry-only locks for all 16
+  Core wheels and all six Core crates.
+- Expanded Python CI to one released-Core Python 3.11-3.14 matrix. Every row
+  installs the public Core 0.8.0 wheel; generic Rust and capsule gates validate
+  direct `Propagator`/`PropagatorShard` composition and cross-extension ABI-v2
+  propagation, STM, lifetime, identity, capabilities, and error behavior.
 - Expanded the four-platform release-candidate matrix from 12 to 16 wheels.
 
 ## [0.6.0] - 2026-11-06

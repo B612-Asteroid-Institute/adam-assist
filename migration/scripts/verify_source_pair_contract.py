@@ -21,7 +21,7 @@ CORE_CRATES = (
     "adam_core_rs_spice",
     "adam_core_rs_kernel_data",
 )
-PYTHON_REQUIREMENT = "adam-core>=0.7.0,<0.8.0"
+PYTHON_REQUIREMENT = "adam-core>=0.8.0,<0.9.0"
 DEPENDENCY_TABLES = {"dependencies", "dev-dependencies", "build-dependencies"}
 PYTHON_CORE_NAME_IN_TEXT = re.compile(r"(?i)\badam[-_.]+core\b")
 FORBIDDEN_CARGO_SOURCES = {
@@ -59,9 +59,9 @@ def verify_cargo_core_dependencies(cargo: dict[str, Any]) -> None:
         if not canonical.startswith("adam_core"):
             continue
         version = _dependency_version(declaration)
-        if version != "0.7":
+        if version != "0.8":
             location = ".".join((*table_path, dependency))
-            raise ValueError(f"{location} must require the coherent 0.7 line")
+            raise ValueError(f"{location} must require the coherent 0.8 line")
         if isinstance(declaration, dict):
             forbidden = sorted(FORBIDDEN_CARGO_SOURCES & declaration.keys())
             if forbidden:
@@ -158,14 +158,14 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
     expected = {
         "schema_version": 1,
         "assist_version": "0.6.0",
-        "core_version": "0.7.0",
-        "core_commit": "a6478f2f280c266d7a5d1442997eb520fc20888f",
+        "core_version": "0.8.0",
+        "core_commit": "37fcd1c6f5d38d70335e56c3b095658a466d1f50",
         "capsule": "adam_core.propagator.v2",
-        "registry_state": "core-0.7.0-public-and-verified",
-        "lock_state": "registry-only-core-0.7.0-locked",
+        "registry_state": "core-0.8.0-public-and-verified",
+        "lock_state": "registry-only-core-0.8.0-locked",
         "source_pair_status": "exact-public-release",
-        "release_automation": "present-and-release-eligible-when-enabled",
-        "workflow_sha256": "337ed1fefafa4cb988ec6c19274fadc23d1397c9a2207494a58187095e51e2fc",
+        "release_automation": "present-and-version-alignment-required",
+        "workflow_sha256": "4e4b5a8100dc7ff1ba24187ec3819441d67edb3ef745f3cf5321b6725409a838",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")
@@ -253,11 +253,11 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
             )
         core_extension = _load_toml(core_tree / "rust" / "adam_core_py" / "Cargo.toml")
         if core_extension["package"]["version"] != contract["core_version"]:
-            raise ValueError("checked-out adam-core extension version is not 0.7.0")
+            raise ValueError("checked-out adam-core extension version is not 0.8.0")
         for crate in CORE_CRATES:
             manifest = _load_toml(core_tree / "rust" / crate / "Cargo.toml")
             if manifest["package"]["version"] != contract["core_version"]:
-                raise ValueError(f"checked-out {crate} version is not 0.7.0")
+                raise ValueError(f"checked-out {crate} version is not 0.8.0")
 
     return contract
 

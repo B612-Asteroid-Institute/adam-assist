@@ -104,7 +104,9 @@ MUTATIONS = [
     ),
     Mutation(
         "cargo-token",
-        lambda w: _step(w, "rust-quality", "Verify source pair and run Rust gates")
+        lambda w: _step(
+            w, "rust-quality", "Verify released registry pair and run Rust gates"
+        )
         .setdefault("env", {})
         .__setitem__("CARGO_REGISTRY_TOKEN", "token"),
     ),
@@ -162,22 +164,22 @@ MUTATIONS = [
             },
         ),
     ),
-    Mutation("remove-test", _remove_step("source-pair", "Run non-live wheel tests")),
+    Mutation("remove-test", _remove_step("released-core", "Run non-live wheel tests")),
     Mutation(
         "disable-test",
-        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+        lambda w: _step(w, "released-core", "Run non-live wheel tests").__setitem__(
             "if", "false"
         ),
     ),
     Mutation(
         "continue-test",
-        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+        lambda w: _step(w, "released-core", "Run non-live wheel tests").__setitem__(
             "continue-on-error", True
         ),
     ),
     Mutation(
         "disable-source-job",
-        lambda w: w[NORMAL]["jobs"]["source-pair"].__setitem__("if", "false"),
+        lambda w: w[NORMAL]["jobs"]["released-core"].__setitem__("if", "false"),
     ),
     Mutation(
         "remove-rust-job",
@@ -189,39 +191,43 @@ MUTATIONS = [
     ),
     Mutation(
         "pin-drift",
-        lambda w: w[NORMAL]["env"].__setitem__("ADAM_CORE_PUBLIC_REF", "0" * 40),
+        lambda w: w[NORMAL]["env"].__setitem__("ADAM_CORE_RELEASE_COMMIT", "0" * 40),
     ),
     Mutation(
-        "checkout-drift",
-        lambda w: _step(w, "source-pair", "Checkout exact adam-core source")[
-            "with"
-        ].__setitem__("ref", "main"),
+        "source-checkout-insertion",
+        lambda w: w[NORMAL]["jobs"]["released-core"]["steps"].append(
+            {
+                "uses": "actions/checkout@v4",
+                "with": {
+                    "repository": "B612-Asteroid-Institute/adam_core",
+                    "ref": "main",
+                },
+            }
+        ),
     ),
     Mutation(
         "drop-source-contract",
         lambda w: _step(
-            w, "source-pair", "Verify exact source-pair identity"
+            w, "released-core", "Verify exact released-Core pair contract"
         ).__setitem__("run", "echo skipped"),
     ),
     Mutation(
         "drop-dev-extra",
         lambda w: _step(
-            w, "source-pair", "Build and install exact source-pair wheels"
+            w, "released-core", "Build Assist and install released Core wheel pair"
         ).__setitem__(
             "run",
             _step(
                 w,
-                "source-pair",
-                "Build and install exact source-pair wheels",
-            )[
-                "run"
-            ].replace("${assist_wheel}[dev]", "$assist_wheel"),
+                "released-core",
+                "Build Assist and install released Core wheel pair",
+            )["run"].replace("${assist_wheel}[dev]", "$assist_wheel"),
         ),
     ),
     Mutation(
         "editable-install",
         lambda w: _step(
-            w, "benchmark", "Install the already-tested source-pair wheels"
+            w, "benchmark", "Install the already-tested released-Core wheel pair"
         ).__setitem__("run", 'python -m pip install -e ".[dev]"'),
     ),
     Mutation(
@@ -317,8 +323,16 @@ def test_release_workflows_reject_partially_stale_versions() -> None:
 @pytest.mark.parametrize("name", RELEASE_WORKFLOWS)
 def test_release_workflows_reject_stale_core_versions(name: str) -> None:
     workflows = deepcopy(BASE)
-    workflows[name] = _replace_workflow_string(workflows[name], "0.7.0", "0.6.1")
+    workflows[name] = _replace_workflow_string(workflows[name], "0.8.0", "0.7.0")
     with pytest.raises(WorkflowPolicyError):
+        verify_workflow_documents(workflows)
+
+
+@pytest.mark.parametrize("name", ("publish.yml", "release-candidate-wheel-matrix.yml"))
+def test_release_workflows_reject_upper_core_range_drift(name: str) -> None:
+    workflows = deepcopy(BASE)
+    workflows[name] = _replace_workflow_string(workflows[name], "<0.9.0", "<0.8.0")
+    with pytest.raises(WorkflowPolicyError, match="Core range|Core 0.8 line"):
         verify_workflow_documents(workflows)
 
 
@@ -539,62 +553,62 @@ REVIEW_GAP_MUTATIONS = [
     ),
     Mutation(
         "replace-test-with-true",
-        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+        lambda w: _step(w, "released-core", "Run non-live wheel tests").__setitem__(
             "run", "true"
         ),
     ),
     Mutation(
         "append-or-true",
-        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+        lambda w: _step(w, "released-core", "Run non-live wheel tests").__setitem__(
             "run", "python -m pytest --benchmark-skip -q tests || true"
         ),
     ),
     Mutation(
         "noop-shell",
-        lambda w: _step(w, "source-pair", "Run non-live wheel tests").__setitem__(
+        lambda w: _step(w, "released-core", "Run non-live wheel tests").__setitem__(
             "shell", "true {0}"
         ),
     ),
     Mutation(
         "replace-lint-with-true",
-        lambda w: _step(w, "source-pair", "Lint and typecheck the source").__setitem__(
-            "run", "true"
-        ),
+        lambda w: _step(
+            w, "released-core", "Lint and typecheck the source"
+        ).__setitem__("run", "true"),
     ),
     Mutation(
         "drop-cargo-test",
         lambda w: _step(
-            w, "rust-quality", "Verify source pair and run Rust gates"
+            w, "rust-quality", "Verify released registry pair and run Rust gates"
         ).__setitem__(
             "run",
-            _step(w, "rust-quality", "Verify source pair and run Rust gates")[
-                "run"
-            ].replace("cargo test", "echo skipped"),
+            _step(
+                w, "rust-quality", "Verify released registry pair and run Rust gates"
+            )["run"].replace("cargo test", "echo skipped"),
         ),
     ),
     Mutation(
         "exclude-python-313",
-        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"].__setitem__(
+        lambda w: w[NORMAL]["jobs"]["released-core"]["strategy"]["matrix"].__setitem__(
             "exclude", [{"python-version": "3.13"}]
         ),
     ),
     Mutation(
-        "remove-merged-core-row",
-        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"][
-            "include"
+        "remove-python-314-row",
+        lambda w: w[NORMAL]["jobs"]["released-core"]["strategy"]["matrix"][
+            "python-version"
         ].pop(),
     ),
     Mutation(
-        "merged-core-ref-drift",
-        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"]["include"][
-            -1
-        ].__setitem__("core-ref", "main"),
+        "add-core-ref-axis",
+        lambda w: w[NORMAL]["jobs"]["released-core"]["strategy"]["matrix"].__setitem__(
+            "core-ref", ["main"]
+        ),
     ),
     Mutation(
-        "public-core-kind-drift",
-        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"]["include"][
-            0
-        ].__setitem__("core-kind", "merged-source"),
+        "released-core-kind-drift",
+        lambda w: w[NORMAL]["jobs"]["released-core"]["strategy"]["matrix"].__setitem__(
+            "core-kind", ["merged-source"]
+        ),
     ),
     Mutation(
         "add-version-specific-job",
@@ -604,20 +618,22 @@ REVIEW_GAP_MUTATIONS = [
         ),
     ),
     Mutation(
-        "job-core-ref-override",
+        "job-core-version-override",
         lambda w: w[NORMAL]["jobs"]["rust-quality"].__setitem__(
-            "env", {"ADAM_CORE_PUBLIC_REF": "main"}
+            "env", {"ADAM_CORE_VERSION": "0.7.0"}
         ),
     ),
     Mutation(
-        "drop-rust-core-tree-check",
+        "drop-rust-registry-line-check",
         lambda w: _step(
-            w, "rust-quality", "Verify source pair and run Rust gates"
+            w, "rust-quality", "Verify released registry pair and run Rust gates"
         ).__setitem__(
             "run",
-            _step(w, "rust-quality", "Verify source pair and run Rust gates")[
-                "run"
-            ].replace("--core-tree .source-pair/adam-core", ""),
+            _step(
+                w, "rust-quality", "Verify released registry pair and run Rust gates"
+            )["run"].replace(
+                "python migration/scripts/verify_rust_core_line.py", "echo skipped"
+            ),
         ),
     ),
     Mutation(
