@@ -13,7 +13,9 @@ that version. Any release of these bytes requires a separately authorized
 Assist version bump plus matching package, workflow, input, assertion, and
 artifact-identity updates. This change does not select that version.
 
-The paired Core source at `cd4b24f9` removes the public
+CPython 3.14 source support is merged into Core main at `8dc01202`, but public
+Core 0.7 registry wheels still stop at CPython 3.13 and Arrow/Parquet 54. The
+merged source removes the public
 `adam_core::od::algorithms::external_provider_metadata` Rust API and moves the
 public Arrow/Parquet boundary from 54 to 58 while still carrying a 0.7.0 source
 label. A SemVer-compliant Core successor is therefore likely 0.8, outside every
@@ -25,13 +27,14 @@ acceptance matrix freezes every Assist publication to PyPI, including
 bytes cannot be republished under immutable 0.6.0 and require a separately
 authorized Assist version plus Rust Core range/lock alignment.
 
-In the CPython 3.14 wheel check, the Assist wheel is built with its registry-only
-Cargo lock and embeds registry Core 0.7 Rust crates. The separately loaded
-non-release Python Core wheel is built from `cd4b24f9`; the external capsule ABI
-between the extensions is unchanged. Only the separate direct-Rust lane
-path-patches all six Core crates to `cd4b24f9`. Exact source-built wheel and
+The same four-row source-pair matrix handles Python 3.11-3.14. In its 3.14 row,
+the Assist wheel is built with its registry-only Cargo lock and embeds registry
+Core 0.7 Rust crates. The separately loaded non-release Python Core wheel is
+built from merged Core main `8dc01202`; the external capsule ABI between the
+extensions is unchanged. Focused conditional integration steps on that row
+path-patch all six Core crates to `8dc01202`. Exact source-built wheel and
 direct-Rust evidence never substitutes for immutable registry artifacts. The
-dedicated `migration/locks/adam-assist-core-cd4b24f9.Cargo.lock` is used only
+dedicated `migration/locks/adam-assist-core-8dc01202.Cargo.lock` is used only
 for this exact disposable direct-Rust pairing; the registry-only crate lock
 remains the release authority.
 

@@ -140,6 +140,10 @@ def test_cpython_314_binding_and_distribution_metadata() -> None:
     ).read_text()
     publish = (ROOT / ".github/workflows/publish.yml").read_text()
     assert 'python-version: "3.14"' in normal_ci
+    assert normal_ci.count("\n  source-pair:") == 1
+    assert normal_ci.count("core-kind: public-release") == 3
+    assert normal_ci.count("core-kind: merged-source") == 1
+    assert "8dc01202545c34b152249e7e4674915cd07f57fa" in normal_ci
     assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in release_matrix
     assert 'expected_python = {"cp311", "cp312", "cp313", "cp314"}' in publish
 
@@ -464,7 +468,12 @@ def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     assert "cargo test --manifest-path" in release_tooling
     assert "--locked" in release_tooling
     assert 'test -z "$(git status --porcelain)"' in release_tooling
-    assert "Exact public Core release" in normal_ci
+    assert (
+        "Core ${{ matrix.core-kind }} / Python ${{ matrix.python-version }}"
+        in normal_ci
+    )
+    assert normal_ci.count("core-kind: public-release") == 3
+    assert normal_ci.count("core-kind: merged-source") == 1
     assert "exit 1" not in normal_ci
     workflows = sorted(
         path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")

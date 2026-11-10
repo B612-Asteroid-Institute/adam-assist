@@ -17,7 +17,6 @@ def test_exact_workflow_inventory_and_gated_release_jobs() -> None:
     assert set(workflows) == set(WORKFLOW_INVENTORY)
     assert set(workflows[NORMAL]["jobs"]) == {
         "source-pair",
-        "python-314-source-pair",
         "rust-quality",
         "benchmark",
     }
@@ -61,12 +60,22 @@ def test_publication_tools_stay_behind_gated_release_jobs() -> None:
 def test_critical_ci_commands_and_benchmark_evidence_are_pinned() -> None:
     workflow = load_workflows()[NORMAL]
     jobs = workflow["jobs"]
-    source_runs = "\n".join(
-        step.get("run", "") for step in jobs["source-pair"]["steps"]
-    )
-    python314_runs = "\n".join(
-        step.get("run", "") for step in jobs["python-314-source-pair"]["steps"]
-    )
+    source = jobs["source-pair"]
+    source_runs = "\n".join(step.get("run", "") for step in source["steps"])
+    assert source["strategy"]["matrix"]["include"] == [
+        {
+            "python-version": version,
+            "core-ref": "a6478f2f280c266d7a5d1442997eb520fc20888f",
+            "core-kind": "public-release",
+        }
+        for version in ("3.11", "3.12", "3.13")
+    ] + [
+        {
+            "python-version": "3.14",
+            "core-ref": "8dc01202545c34b152249e7e4674915cd07f57fa",
+            "core-kind": "merged-source",
+        }
+    ]
     rust_run = next(
         step["run"]
         for step in jobs["rust-quality"]["steps"]
@@ -81,27 +90,24 @@ def test_critical_ci_commands_and_benchmark_evidence_are_pinned() -> None:
         "pdm lock --check",
         "verify_registry_locks.py",
         "verify_source_pair_contract.py",
-        "--core-tree .source-pair/adam-core",
-    ):
-        assert command in source_runs
-    python314_setup = next(
-        step
-        for step in jobs["python-314-source-pair"]["steps"]
-        if step.get("uses") == "actions/setup-python@v5"
-    )
-    assert python314_setup["with"] == {"python-version": "3.14"}
-    for command in (
-        "ADAM_CORE_PYTHON314_REF",
-        "verify_python314_pair_lock.py",
-        "adam-assist-core-cd4b24f9.Cargo.lock",
+        '--core-tree "$core"',
+        "ADAM_CORE_MERGED_REF",
+        "verify_core_pair_lock.py",
+        "adam-assist-core-8dc01202.Cargo.lock",
         "cargo test --locked --all-targets",
         "core_owned_od",
         "-- --ignored",
         "ADAM_CORE_RS_ASSIST_PLANETS_PATH",
         "ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH",
-        "python -m pytest --benchmark-skip -q tests",
     ):
-        assert command in python314_runs
+        assert command in source_runs
+    setup_python = next(
+        step
+        for step in source["steps"]
+        if step.get("uses") == "actions/setup-python@v5"
+    )
+    assert setup_python["with"] == {"python-version": "${{ matrix.python-version }}"}
+    assert all("314" not in job_id for job_id in jobs)
     for command in ("cargo fmt", "cargo check", "cargo clippy", "cargo test"):
         assert command in rust_run
     assert "--locked" in rust_run

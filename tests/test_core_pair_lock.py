@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from migration.scripts.verify_python314_pair_lock import PAIR_LOCK, verify
+from migration.scripts.verify_core_pair_lock import PAIR_LOCK, verify
 
 
-def test_exact_python314_pair_lock_is_reproducible() -> None:
+def test_exact_merged_core_pair_lock_is_reproducible() -> None:
     verify()
 
 

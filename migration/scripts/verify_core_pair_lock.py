@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the dedicated exact-Core CPython 3.14 direct-Rust pair lock."""
+"""Verify the dedicated merged-Core direct-Rust pair lock."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PAIR_LOCK = ROOT / "migration" / "locks" / "adam-assist-core-cd4b24f9.Cargo.lock"
+PAIR_LOCK = ROOT / "migration" / "locks" / "adam-assist-core-8dc01202.Cargo.lock"
 EXPECTED_SHA256 = "4e48473a76dc6f28bd80efafcbf8a17cad427b2fc90c2b3cdf7959bd30a900fc"
 CORE_PACKAGES = {
     "adam_core",
@@ -25,7 +25,7 @@ CRATES_IO_SOURCE = "registry+https://github.com/rust-lang/crates.io-index"
 def verify(lock_path: Path = PAIR_LOCK, *, check_digest: bool = True) -> None:
     raw = lock_path.read_bytes()
     if check_digest and hashlib.sha256(raw).hexdigest() != EXPECTED_SHA256:
-        raise ValueError("CPython 3.14 direct-Rust pair lock digest drifted")
+        raise ValueError("merged-Core direct-Rust pair lock digest drifted")
     lock = tomllib.loads(raw.decode())
     packages = lock.get("package")
     if not isinstance(packages, list):
@@ -101,7 +101,7 @@ def main() -> None:
     parser.add_argument("--lock", type=Path, default=PAIR_LOCK)
     args = parser.parse_args()
     verify(args.lock.resolve())
-    print("verified exact Core cd4b24f9 direct-Rust pair lock")
+    print("verified merged Core 8dc01202 direct-Rust pair lock")
 
 
 if __name__ == "__main__":

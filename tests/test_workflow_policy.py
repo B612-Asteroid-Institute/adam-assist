@@ -189,31 +189,33 @@ MUTATIONS = [
     ),
     Mutation(
         "pin-drift",
-        lambda w: w[NORMAL]["env"].__setitem__("ADAM_CORE_SOURCE_REF", "0" * 40),
+        lambda w: w[NORMAL]["env"].__setitem__("ADAM_CORE_PUBLIC_REF", "0" * 40),
     ),
     Mutation(
         "checkout-drift",
-        lambda w: _step(w, "source-pair", "Checkout exact public adam-core release")[
+        lambda w: _step(w, "source-pair", "Checkout exact adam-core source")[
             "with"
         ].__setitem__("ref", "main"),
     ),
     Mutation(
         "drop-source-contract",
-        lambda w: _step(w, "source-pair", "Verify source-pair contract").__setitem__(
-            "run", "echo skipped"
-        ),
+        lambda w: _step(
+            w, "source-pair", "Verify exact source-pair identity"
+        ).__setitem__("run", "echo skipped"),
     ),
     Mutation(
         "drop-dev-extra",
         lambda w: _step(
-            w, "source-pair", "Build Core and ASSIST wheels from the exact pair"
+            w, "source-pair", "Build and install exact source-pair wheels"
         ).__setitem__(
             "run",
             _step(
                 w,
                 "source-pair",
-                "Build Core and ASSIST wheels from the exact pair",
-            )["run"].replace("${assist_wheel}[dev]", "$assist_wheel"),
+                "Build and install exact source-pair wheels",
+            )[
+                "run"
+            ].replace("${assist_wheel}[dev]", "$assist_wheel"),
         ),
     ),
     Mutation(
@@ -577,9 +579,34 @@ REVIEW_GAP_MUTATIONS = [
         ),
     ),
     Mutation(
+        "remove-merged-core-row",
+        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"][
+            "include"
+        ].pop(),
+    ),
+    Mutation(
+        "merged-core-ref-drift",
+        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"]["include"][
+            -1
+        ].__setitem__("core-ref", "main"),
+    ),
+    Mutation(
+        "public-core-kind-drift",
+        lambda w: w[NORMAL]["jobs"]["source-pair"]["strategy"]["matrix"]["include"][
+            0
+        ].__setitem__("core-kind", "merged-source"),
+    ),
+    Mutation(
+        "add-version-specific-job",
+        lambda w: w[NORMAL]["jobs"].__setitem__(
+            "version-specific-source-pair",
+            {"runs-on": "ubuntu-latest", "steps": []},
+        ),
+    ),
+    Mutation(
         "job-core-ref-override",
         lambda w: w[NORMAL]["jobs"]["rust-quality"].__setitem__(
-            "env", {"ADAM_CORE_SOURCE_REF": "main"}
+            "env", {"ADAM_CORE_PUBLIC_REF": "main"}
         ),
     ),
     Mutation(
