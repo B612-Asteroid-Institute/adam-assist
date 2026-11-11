@@ -70,7 +70,7 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     manifest = _cargo_manifest()
     package = manifest["package"]
     assert package["name"] == "adam_assist"
-    assert package["version"] == "0.6.0"
+    assert package["version"] == "0.7.0"
     assert package["rust-version"] == "1.87"
     assert package.get("publish", True) is True
     assert package["license"] == "GPL-3.0"
@@ -196,7 +196,7 @@ def test_public_source_pair_has_authentic_registry_locks() -> None:
     assert contract["lock_state"] == "registry-only-core-0.8.0-locked"
     assert contract["registry_state"] == "core-0.8.0-public-and-verified"
     assert contract["source_pair_status"] == "exact-public-release"
-    assert contract["release_automation"] == "present-and-version-alignment-required"
+    assert contract["release_automation"] == "present-and-version-aligned"
 
 
 def test_packaged_rust_fixture_matches_frozen_migration_evidence() -> None:
@@ -290,8 +290,8 @@ def test_python_stable_version_matches_cargo_semver() -> None:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     cargo_version = _cargo_manifest()["package"]["version"]
-    assert cargo_version == "0.6.0"
-    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.6.0"
+    assert cargo_version == "0.7.0"
+    assert module.cargo_version_to_pep440(cargo_version) == __version__ == "0.7.0"
 
 
 def test_current_benchmark_ci_covers_provider_product_workloads() -> None:

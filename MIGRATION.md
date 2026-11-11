@@ -42,7 +42,7 @@ This breaking removal starts the adam-assist `0.6.0` source line. Released
 `0.5`-compatible.
 
 Published adam-assist 0.6.0 retains its immutable Core 0.7 dependency line.
-The current unreleased source exports only `adam_core.propagator.v2`, declares
+The 0.7.0 source line exports only `adam_core.propagator.v2`, declares
 Python `adam-core>=0.8.0,<0.9.0` and coherent Rust `0.8` requirements, and is
 validated against public Core 0.8.0 release commit
 `37fcd1c6f5d38d70335e56c3b095658a466d1f50`. Authentic PDM and Cargo locks
@@ -77,7 +77,8 @@ view into `adam_core::od::OdPropagator::external`, and call the same Core-owned
 
 This section is the PR-level migration and validation inventory for the exact
 public Core release pair. It records Core 0.8.0 registry identity and authentic
-locks; it is not an Assist 0.6.0 artifact-qualification or publication claim.
+locks. It supports Assist 0.7.0 artifact qualification but is not by itself a
+publication claim.
 
 ### Lineage and replay accounting
 
@@ -236,14 +237,13 @@ Repository validation covers:
 
 The machine-readable pair state is `exact-public-release`; its `lock_state` and
 `registry_state` require public Core 0.8.0 and authentic registry-only locks.
-Its `present-and-version-alignment-required` release-automation value is
-descriptive status, not an executable gate. Publication stays fail-closed
-because jobs require the readiness variable, publishers use the immutable
-`v0.6.0` tag checkout and matching release-version inputs, and registries do
-not permit replacing the existing 0.6.0 artifacts. A Core 0.8 Assist release
-therefore requires a separately reviewed new Assist version. Package manifests
-and locks contain no path, Git, URL, patch, replacement, or fabricated checksum
-state.
+Its `present-and-version-aligned` release-automation value records that the
+0.7.0 source and release workflows agree; it is descriptive status, not an
+executable gate. Publication stays fail-closed because jobs require the
+readiness variable, publishers require an immutable `v0.7.0` tag checkout and
+matching release-version inputs, and registries do not permit replacing the
+existing 0.6.0 artifacts. Package manifests and locks contain no path, Git,
+URL, patch, replacement, or fabricated checksum state.
 
 One CI matrix covers Python 3.11-3.14 with the same wheel and test steps in every
 row. Each row builds only the Assist wheel and installs the public binary Core
@@ -320,7 +320,7 @@ inconvenient:
 | `tests/test_dependency_metadata.py::test_python_lock_uses_public_core_registry_artifacts` | Restored as registry-lock verification for the 16 hashed Core 0.8 wheels. |
 | `tests/test_dependency_metadata.py::test_stable_dependencies_declare_core_06_compatibility` | Replaced by `test_dependencies_declare_core_080_floor` and exact public-release metadata assertions. |
 | `tests/test_nongrav.py::test_partial_constants_are_rejected_for_active_force` | Adapted to reviewed field-wise asteroid defaults in `test_partial_constants_fill_asteroid_defaults_per_field` and capsule/default-equivalence tests. |
-| `tests/test_public_surface_compatibility.py::test_stable_version_module_is_preserved` | Adapted to `test_next_source_version_module_is_preserved`, preserving the module while asserting the breaking-line version `0.6.0`. |
+| `tests/test_public_surface_compatibility.py::test_stable_version_module_is_preserved` | Adapted to `test_release_version_module_is_preserved`, preserving the module while asserting the aligned release version `0.7.0`. |
 
 ### Historical evidence and deliberate omissions
 

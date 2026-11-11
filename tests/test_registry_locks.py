@@ -60,7 +60,7 @@ checksum = "abc"
 """ for name in sorted(CORE_RUST_PACKAGES))
     root_and_non_core = f"""[[package]]
 name = "adam_assist"
-version = "0.6.0"
+version = "0.7.0"
 
 [[package]]
 name = "rawzip"

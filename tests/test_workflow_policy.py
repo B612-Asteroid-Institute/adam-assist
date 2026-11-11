@@ -11,6 +11,7 @@ from migration.scripts.verify_workflow_policy import (
     EXPECTED_RELEASE_JOB_CONDITIONS,
     NORMAL,
     PUBLISH_PYPI_CONDITION,
+    PYPI_REF_CONFIRMATION_SCRIPT,
     READINESS_CONDITION,
     RELEASE_WORKFLOWS,
     WorkflowPolicyError,
@@ -139,7 +140,7 @@ MUTATIONS = [
     Mutation("pdm-publish", _publisher_command("pdm publish")),
     Mutation("cargo-publish", _publisher_command("cd rust && cargo publish")),
     Mutation("maturin-publish", _publisher_command("maturin publish")),
-    Mutation("gh-release", _publisher_command("gh release create v0.6.0 dist/*")),
+    Mutation("gh-release", _publisher_command("gh release create v0.7.0 dist/*")),
     Mutation(
         "http-upload",
         _publisher_command("curl --upload-file=dist/x https://example.invalid/upload"),
@@ -283,6 +284,45 @@ def test_release_workflows_reject_automatic_triggers(name: str) -> None:
     dispatch = workflow[key]["workflow_dispatch"]
     workflow[key] = {"push": None, "workflow_dispatch": dispatch}
     with pytest.raises(WorkflowPolicyError, match="workflow_dispatch-only"):
+        verify_workflow_documents(workflows)
+
+
+def _pypi_ref_confirmation_step(workflows: WorkflowMap) -> dict[str, Any]:
+    return next(
+        step
+        for step in workflows["publish.yml"]["jobs"]["collect-tested-artifacts"][
+            "steps"
+        ]
+        if step.get("name")
+        == "Verify immutable release tag and irreversible-action confirmation"
+    )
+
+
+def test_pypi_non_dry_run_is_exact_tag_only() -> None:
+    workflows = deepcopy(BASE)
+    step = _pypi_ref_confirmation_step(workflows)
+    run = step["run"].strip()
+    assert run == PYPI_REF_CONFIRMATION_SCRIPT
+    assert "refs/heads/main" not in run
+
+    step["run"] = run.replace(
+        '"refs/tags/v$EXPECTED_VERSION")',
+        "refs/heads/main)",
+        1,
+    )
+    with pytest.raises(WorkflowPolicyError, match="tag-only"):
+        verify_workflow_documents(workflows)
+
+
+def test_pypi_release_branch_cannot_disable_dry_run() -> None:
+    workflows = deepcopy(BASE)
+    step = _pypi_ref_confirmation_step(workflows)
+    step["run"] = step["run"].replace(
+        'refs/heads/release/*)\n    test "$DRY_RUN" = "true"',
+        'refs/heads/release/*)\n    test "$DRY_RUN" = "false"',
+        1,
+    )
+    with pytest.raises(WorkflowPolicyError, match="tag-only"):
         verify_workflow_documents(workflows)
 
 

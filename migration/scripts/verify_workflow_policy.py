@@ -32,6 +32,22 @@ READINESS_CONDITION = "${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}"
 PUBLISH_PYPI_CONDITION = (
     "${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' " "&& inputs.dry_run == false }}"
 )
+PYPI_REF_CONFIRMATION_SCRIPT = """set -euo pipefail
+case "$GITHUB_REF" in
+  "refs/tags/v$EXPECTED_VERSION")
+    test "$DRY_RUN" = "false"
+    ;;
+  refs/heads/release/*)
+    test "$DRY_RUN" = "true"
+    ;;
+  *) echo "publication must run from the exact release tag or a dry-run release branch" >&2; exit 1 ;;
+esac
+test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+if [ "$DRY_RUN" = "true" ]; then
+  test "$CONFIRMATION" = "verify adam-assist $EXPECTED_VERSION from $EXPECTED_SHA for pypi"
+else
+  test "$CONFIRMATION" = "publish adam-assist $EXPECTED_VERSION from $EXPECTED_SHA to pypi"
+fi"""
 EXPECTED_RELEASE_JOB_CONDITIONS = {
     "publish-rust-crate.yml": {
         "compatibility-floor": READINESS_CONDITION,
@@ -54,7 +70,7 @@ EXPECTED_RELEASE_JOB_CONDITIONS = {
         "latest-stable-compatibility": READINESS_CONDITION,
     },
 }
-RELEASE_AUTOMATION_STATE = "present-and-version-alignment-required"
+RELEASE_AUTOMATION_STATE = "present-and-version-aligned"
 CORE_RELEASE_COMMIT = "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
 CORE_PUBLIC_REF = CORE_RELEASE_COMMIT
 ALLOWED_ACTIONS = {
@@ -83,7 +99,7 @@ INERT_RELEASE_HELPERS = (
     "publish_crate_archive",
     "verify_release",
 )
-WORKFLOW_SHA256 = "4e4b5a8100dc7ff1ba24187ec3819441d67edb3ef745f3cf5321b6725409a838"
+WORKFLOW_SHA256 = "d43bf3f3480044830ef7f583f736000359cc5f8938ff247f0232af60606baf13"
 
 
 class WorkflowPolicyError(ValueError):
@@ -507,23 +523,34 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
 
     if name == "publish-rust-crate.yml":
         expected = {
-            "expected_version": "0.6.0",
+            "expected_version": "0.7.0",
             "expected_core_version": "0.8.0",
-            "expected_python_version": "0.6.0",
+            "expected_python_version": "0.7.0",
         }
         for input_name, default in expected.items():
             if _input_default(inputs, input_name, name) != default:
                 _fail(name, f"{input_name} default must be {default}")
     elif name == "publish.yml":
         expected = {
-            "expected_version": "0.6.0",
-            "expected_rust_version": "0.6.0",
+            "expected_version": "0.7.0",
+            "expected_rust_version": "0.7.0",
             "expected_adam_core_version": "0.8.0",
             "expected_adam_core_rust_version": "0.8.0",
         }
         for input_name, default in expected.items():
             if _input_default(inputs, input_name, name) != default:
                 _fail(name, f"{input_name} default must be {default}")
+        confirmation = _run(
+            _step_by_name(
+                jobs["collect-tested-artifacts"],
+                "Verify immutable release tag and irreversible-action confirmation",
+            )
+        ).strip()
+        if confirmation != PYPI_REF_CONFIRMATION_SCRIPT:
+            _fail(
+                name,
+                "non-dry-run PyPI publication must be tag-only and release branches dry-run-only",
+            )
         commands = "\n".join(
             _run(step) for job in jobs.values() for step in _steps(job)
         )
@@ -536,7 +563,7 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             "MATURIN_PEP517_ARGS": "--locked",
             "ADAM_CORE_RELEASE_VERSION": "0.8.0",
             "ADAM_CORE_ACCEPTANCE_REF": CORE_PUBLIC_REF,
-            "ADAM_ASSIST_RELEASE_VERSION": "0.6.0",
+            "ADAM_ASSIST_RELEASE_VERSION": "0.7.0",
         }:
             _fail(name, "wheel release identities drifted")
         commands = "\n".join(
@@ -562,7 +589,7 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             _fail(name, "benchmark diagnostic requires the supported macos-15 runner")
     elif name == "rust-crate-release-candidate.yml":
         if workflow.get("env") != {
-            "RUST_RELEASE_VERSION": "0.6.0",
+            "RUST_RELEASE_VERSION": "0.7.0",
             "CORE_RUST_VERSION": "0.8.0",
             "RELEASE_CHANNEL": "stable",
         }:
@@ -668,7 +695,7 @@ def verify(root: Path = ROOT) -> None:
     if contract.get("release_automation") != RELEASE_AUTOMATION_STATE:
         _fail(
             "source_pair_contract",
-            "release automation must be present but gated by release readiness",
+            "release automation must be version-aligned and gated by release readiness",
         )
     if contract.get("workflow_sha256") != WORKFLOW_SHA256:
         _fail("source_pair_contract", "canonical workflow digest drifted")

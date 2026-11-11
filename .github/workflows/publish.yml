@@ -14,12 +14,12 @@ on:
       expected_version:
         description: Exact adam-assist PEP 440 release version
         required: true
-        default: 0.6.0
+        default: 0.7.0
         type: string
       expected_rust_version:
         description: Exact matching adam_assist Cargo version
         required: true
-        default: 0.6.0
+        default: 0.7.0
         type: string
       expected_adam_core_version:
         description: Exact already-published adam-core Python release
@@ -43,11 +43,6 @@ on:
         description: Exact published adam_assist crate checksum
         required: true
         type: string
-      recovery_from_main:
-        description: Permit a default-branch dispatch that still checks out the immutable release tag
-        required: true
-        default: false
-        type: boolean
       dry_run:
         description: Verify and assemble exact artifacts without entering the PyPI environment
         required: true
@@ -102,24 +97,17 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SHA: ${{ inputs.release_sha }}
-          RECOVERY_FROM_MAIN: ${{ inputs.recovery_from_main }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
             "refs/tags/v$EXPECTED_VERSION")
-              test "$RECOVERY_FROM_MAIN" = "false"
-              test "$DRY_RUN" = "false"
-              ;;
-            refs/heads/main)
-              test "$RECOVERY_FROM_MAIN" = "true"
               test "$DRY_RUN" = "false"
               ;;
             refs/heads/release/*)
-              test "$RECOVERY_FROM_MAIN" = "false"
               test "$DRY_RUN" = "true"
               ;;
-            *) echo "publication must run from the release tag or an explicit recovery" >&2; exit 1 ;;
+            *) echo "publication must run from the exact release tag or a dry-run release branch" >&2; exit 1 ;;
           esac
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           if [ "$DRY_RUN" = "true" ]; then

@@ -71,7 +71,7 @@ jobs:
           from packaging.requirements import Requirement
 
           assert metadata.version("adam-core") == "0.8.0"
-          assert metadata.version("adam-assist") == "0.6.0"
+          assert metadata.version("adam-assist") == "0.7.0"
           assert core_native.build_identity() == (
               "0.8.0",
               "37fcd1c6f5d38d70335e56c3b095658a466d1f50",

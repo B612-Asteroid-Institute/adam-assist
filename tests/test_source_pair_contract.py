@@ -15,12 +15,12 @@ from migration.scripts.verify_source_pair_contract import (
 
 def test_source_pair_contract_accepts_current_tree() -> None:
     contract = verify()
-    assert contract["assist_version"] == "0.6.0"
+    assert contract["assist_version"] == "0.7.0"
     assert contract["core_version"] == "0.8.0"
     assert contract["source_pair_status"] == "exact-public-release"
     assert contract["lock_state"] == "registry-only-core-0.8.0-locked"
     assert contract["registry_state"] == "core-0.8.0-public-and-verified"
-    assert contract["release_automation"] == "present-and-version-alignment-required"
+    assert contract["release_automation"] == "present-and-version-aligned"
 
 
 def test_every_cargo_dependency_table_rejects_mixed_core_versions() -> None:
@@ -69,7 +69,7 @@ def test_dev_environment_verifier_enforces_installed_runtime_versions(
     versions = {
         **FROZEN_DEV_VERSIONS,
         "adam-core": "0.8.0",
-        "adam-assist": "0.6.0",
+        "adam-assist": "0.7.0",
     }
     imported: list[str] = []
     monkeypatch.setattr(

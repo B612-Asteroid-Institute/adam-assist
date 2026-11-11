@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-11
+
 ### Changed
 
 - Added CPython 3.14 support and upgraded the optional native bindings to
@@ -14,6 +16,9 @@
   direct `Propagator`/`PropagatorShard` composition and cross-extension ABI-v2
   propagation, STM, lifetime, identity, capabilities, and error behavior.
 - Expanded the four-platform release-candidate matrix from 12 to 16 wheels.
+- Aligned the Python wheel and Rust crate release identities at `0.7.0` for
+  exact-candidate promotion. This release does not change propagation,
+  ephemeris, force-model, covariance, or other science/runtime algorithms.
 
 ## [0.6.0] - 2026-11-06
 
