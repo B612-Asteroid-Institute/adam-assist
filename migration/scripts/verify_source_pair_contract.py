@@ -157,15 +157,15 @@ def verify(core_tree: Path | None = None, *, root: Path = ROOT) -> dict[str, obj
     )
     expected = {
         "schema_version": 1,
-        "assist_version": "0.6.0",
+        "assist_version": "0.7.0",
         "core_version": "0.8.0",
         "core_commit": "37fcd1c6f5d38d70335e56c3b095658a466d1f50",
         "capsule": "adam_core.propagator.v2",
         "registry_state": "core-0.8.0-public-and-verified",
         "lock_state": "registry-only-core-0.8.0-locked",
         "source_pair_status": "exact-public-release",
-        "release_automation": "present-and-version-alignment-required",
-        "workflow_sha256": "4e4b5a8100dc7ff1ba24187ec3819441d67edb3ef745f3cf5321b6725409a838",
+        "release_automation": "present-and-version-aligned",
+        "workflow_sha256": "d43bf3f3480044830ef7f583f736000359cc5f8938ff247f0232af60606baf13",
     }
     if contract != expected:
         raise ValueError(f"unexpected source-pair contract: {contract!r}")

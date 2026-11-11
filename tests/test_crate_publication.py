@@ -81,17 +81,17 @@ def test_package_validation_requires_msrv_channel_and_core_pins() -> None:
             unpinned, VERSION, CORE_VERSION, "preview"
         )
 
-    stable_exact = _package("0.6.0", "0.8.0", "stable")
+    stable_exact = _package("0.7.0", "0.8.0", "stable")
     stable_dependencies = stable_exact["dependencies"]
     assert isinstance(stable_dependencies, list)
     stable_dependencies[0]["req"] = "=0.8.0"
     with pytest.raises(ValueError, match="must use"):
-        publish_crate_archive.validate_package(stable_exact, "0.6.0", "0.8.0", "stable")
+        publish_crate_archive.validate_package(stable_exact, "0.7.0", "0.8.0", "stable")
 
     with pytest.raises(ValueError, match=">=0.8.0, <0.9.0"):
         publish_crate_archive.validate_package(
-            _package("0.6.0", "0.9.0", "stable"),
-            "0.6.0",
+            _package("0.7.0", "0.9.0", "stable"),
+            "0.7.0",
             "0.9.0",
             "stable",
         )

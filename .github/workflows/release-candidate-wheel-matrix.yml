@@ -15,7 +15,7 @@ env:
   MATURIN_PEP517_ARGS: "--locked"
   ADAM_CORE_RELEASE_VERSION: "0.8.0"
   ADAM_CORE_ACCEPTANCE_REF: "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
-  ADAM_ASSIST_RELEASE_VERSION: "0.6.0"
+  ADAM_ASSIST_RELEASE_VERSION: "0.7.0"
 
 jobs:
   # Release jobs stay manual and run only during the bounded readiness window

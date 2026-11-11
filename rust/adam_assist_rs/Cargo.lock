@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "adam_assist"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "adam_core",
  "adam_core_rs_coords",

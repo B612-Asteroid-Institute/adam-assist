@@ -45,8 +45,8 @@ def verify(*, require_wheel: bool = False) -> None:
             raise ValueError(f"installed {name} {actual} != {expected}")
     if importlib.metadata.version("adam-core") != "0.8.0":
         raise ValueError("installed adam-core must be the exact released 0.8.0 pair")
-    if importlib.metadata.version("adam-assist") != "0.6.0":
-        raise ValueError("installed adam-assist must remain 0.6.0")
+    if importlib.metadata.version("adam-assist") != "0.7.0":
+        raise ValueError("installed adam-assist must be the aligned 0.7.0 release")
 
     if require_wheel:
         for distribution_name, module_name in (

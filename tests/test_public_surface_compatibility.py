@@ -186,5 +186,5 @@ def test_current_surface_manifest_reconciles_latest_upstream() -> None:
     }
 
 
-def test_next_source_version_module_is_preserved() -> None:
-    assert __version__ == "0.6.0"
+def test_release_version_module_is_preserved() -> None:
+    assert __version__ == "0.7.0"

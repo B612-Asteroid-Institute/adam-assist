@@ -19,15 +19,15 @@ route. The Python capsule suite separately executes propagation, STM, lifetime,
 and error contracts plus Core `run_iod`, `refine`, `run_od`, and
 `evaluate_orbits` with the Assist provider.
 
-The mandatory 16-wheel matrix includes Python 3.14, so a wheel publication run
-requires aligned Assist versions and dependencies. Release workflows are
-`workflow_dispatch`-only and require
+The mandatory 16-wheel matrix includes Python 3.14. Python and Rust release
+identities are aligned at 0.7.0 while retaining the public Core 0.8 line.
+Release workflows are `workflow_dispatch`-only and require
 `ADAM_ASSIST_RELEASES_ENABLED == 'true'`. The PyPI upload job also requires
-`dry_run == false`. The contract's
-`present-and-version-alignment-required` value is descriptive rather than a
-gate: actual fail-closed behavior comes from the readiness variable, exact
-immutable tag checkout and release-version checks, and registry immutability.
-The existing `v0.6.0` tag cannot publish this Core 0.8 source state.
+`dry_run == false`. The contract's `present-and-version-aligned` value is
+descriptive rather than a gate: actual fail-closed behavior comes from the
+readiness variable, exact immutable `v0.7.0` tag checkout, candidate-run and
+release-version checks, and registry immutability. Published 0.6.0 artifacts
+remain immutable.
 
 ## Public Core release and lock validation
 
@@ -61,5 +61,9 @@ archive and 16 platform/Python wheels. The wheel matrix checks out the exact
 Core release only for immutable clean-room acceptance tooling and provenance;
 it installs public Core artifacts and never rebuilds Core. Publication
 workflows reverify the accepted artifacts and upload them without rebuilding.
-Rust 1.87 remains the MSRV for formatting, Clippy, tests, documentation,
-packaging, and clean consumers.
+Run both candidate workflows at the exact reviewed commit, create the immutable
+`v0.7.0` tag only after both candidates pass, publish and verify the tested
+Rust crate first, then pass its public checksum to the tested-wheel publisher.
+Verify all 16 public wheel hashes before creating the GitHub Release from the
+same tag. Rust 1.87 remains the MSRV for formatting, Clippy, tests,
+documentation, packaging, and clean consumers.
