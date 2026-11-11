@@ -2174,9 +2174,17 @@ mod tests {
         let assist = AssistPropagator::from_paths(&planets, &asteroids).unwrap();
         let fingerprint = assist.data_fingerprint().unwrap().to_string();
         let retained = assist.external_propagator().unwrap();
-        let retained_metadata =
-            adam_core::od::algorithms::external_provider_metadata(retained.external()).unwrap();
-        assert_eq!(retained_metadata.data_fingerprint, fingerprint);
+        let retained_data_fingerprint = retained
+            .external()
+            .data_fingerprint()
+            .expect("external provider data fingerprint")
+            .to_string();
+        let retained_configuration_fingerprint = retained
+            .external()
+            .configuration_fingerprint()
+            .expect("external provider configuration fingerprint")
+            .to_string();
+        assert_eq!(retained_data_fingerprint, fingerprint);
 
         // Rename preserves the exact inode/bytes mapped by ASSIST; replacing
         // only the canonical path cannot mutate that loaded handle.
@@ -2184,15 +2192,13 @@ mod tests {
         std::fs::rename(&planets, &loaded_planets).unwrap();
         std::fs::write(&planets, b"tampered kernel path").unwrap();
 
-        let metadata_after_tamper =
-            adam_core::od::algorithms::external_provider_metadata(retained.external()).unwrap();
         assert_eq!(
-            metadata_after_tamper.data_fingerprint,
-            retained_metadata.data_fingerprint
+            retained.external().data_fingerprint(),
+            Some(retained_data_fingerprint.as_str())
         );
         assert_eq!(
-            metadata_after_tamper.configuration_fingerprint,
-            retained_metadata.configuration_fingerprint
+            retained.external().configuration_fingerprint(),
+            Some(retained_configuration_fingerprint.as_str())
         );
         let new_adapter_error = match assist.external_propagator() {
             Ok(_) => panic!("tampered kernel path unexpectedly produced a new adapter"),

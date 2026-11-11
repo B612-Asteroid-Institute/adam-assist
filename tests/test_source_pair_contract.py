@@ -16,11 +16,11 @@ from migration.scripts.verify_source_pair_contract import (
 def test_source_pair_contract_accepts_current_tree() -> None:
     contract = verify()
     assert contract["assist_version"] == "0.6.0"
-    assert contract["core_version"] == "0.7.0"
+    assert contract["core_version"] == "0.8.0"
     assert contract["source_pair_status"] == "exact-public-release"
-    assert contract["lock_state"] == "registry-only-core-0.7.0-locked"
-    assert contract["registry_state"] == "core-0.7.0-public-and-verified"
-    assert contract["release_automation"] == "present-and-release-eligible-when-enabled"
+    assert contract["lock_state"] == "registry-only-core-0.8.0-locked"
+    assert contract["registry_state"] == "core-0.8.0-public-and-verified"
+    assert contract["release_automation"] == "present-and-version-alignment-required"
 
 
 def test_every_cargo_dependency_table_rejects_mixed_core_versions() -> None:
@@ -30,7 +30,7 @@ def test_every_cargo_dependency_table_rejects_mixed_core_versions() -> None:
     mixed.setdefault("target", {}).setdefault("cfg(unix)", {})["build-dependencies"] = {
         "adam_core_rs_coords": "0.6"
     }
-    with pytest.raises(ValueError, match="coherent 0.7 line"):
+    with pytest.raises(ValueError, match="coherent 0.8 line"):
         verify_cargo_core_dependencies(mixed)
 
 
@@ -41,7 +41,7 @@ def test_every_cargo_dependency_table_rejects_nonregistry_core_sources() -> None
     mixed.setdefault("target", {}).setdefault("cfg(unix)", {})["dependencies"] = {
         "renamed_core": {
             "package": "adam_core_rs_spice",
-            "version": "0.7",
+            "version": "0.8",
             "git": "https://example.invalid/adam_core",
         }
     }
@@ -68,7 +68,7 @@ def test_dev_environment_verifier_enforces_installed_runtime_versions(
 ) -> None:
     versions = {
         **FROZEN_DEV_VERSIONS,
-        "adam-core": "0.7.0",
+        "adam-core": "0.8.0",
         "adam-assist": "0.6.0",
     }
     imported: list[str] = []
@@ -179,22 +179,22 @@ SOURCE_CONTRACT_MUTATIONS = (
         _append(
             "rust/adam_assist_rs/Cargo.toml",
             "\n[target.'cfg(unix)'.dependencies]\n"
-            'adam_core_rs_spice = { version = "0.7", path = "../core" }\n',
+            'adam_core_rs_spice = { version = "0.8", path = "../core" }\n',
         ),
     ),
     (
         "D03-dev-git",
         _replace(
             "rust/adam_assist_rs/Cargo.toml",
-            'adam_core_rs_kernel_data = { version = "0.7", default-features = false }',
-            'adam_core_rs_kernel_data = { version = "0.7", git = "https://example.invalid/core" }',
+            'adam_core_rs_kernel_data = { version = "0.8", default-features = false }',
+            'adam_core_rs_kernel_data = { version = "0.8", git = "https://example.invalid/core" }',
         ),
     ),
     (
         "D04-workspace-source",
         _append(
             "rust/adam_assist_rs/Cargo.toml",
-            '\n[workspace.dependencies]\nadam_core_rs_coords = { version = "0.7", path = "../core" }\n',
+            '\n[workspace.dependencies]\nadam_core_rs_coords = { version = "0.8", path = "../core" }\n',
         ),
     ),
     (
@@ -215,15 +215,15 @@ SOURCE_CONTRACT_MUTATIONS = (
         "D07-replace-table",
         _append(
             "rust/adam_assist_rs/Cargo.toml",
-            '\n[replace]\n"adam_core_rs_coords:0.7.0" = { path = "../core" }\n',
+            '\n[replace]\n"adam_core_rs_coords:0.8.0" = { path = "../core" }\n',
         ),
     ),
     (
         "D09-alternative-registry",
         _replace(
             "rust/adam_assist_rs/Cargo.toml",
-            'adam_core_rs_coords = "0.7"',
-            'adam_core_rs_coords = { version = "0.7", registry = "internal" }',
+            'adam_core_rs_coords = "0.8"',
+            'adam_core_rs_coords = { version = "0.8", registry = "internal" }',
         ),
     ),
     (
@@ -244,8 +244,8 @@ SOURCE_CONTRACT_MUTATIONS = (
         "D12-second-python-core",
         _replace(
             "pyproject.toml",
-            '    "adam-core>=0.7.0,<0.8.0",',
-            '    "adam-core>=0.7.0,<0.8.0",\n    "adam_core==0.6.1",',
+            '    "adam-core>=0.8.0,<0.9.0",',
+            '    "adam-core>=0.8.0,<0.9.0",\n    "adam_core==0.6.1",',
         ),
     ),
     (
@@ -318,16 +318,16 @@ SOURCE_CONTRACT_MUTATIONS = (
         "stale-public-core-ref",
         _replace(
             "migration/source_pair_contract.json",
+            "37fcd1c6f5d38d70335e56c3b095658a466d1f50",
             "a6478f2f280c266d7a5d1442997eb520fc20888f",
-            "0b49938eb0be04214a8d07b206227d31b248394a",
         ),
     ),
     (
         "stale-absent-lock-state",
         _replace(
             "migration/source_pair_contract.json",
-            "registry-only-core-0.7.0-locked",
-            "absent-until-core-0.7.0-is-public",
+            "registry-only-core-0.8.0-locked",
+            "absent-until-core-0.8.0-is-public",
         ),
     ),
     ("R01-stale-pdm-lock", _write("pdm.lock", "[metadata]\nlock_version = '4.5'\n")),

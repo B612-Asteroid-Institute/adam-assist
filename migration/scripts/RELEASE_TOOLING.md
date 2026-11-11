@@ -1,44 +1,65 @@
 # Registry-locked release tooling
 
-Adam-core `0.7.0` is public and independently verified at release commit
-`a6478f2f280c266d7a5d1442997eb520fc20888f`. The committed PDM and Cargo locks
+Adam-core `0.8.0` is public and independently verified at release commit
+`37fcd1c6f5d38d70335e56c3b095658a466d1f50`. The committed PDM and Cargo locks
 resolve only the corresponding public PyPI wheels and crates.io archives, with
 registry hashes/checksums and no path, Git, URL, patch, or replacement source.
 
-Release-candidate and publication workflows remain `workflow_dispatch`-only.
-Every release job requires the bounded repository variable
-`ADAM_ASSIST_RELEASES_ENABLED` to equal `true`; `publish-pypi` additionally
-retains its `dry_run == false` condition. The variable is configured only for
-the reviewed release window after environment protections and the exact final
-candidate are accepted. Enabling it does not itself authorize a registry
-upload, tag, or GitHub release.
+## CPython 3.14 validation
+
+One Python 3.11-3.14 CI matrix builds only the Assist wheel. Every row installs
+the public binary Core 0.8.0 wheel, checks its embedded release identity, and
+runs the same installed-wheel suite. The generic Rust lane consumes all six
+Core 0.8.0 crates from the authentic Cargo lock and runs direct
+`AssistPropagator`/`Propagator`, installed-kernel, and provider-provenance
+runtime contracts on Rust 1.87. It compile/type-checks direct
+`AssistShard`/`PropagatorShard` composition and trait bounds, while its
+`core_owned_od` example compile/type-checks the standalone Rust composition
+route. The Python capsule suite separately executes propagation, STM, lifetime,
+and error contracts plus Core `run_iod`, `refine`, `run_od`, and
+`evaluate_orbits` with the Assist provider.
+
+The mandatory 16-wheel matrix includes Python 3.14, so a wheel publication run
+requires aligned Assist versions and dependencies. Release workflows are
+`workflow_dispatch`-only and require
+`ADAM_ASSIST_RELEASES_ENABLED == 'true'`. The PyPI upload job also requires
+`dry_run == false`. The contract's
+`present-and-version-alignment-required` value is descriptive rather than a
+gate: actual fail-closed behavior comes from the readiness variable, exact
+immutable tag checkout and release-version checks, and registry immutability.
+The existing `v0.6.0` tag cannot publish this Core 0.8 source state.
 
 ## Public Core release and lock validation
 
-Use the exact public Core release checkout as the source/provenance authority,
-then verify both committed locks and run Cargo without overrides:
+Verify the exact public release identity and both committed locks, then run
+Cargo without overrides. `pdm lock --check` validates the committed lock; it
+does not use the resolver pins itself. The dev extra pins `pdm==2.29.2`,
+`hishel==1.1.6`, and `unearth==0.18.2` only so future `pdm lock` regeneration
+uses the tested client stack: current Hishel is incompatible with PDM 2.29.2's
+lock command.
 
 ```console
-git clone --no-hardlinks https://github.com/B612-Asteroid-Institute/adam_core.git ../adam-core-a6478f2f
-git -C ../adam-core-a6478f2f checkout --detach a6478f2f280c266d7a5d1442997eb520fc20888f
-CORE="$(cd ../adam-core-a6478f2f && pwd)"
-test "$(git -C "$CORE" rev-parse HEAD)" = a6478f2f280c266d7a5d1442997eb520fc20888f
-test "$(git -C "$CORE" rev-parse 'v0.7.0^{commit}')" = a6478f2f280c266d7a5d1442997eb520fc20888f
-python migration/scripts/verify_source_pair_contract.py --core-tree "$CORE"
-
+python migration/scripts/verify_source_pair_contract.py
 pdm lock --check
 python migration/scripts/verify_registry_locks.py \
-  --core-version 0.7.0 --python-lock --rust-lock
+  --core-version 0.8.0 --python-lock --rust-lock
+python -m pip download --only-binary=:all: --no-deps \
+  --dest /tmp/adam-core-0.8.0 adam-core==0.8.0
 cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
   --locked --all-targets --features python
 cargo test --manifest-path rust/adam_assist_rs/Cargo.toml \
   --locked --lib --no-default-features
+cargo metadata --manifest-path rust/adam_assist_rs/Cargo.toml \
+  --locked --format-version 1 > /tmp/adam-assist-cargo-metadata.json
+python migration/scripts/verify_rust_core_line.py \
+  --metadata /tmp/adam-assist-cargo-metadata.json --core-version 0.8.0
 test -z "$(git status --porcelain)"
 ```
 
-The release-candidate workflows repeat these checks before building the one
-crate archive and 12 platform/Python wheel artifacts. Publication workflows
-accept only those successful exact-commit candidate runs, reverify checksums,
-and upload the accepted bytes without rebuilding. Rust 1.87 remains the
-authoritative MSRV for formatting, strict Clippy, tests, documentation,
+The release-candidate workflows repeat these checks before building one crate
+archive and 16 platform/Python wheels. The wheel matrix checks out the exact
+Core release only for immutable clean-room acceptance tooling and provenance;
+it installs public Core artifacts and never rebuilds Core. Publication
+workflows reverify the accepted artifacts and upload them without rebuilding.
+Rust 1.87 remains the MSRV for formatting, Clippy, tests, documentation,
 packaging, and clean consumers.

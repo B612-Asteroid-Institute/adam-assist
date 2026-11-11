@@ -24,12 +24,12 @@ on:
       expected_adam_core_version:
         description: Exact already-published adam-core Python release
         required: true
-        default: 0.7.0
+        default: 0.8.0
         type: string
       expected_adam_core_rust_version:
         description: Exact already-published adam-core Rust release
         required: true
-        default: 0.7.0
+        default: 0.8.0
         type: string
       release_channel:
         description: Registry release channel
@@ -67,7 +67,7 @@ jobs:
   # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
   compatibility-floor:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
-    name: Verify public Core 0.7 registry floor
+    name: Verify public Core 0.8 registry floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -170,7 +170,7 @@ jobs:
           set -euo pipefail
           mkdir dist
           find acceptance-artifacts -type f -name 'adam_assist-*.whl' -exec cp '{}' dist/ ';'
-          test "$(find dist -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 12
+          test "$(find dist -maxdepth 1 -name 'adam_assist-*.whl' | wc -l | tr -d ' ')" = 16
           python - <<'PY'
           import email
           import os
@@ -182,14 +182,14 @@ jobs:
 
           expected_version = Version(os.environ["EXPECTED_VERSION"])
           expected_core = Version(os.environ["EXPECTED_CORE_VERSION"])
-          if expected_core not in Requirement("adam-core>=0.7.0,<0.8.0").specifier:
+          if expected_core not in Requirement("adam-core>=0.8.0,<0.9.0").specifier:
               raise SystemExit(f"selected Core {expected_core} is outside the supported range")
           expected_requirements = {
-              "adam-core": "<0.8.0,>=0.7.0",
+              "adam-core": "<0.9.0,>=0.8.0",
               "naif-de440": "==2020.12.21.1",
               "jpl-small-bodies-de441-n16": "==2021.3.31.1",
           }
-          expected_python = {"cp311", "cp312", "cp313"}
+          expected_python = {"cp311", "cp312", "cp313", "cp314"}
           expected_platforms = {
               "manylinux_2_17_x86_64",
               "manylinux_2_17_aarch64",
@@ -306,7 +306,7 @@ jobs:
             --dist accepted-dist \
             --project adam-assist \
             --version "$EXPECTED_VERSION" \
-            --expected-count 12 \
+            --expected-count 16 \
             --upload-dir upload-dist \
             --output pypi-before.json
           echo "missing_count=$(find upload-dist -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')" \
@@ -324,7 +324,7 @@ jobs:
             --dist accepted-dist \
             --project adam-assist \
             --version "$EXPECTED_VERSION" \
-            --expected-count 12 \
+            --expected-count 16 \
             --require-complete \
             --output pypi-after.json
       - name: Upload public-registry comparison evidence

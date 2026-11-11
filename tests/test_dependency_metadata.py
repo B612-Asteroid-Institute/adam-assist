@@ -88,14 +88,14 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     assert dependencies["librebound-sys"] == "=4.6.0"
     assert dependencies["sha2"] == "0.10"
     kernel_dependency = {
-        "version": "0.7",
+        "version": "0.8",
         "default-features": False,
     }
     assert dependencies["adam_core_rs_kernel_data"] == {
         **kernel_dependency,
         "optional": True,
     }
-    assert manifest["dev-dependencies"]["adam_core"] == "0.7"
+    assert manifest["dev-dependencies"]["adam_core"] == "0.8"
     assert manifest["dev-dependencies"]["adam_core_rs_kernel_data"] == (
         kernel_dependency
     )
@@ -108,20 +108,62 @@ def test_public_rust_crate_metadata_and_dependencies() -> None:
     }.isdisjoint(dependencies)
 
 
+def test_cpython_314_binding_and_distribution_metadata() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        pyproject = tomllib.load(pyproject_file)
+    project = pyproject["project"]
+    assert project["requires-python"] == ">=3.11,<3.15"
+    assert {
+        f"Programming Language :: Python :: 3.{minor}" for minor in range(11, 15)
+    } <= set(project["classifiers"])
+
+    manifest = _cargo_manifest()
+    assert manifest["dependencies"]["pyo3"] == {
+        "version": "0.28",
+        "optional": True,
+    }
+    assert manifest["dependencies"]["numpy"] == {
+        "version": "0.28",
+        "optional": True,
+    }
+    python_source = (ROOT / "rust" / "adam_assist_rs" / "src" / "python.rs").read_text()
+    assert "#[pymodule(gil_used = true)]" in python_source
+    assert "allow_threads" not in python_source
+    assert "new_bound" not in python_source
+    assert "into_pyarray_bound" not in python_source
+
+    normal_ci = (
+        ROOT / ".github/workflows/pip-build-lint-test-coverage.yml"
+    ).read_text()
+    release_matrix = (
+        ROOT / ".github/workflows/release-candidate-wheel-matrix.yml"
+    ).read_text()
+    publish = (ROOT / ".github/workflows/publish.yml").read_text()
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in normal_ci
+    assert normal_ci.count("\n  released-core:") == 1
+    assert "core-kind: [released-registry]" in normal_ci
+    assert "37fcd1c6f5d38d70335e56c3b095658a466d1f50" in normal_ci
+    assert ".source-pair" not in normal_ci
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in release_matrix
+    assert 'expected_python = {"cp311", "cp312", "cp313", "cp314"}' in publish
+
+
 def test_dev_lint_tool_is_pinned() -> None:
     with (ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
     dev = pyproject["project"]["optional-dependencies"]["dev"]
     assert "ruff==0.16.4" in dev
     assert "pdm==2.29.2" in dev
+    assert "hishel==1.1.6" in dev
+    assert "unearth==0.18.2" in dev
     assert "packaging" in dev
     assert "PyYAML" in dev
 
 
-def test_dependencies_declare_core_070_floor() -> None:
+def test_dependencies_declare_core_080_floor() -> None:
     dependencies = _project_dependencies()
     assert dependencies == [
-        "adam-core>=0.7.0,<0.8.0",
+        "adam-core>=0.8.0,<0.9.0",
         "naif-de440==2020.12.21.1",
         "jpl-small-bodies-de441-n16==2021.3.31.1",
     ]
@@ -139,8 +181,8 @@ def test_dependencies_declare_core_070_floor() -> None:
         assert requirement in dev_dependencies
     manifest = _cargo_manifest()
     dependencies = manifest["dependencies"]
-    assert dependencies["adam_core_rs_coords"] == "0.7"
-    assert dependencies["adam_core_rs_spice"] == "0.7"
+    assert dependencies["adam_core_rs_coords"] == "0.8"
+    assert dependencies["adam_core_rs_spice"] == "0.8"
     assert "patch" not in manifest
     assert not (ROOT / "rust" / "vendor").exists()
 
@@ -149,12 +191,12 @@ def test_public_source_pair_has_authentic_registry_locks() -> None:
     assert (ROOT / "pdm.lock").is_file()
     assert (ROOT / "rust" / "adam_assist_rs" / "Cargo.lock").is_file()
     contract = verify_source_pair()
-    assert contract["core_version"] == "0.7.0"
-    assert contract["core_commit"] == "a6478f2f280c266d7a5d1442997eb520fc20888f"
-    assert contract["lock_state"] == "registry-only-core-0.7.0-locked"
-    assert contract["registry_state"] == "core-0.7.0-public-and-verified"
+    assert contract["core_version"] == "0.8.0"
+    assert contract["core_commit"] == "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
+    assert contract["lock_state"] == "registry-only-core-0.8.0-locked"
+    assert contract["registry_state"] == "core-0.8.0-public-and-verified"
     assert contract["source_pair_status"] == "exact-public-release"
-    assert contract["release_automation"] == "present-and-release-eligible-when-enabled"
+    assert contract["release_automation"] == "present-and-version-alignment-required"
 
 
 def test_packaged_rust_fixture_matches_frozen_migration_evidence() -> None:
@@ -341,7 +383,7 @@ def test_frozen_regressions_are_complete_and_legacy_runtime_free() -> None:
 
 
 def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
-    core_ref = "a6478f2f280c266d7a5d1442997eb520fc20888f"
+    core_ref = "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
     readme = (ROOT / "README.md").read_text()
     crate_readme = (ROOT / "rust" / "adam_assist_rs" / "README.md").read_text()
     migration = (ROOT / "MIGRATION.md").read_text()
@@ -394,8 +436,8 @@ def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     assert "the authority for compatible adam-core crate versions" in crate_readme
     assert "packaged-crate consumers" not in crate_readme
     assert "kernel-backed integration tests" not in crate_readme
-    assert "adam-core>=0.7.0,<0.8.0" in _project_dependencies()
-    assert _cargo_manifest()["dependencies"]["adam_core_rs_coords"] == "0.7"
+    assert "adam-core>=0.8.0,<0.9.0" in _project_dependencies()
+    assert _cargo_manifest()["dependencies"]["adam_core_rs_coords"] == "0.8"
 
     assert core_ref in migration
     assert core_ref in release_tooling
@@ -403,13 +445,18 @@ def test_runtime_docs_and_release_tooling_have_separate_authorities() -> None:
     assert "f66517aa" in migration
     assert "src/{propagate.rs, coordinates.rs, orbit.rs, assist_data.rs}" in migration
     assert "ADAM_ASSIST_RELEASES_ENABLED" in release_tooling
-    assert "verify_source_pair_contract.py --core-tree" in release_tooling
+    assert "verify_source_pair_contract.py" in release_tooling
     assert "pdm lock --check" in release_tooling
     assert "verify_registry_locks.py" in release_tooling
     assert "cargo test --manifest-path" in release_tooling
     assert "--locked" in release_tooling
     assert 'test -z "$(git status --porcelain)"' in release_tooling
-    assert "Exact public Core release" in normal_ci
+    assert (
+        "Core ${{ matrix.core-kind }} / Python ${{ matrix.python-version }}"
+        in normal_ci
+    )
+    assert "core-kind: [released-registry]" in normal_ci
+    assert ".source-pair" not in normal_ci
     assert "exit 1" not in normal_ci
     workflows = sorted(
         path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")

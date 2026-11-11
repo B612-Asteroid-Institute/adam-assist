@@ -26,8 +26,9 @@
 pip install adam-assist
 ```
 
-Native wheels support CPython 3.11-3.13 on manylinux 2.17+ x86-64/AArch64 and
-macOS Apple silicon/Intel. Windows is currently unsupported because
+Native builds support CPython 3.11-3.14 on manylinux 2.17+ x86-64/AArch64 and
+macOS Apple silicon/Intel. The current PyPI wheel set supports CPython
+3.11-3.13. Windows is currently unsupported because
 ``libassist-sys 1.2.1`` wraps upstream ASSIST code that requires POSIX
 ``sys/mman.h`` memory mapping; no Windows port is bundled. Musllinux is also
 unsupported.

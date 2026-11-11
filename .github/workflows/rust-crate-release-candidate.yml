@@ -8,7 +8,7 @@ permissions:
 
 env:
   RUST_RELEASE_VERSION: "0.6.0"
-  CORE_RUST_VERSION: "0.7.0"
+  CORE_RUST_VERSION: "0.8.0"
   RELEASE_CHANNEL: stable
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
   # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
   compatibility-floor:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
-    name: Verify public Core 0.7 registry floor
+    name: Verify public Core 0.8 registry floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
       - name: Set up supported Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - uses: dtolnay/rust-toolchain@1.87.0
         with:
           components: rustfmt, clippy
@@ -84,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core-version: ["0.7.0"]
+        core-version: ["0.8.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.87.0
@@ -157,7 +157,7 @@ jobs:
       - name: Set up supported Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - uses: dtolnay/rust-toolchain@stable
       - name: Check and test supported feature configurations
         run: |

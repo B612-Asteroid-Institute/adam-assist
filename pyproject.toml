@@ -15,12 +15,16 @@ classifiers = [
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
-    "adam-core>=0.7.0,<0.8.0",
+    "adam-core>=0.8.0,<0.9.0",
     "naif-de440==2020.12.21.1",
     "jpl-small-bodies-de441-n16==2021.3.31.1",
 ]
@@ -44,6 +48,10 @@ Source = "https://github.com/B612-Asteroid-Institute/adam-assist"
 dev = [
     "ruff==0.16.4",
     "pdm==2.29.2",
+    # Pin the resolver client stack used to regenerate pdm.lock: current
+    # Hishel is incompatible with PDM 2.29.2's `pdm lock` command.
+    "hishel==1.1.6",
+    "unearth==0.18.2",
     "mypy",
     "maturin>=1.7,<2",
     "pytest",

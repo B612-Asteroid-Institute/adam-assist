@@ -13,8 +13,8 @@ concurrency:
 env:
   PIP_ONLY_BINARY: ":all:"
   MATURIN_PEP517_ARGS: "--locked"
-  ADAM_CORE_RELEASE_VERSION: "0.7.0"
-  ADAM_CORE_ACCEPTANCE_REF: "a6478f2f280c266d7a5d1442997eb520fc20888f"
+  ADAM_CORE_RELEASE_VERSION: "0.8.0"
+  ADAM_CORE_ACCEPTANCE_REF: "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
   ADAM_ASSIST_RELEASE_VERSION: "0.6.0"
 
 jobs:
@@ -22,7 +22,7 @@ jobs:
   # controlled by the ADAM_ASSIST_RELEASES_ENABLED repository variable.
   compatibility-floor:
     if: ${{ vars.ADAM_ASSIST_RELEASES_ENABLED == 'true' }}
-    name: Verify public Core 0.7 registry floor
+    name: Verify public Core 0.8 registry floor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         platform:
           - {name: manylinux-x86_64, runner: ubuntu-latest, system: Linux-x86_64, family: manylinux, target: x86_64, wheel_tag: "manylinux*x86_64"}
           - {name: manylinux-aarch64, runner: ubuntu-24.04-arm, system: Linux-aarch64, family: manylinux, target: aarch64, wheel_tag: "manylinux*aarch64"}
@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C adam-core-acceptance rev-parse HEAD)" = "$ADAM_CORE_ACCEPTANCE_REF"
-          test "$(git -C adam-core-acceptance rev-parse 'v0.7.0^{commit}')" = "$ADAM_CORE_ACCEPTANCE_REF"
+          test "$(git -C adam-core-acceptance rev-parse 'v0.8.0^{commit}')" = "$ADAM_CORE_ACCEPTANCE_REF"
           test -z "$(git -C adam-core-acceptance status --porcelain)"
           python - <<'PY'
           import hashlib
@@ -240,7 +240,7 @@ jobs:
                       for value in metadata.get_all("Requires-Dist", [])
                   }
                   expected_requirements = {
-                      "adam-core>=0.7.0,<0.8.0",
+                      "adam-core>=0.8.0,<0.9.0",
                       "naif-de440==2020.12.21.1",
                       "jpl-small-bodies-de441-n16==2021.3.31.1",
                   }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify public-release CI and manually gated release workflows.
 
-Core 0.7 and authentic registry locks are public. Release infrastructure stays
+Core 0.8 and authentic registry locks are public. Release infrastructure stays
 workflow-dispatch-only, and every release job requires one bounded-window
 repository variable.
 """
@@ -54,9 +54,9 @@ EXPECTED_RELEASE_JOB_CONDITIONS = {
         "latest-stable-compatibility": READINESS_CONDITION,
     },
 }
-RELEASE_AUTOMATION_STATE = "present-and-release-eligible-when-enabled"
-CORE_REF = "a6478f2f280c266d7a5d1442997eb520fc20888f"
-CORE_REPOSITORY = "B612-Asteroid-Institute/adam_core"
+RELEASE_AUTOMATION_STATE = "present-and-version-alignment-required"
+CORE_RELEASE_COMMIT = "37fcd1c6f5d38d70335e56c3b095658a466d1f50"
+CORE_PUBLIC_REF = CORE_RELEASE_COMMIT
 ALLOWED_ACTIONS = {
     "actions/checkout@v4",
     "actions/setup-python@v5",
@@ -83,61 +83,7 @@ INERT_RELEASE_HELPERS = (
     "publish_crate_archive",
     "verify_release",
 )
-WORKFLOW_SHA256 = "a8203ec95572210715000d90874dcc0a192e0960c3a5f955f358e5e803854644"
-REQUIRED_RUN_SHA256 = {
-    (
-        "source-pair",
-        "Verify source-pair contract",
-    ): "e32dc74240bec3c4973eba9ad56592e2ebae1a6b9adaa5e29dc051f753f40b3f",
-    (
-        "source-pair",
-        "Install build and test tooling",
-    ): "f086e46169b1d26b49ea59ef0b7865f5467accd5ab79d2e6450151e9f139d01c",
-    (
-        "source-pair",
-        "Build Core and ASSIST wheels from the exact pair",
-    ): "66f4e271d07b83cce0b944c751fc6342a99b2b1104155d38dd73b198a4592f18",
-    (
-        "source-pair",
-        "Verify release-ready workflow policy",
-    ): "50a51d5358b2c995ee1ad421cfe663df89c6201557ca3775a85c1aedc41638d7",
-    (
-        "source-pair",
-        "Verify installed versions and wheel dependency floor",
-    ): "d356139c8cab6fb05be911e92bca7eba3b2e6c83a52b221d1823499a2c76e43b",
-    (
-        "source-pair",
-        "Run non-live wheel tests",
-    ): "6155eec545b37540661aa11f070ae5122d8a9ab39ba6c22db1f961c29dc8c5bd",
-    (
-        "source-pair",
-        "Run non-live wheel tests with coverage",
-    ): "8d1caa5efe72cf121fb1c9b426bf5f67ba844dc3d6c923f8009687562f497a8a",
-    (
-        "source-pair",
-        "Lint and typecheck the source",
-    ): "d88ab56c0c5025ae3cc64775839be5eec21b5c0a153ddacb1be125786dd0e23c",
-    (
-        "source-pair",
-        "Verify authentic locks and clean tracked state",
-    ): "0e8e74c6cd4895f7d8d829d391264d9696c5ef02fb322606be805b6cd0bdf0b3",
-    (
-        "rust-quality",
-        "Verify source pair and run Rust gates",
-    ): "15702fec0f685e2f85a6720e4833406bbd6053ebe8e280752a5ce04a90930448",
-    (
-        "benchmark",
-        "Install the already-tested source-pair wheels",
-    ): "0fc96830e3b073a75a52a3266ead70725367914f69492736d4dd4d75a2510375",
-    (
-        "benchmark",
-        "Run benchmarks",
-    ): "9a477acc4abccc5bd7f3f8f470f3baa2de3a54f6d9adb34dcf736b29cf3a9193",
-    (
-        "benchmark",
-        "Run current public/native benchmark smoke",
-    ): "5e6bf6568657875cb383aee5668bd42f59d99d5bb35dfed9b62885282697ab0b",
-}
+WORKFLOW_SHA256 = "4e4b5a8100dc7ff1ba24187ec3819441d67edb3ef745f3cf5321b6725409a838"
 
 
 class WorkflowPolicyError(ValueError):
@@ -223,16 +169,6 @@ def _require_condition(step: Mapping[str, Any], expected: str | None) -> None:
         _fail(str(step.get("name", "<step>")), f"condition {actual!r} != {expected!r}")
 
 
-def _verify_checkout(job: Mapping[str, Any], location: str) -> None:
-    step = _step_by_name(job, "Checkout exact public adam-core release")
-    if step.get("uses") != "actions/checkout@v4" or step.get("with") != {
-        "repository": CORE_REPOSITORY,
-        "ref": "${{ env.ADAM_CORE_SOURCE_REF }}",
-        "path": ".source-pair/adam-core",
-    }:
-        _fail(location, "Core checkout must use the exact reviewed source pair")
-
-
 def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:
     if set(workflow) != {"name", True, "permissions", "concurrency", "env", "jobs"}:
         _fail(NORMAL, "workflow-level keys drifted from the exact CI policy")
@@ -244,9 +180,15 @@ def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:
 
     jobs = workflow["jobs"]
     allowed_job_keys = {
-        "source-pair": {"name", "runs-on", "strategy", "steps", "timeout-minutes"},
+        "released-core": {"name", "runs-on", "strategy", "steps", "timeout-minutes"},
         "rust-quality": {"name", "runs-on", "steps", "timeout-minutes"},
         "benchmark": {"runs-on", "needs", "steps", "timeout-minutes"},
+    }
+    shell_steps = {
+        ("released-core", "Verify exact released-Core pair contract"),
+        ("released-core", "Build Assist and install released Core wheel pair"),
+        ("rust-quality", "Verify released registry pair and run Rust gates"),
+        ("rust-quality", "Run direct Rust runtime and provenance contracts"),
     }
     for job_id, job in jobs.items():
         unexpected = set(job) - allowed_job_keys[job_id]
@@ -268,37 +210,18 @@ def _verify_exact_structure(workflow: Mapping[str, Any]) -> None:
                     f"forbidden step keys: {sorted(unexpected)!r}",
                 )
             expected_shell = (
-                "bash"
-                if (job_id, step.get("name"))
-                in {
-                    ("source-pair", "Build Core and ASSIST wheels from the exact pair"),
-                    ("rust-quality", "Verify source pair and run Rust gates"),
-                }
-                else None
+                "bash" if (job_id, step.get("name")) in shell_steps else None
             )
             if step.get("shell") != expected_shell:
                 _fail(
                     f"{NORMAL}:{job_id}:{step.get('name', '<step>')}",
                     "custom or missing shell override",
                 )
-            env = step.get("env")
-            allowed_env = (
-                {"GH_TOKEN": "${{ github.token }}"}
-                if (job_id, step.get("name")) == ("benchmark", "Run benchmarks")
-                else None
-            )
-            if env is not None and env != allowed_env:
+            if "env" in step:
                 _fail(
                     f"{NORMAL}:{job_id}:{step.get('name', '<step>')}",
                     "step environment is not allowlisted",
                 )
-
-    for (job_id, name), expected in REQUIRED_RUN_SHA256.items():
-        actual = hashlib.sha256(
-            _run(_step_by_name(jobs[job_id], name)).encode()
-        ).hexdigest()
-        if actual != expected:
-            _fail(f"{NORMAL}:{job_id}:{name}", "required command changed")
 
 
 def _verify_normal(workflow: Mapping[str, Any]) -> None:
@@ -316,13 +239,16 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
     if workflow.get("permissions") != {"contents": "read"}:
         _fail(NORMAL, "top-level permissions must be exactly contents: read")
     if workflow.get("env") != {
-        "ADAM_CORE_VERSION": "0.7.0",
-        "ADAM_CORE_SOURCE_REF": CORE_REF,
+        "ADAM_CORE_VERSION": "0.8.0",
+        "ADAM_CORE_RELEASE_COMMIT": CORE_RELEASE_COMMIT,
     }:
-        _fail(NORMAL, "Core version/ref drifted from the exact reviewed source pair")
+        _fail(NORMAL, "Core release identity drifted")
+
     jobs = workflow["jobs"]
-    if set(jobs) != {"source-pair", "rust-quality", "benchmark"}:
-        _fail(NORMAL, "required job inventory is source-pair, rust-quality, benchmark")
+    if set(jobs) != {"released-core", "rust-quality", "benchmark"}:
+        _fail(
+            NORMAL, "required job inventory is released-core, rust-quality, benchmark"
+        )
     for job_id, job in jobs.items():
         location = f"{NORMAL}:{job_id}"
         if any(key in job for key in ("if", "continue-on-error", "permissions")):
@@ -340,25 +266,41 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
                 marker in uses.lower() for marker in PUBLISH_ACTION_MARKERS
             ):
                 _fail(step_location, "publisher/release action is forbidden")
-            run = _run(step)
-            if _run_mentions_publication(run):
+            if _run_mentions_publication(_run(step)):
                 _fail(
                     step_location,
                     "package or GitHub-release publication command is forbidden",
                 )
+            if isinstance(step.get("with"), Mapping) and "repository" in step["with"]:
+                _fail(
+                    step_location,
+                    "active CI must consume released Core artifacts, not source checkouts",
+                )
+
     _verify_exact_structure(workflow)
-    source = jobs["source-pair"]
+    released = jobs["released-core"]
     rust = jobs["rust-quality"]
     benchmark = jobs["benchmark"]
-    if source.get("strategy") != {
+    if released.get("strategy") != {
         "fail-fast": False,
-        "matrix": {"python-version": ["3.11", "3.12", "3.13"]},
+        "matrix": {
+            "python-version": ["3.11", "3.12", "3.13", "3.14"],
+            "core-kind": ["released-registry"],
+        },
     }:
-        _fail(NORMAL, "Python source-pair strategy must remain exactly 3.11-3.13")
-    if benchmark.get("needs") != ["source-pair", "rust-quality"]:
-        _fail(NORMAL, "benchmark must require source-pair and rust-quality")
-    _verify_checkout(source, "source-pair")
-    _verify_checkout(rust, "rust-quality")
+        _fail(
+            NORMAL,
+            "released-Core matrix must be exactly Python 3.11-3.14 on released-registry",
+        )
+    if benchmark.get("needs") != ["released-core", "rust-quality"]:
+        _fail(NORMAL, "benchmark must require released Core and Rust quality")
+    setup_python = next(
+        step
+        for step in _steps(released)
+        if step.get("uses") == "actions/setup-python@v5"
+    )
+    if setup_python.get("with") != {"python-version": "${{ matrix.python-version }}"}:
+        _fail("released-core", "Python setup must use the exact matrix row")
 
     required_conditions = {
         "Run non-live wheel tests": "matrix.python-version != '3.12'",
@@ -368,49 +310,135 @@ def _verify_normal(workflow: Mapping[str, Any]) -> None:
         "Coverage report to coveralls": "matrix.python-version == '3.12'",
     }
     for name, condition in required_conditions.items():
-        _require_condition(_step_by_name(source, name), condition)
+        _require_condition(_step_by_name(released, name), condition)
     for name in (
-        "Verify source-pair contract",
-        "Build Core and ASSIST wheels from the exact pair",
+        "Verify exact released-Core pair contract",
+        "Install build and test tooling",
+        "Build Assist and install released Core wheel pair",
+        "Verify released Core identity and wheel dependency range",
+        "Run released-pair capsule contracts",
         "Verify release-ready workflow policy",
-        "Verify installed versions and wheel dependency floor",
-        "Verify authentic locks and clean tracked state",
+        "Verify authentic registry locks and clean tracked state",
+        "Upload released-Core Assist wheel",
     ):
-        _require_condition(_step_by_name(source, name), None)
-    for name in ("Verify source pair and run Rust gates",):
+        _require_condition(_step_by_name(released, name), None)
+    for name in (
+        "Install released Core runtime and kernels",
+        "Verify released registry pair and run Rust gates",
+        "Run direct Rust runtime and provenance contracts",
+    ):
         _require_condition(_step_by_name(rust, name), None)
     for name in (
-        "Install the already-tested source-pair wheels",
+        "Install the already-tested released-Core wheel pair",
         "Run benchmarks",
         "Run current public/native benchmark smoke",
     ):
         _require_condition(_step_by_name(benchmark, name), None)
     _require_condition(
-        _step_by_name(benchmark, "Upload current-only benchmark artifact"),
-        "always()",
+        _step_by_name(benchmark, "Upload current-only benchmark artifact"), "always()"
     )
     _require_condition(
-        _step_by_name(benchmark, "Upload benchmark artifact"),
-        "always()",
+        _step_by_name(benchmark, "Upload benchmark artifact"), "always()"
     )
 
-    policy = _step_by_name(source, "Verify release-ready workflow policy")
-    if _run(policy).strip() != "python migration/scripts/verify_workflow_policy.py":
-        _fail(NORMAL, "normal CI must execute this policy exactly")
-    contract = _run(_step_by_name(source, "Verify source-pair contract"))
-    if (
-        'test "$(git -C .source-pair/adam-core rev-parse HEAD)" = "$ADAM_CORE_SOURCE_REF"'
-        not in contract
-        or "verify_source_pair_contract.py" not in contract
-        or "--core-tree .source-pair/adam-core" not in contract
+    identity = _run(_step_by_name(released, "Verify exact released-Core pair contract"))
+    for marker in (
+        "${{ matrix.core-kind }}",
+        "released-registry",
+        "verify_source_pair_contract.py",
     ):
-        _fail(NORMAL, "source-pair contract/commit verification is incomplete")
-    for job in (source, benchmark):
-        combined = "\n".join(_run(step) for step in _steps(job))
-        if 'python -m pip install "$core_wheel" "${assist_wheel}[dev]"' not in combined:
-            _fail(NORMAL, "wheel-backed jobs must install the Assist dev extra")
-        if "verify_dev_environment.py --require-wheel" not in combined:
-            _fail(NORMAL, "wheel-backed jobs must verify installed provenance and pins")
+        if marker not in identity:
+            _fail(NORMAL, f"released pair identity check is missing {marker!r}")
+    build = _run(
+        _step_by_name(released, "Build Assist and install released Core wheel pair")
+    )
+    for marker in (
+        "maturin build --release --locked",
+        "--only-binary=:all:",
+        '"adam-core==$ADAM_CORE_VERSION"',
+        '"${assist_wheel}[dev]"',
+        "python -m pip check",
+        "verify_dev_environment.py --require-wheel",
+    ):
+        if marker not in build:
+            _fail(NORMAL, f"released wheel build/install is missing {marker!r}")
+    if "adam_core-*.whl" in build or ".source-pair" in build:
+        _fail(NORMAL, "active matrix must not build or source-checkout Core")
+    capsule = _run(_step_by_name(released, "Run released-pair capsule contracts"))
+    for marker in (
+        "native_backend_is_capsule_only",
+        "capsule_propagation_preserves_order_nongrav_and_row_failures",
+        "capsule_stm_honors_custom_and_inactive_nongrav",
+        "capsule_owns_provider_lifetime",
+    ):
+        if marker not in capsule:
+            _fail(NORMAL, f"capsule evidence is missing {marker!r}")
+    ordinary_test = _run(_step_by_name(released, "Run non-live wheel tests"))
+    if (
+        "python -m pytest --benchmark-skip -q tests" not in ordinary_test
+        or "|| true" in ordinary_test
+    ):
+        _fail(NORMAL, "ordinary installed-wheel test command drifted")
+    coverage_test = _run(
+        _step_by_name(released, "Run non-live wheel tests with coverage")
+    )
+    if (
+        "python -m pytest --benchmark-skip --cov=adam_assist --cov-report=xml -q tests"
+        not in coverage_test
+    ):
+        _fail(NORMAL, "coverage installed-wheel test command drifted")
+    lint = _run(_step_by_name(released, "Lint and typecheck the source"))
+    for marker in (
+        "ruff check",
+        "black --check",
+        "isort --check-only",
+        "mypy --strict",
+    ):
+        if marker not in lint:
+            _fail(NORMAL, f"lint/type gate is missing {marker!r}")
+    rust_gate = _run(
+        _step_by_name(rust, "Verify released registry pair and run Rust gates")
+    )
+    for marker in (
+        "cargo fmt",
+        "cargo check",
+        "cargo clippy",
+        "cargo test",
+        "cargo doc",
+    ):
+        if marker not in rust_gate:
+            _fail(NORMAL, f"Rust quality gate is missing {marker!r}")
+    integration = "\n".join(
+        _run(_step_by_name(rust, name))
+        for name in (
+            "Verify released registry pair and run Rust gates",
+            "Run direct Rust runtime and provenance contracts",
+        )
+    )
+    for marker in (
+        "verify_registry_locks.py",
+        "cargo test",
+        "cargo run",
+        "verify_rust_core_line.py",
+        "-- --ignored",
+        "ADAM_CORE_RS_ASSIST_PLANETS_PATH",
+        "ADAM_CORE_RS_ASSIST_ASTEROIDS_PATH",
+    ):
+        if marker not in integration:
+            _fail(NORMAL, f"released Core Rust integration is missing {marker!r}")
+    benchmark_install = _run(
+        _step_by_name(benchmark, "Install the already-tested released-Core wheel pair")
+    )
+    for marker in (
+        '"adam-core==$ADAM_CORE_VERSION"',
+        '"${assist_wheel}[dev]"',
+        "python -m pip check",
+    ):
+        if marker not in benchmark_install:
+            _fail(NORMAL, f"benchmark released-pair install is missing {marker!r}")
+    policy = _run(_step_by_name(released, "Verify release-ready workflow policy"))
+    if policy.strip() != "python migration/scripts/verify_workflow_policy.py":
+        _fail(NORMAL, "normal CI must execute this policy exactly")
 
 
 def _dispatch_inputs(workflow: Mapping[str, Any], name: str) -> Mapping[str, Any]:
@@ -480,7 +508,7 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
     if name == "publish-rust-crate.yml":
         expected = {
             "expected_version": "0.6.0",
-            "expected_core_version": "0.7.0",
+            "expected_core_version": "0.8.0",
             "expected_python_version": "0.6.0",
         }
         for input_name, default in expected.items():
@@ -490,21 +518,32 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
         expected = {
             "expected_version": "0.6.0",
             "expected_rust_version": "0.6.0",
-            "expected_adam_core_version": "0.7.0",
-            "expected_adam_core_rust_version": "0.7.0",
+            "expected_adam_core_version": "0.8.0",
+            "expected_adam_core_rust_version": "0.8.0",
         }
         for input_name, default in expected.items():
             if _input_default(inputs, input_name, name) != default:
                 _fail(name, f"{input_name} default must be {default}")
+        commands = "\n".join(
+            _run(step) for job in jobs.values() for step in _steps(job)
+        )
+        for marker in ("adam-core>=0.8.0,<0.9.0", '"adam-core": "<0.9.0,>=0.8.0"'):
+            if marker not in commands:
+                _fail(name, f"publication Core range is missing {marker!r}")
     elif name == "release-candidate-wheel-matrix.yml":
         if workflow.get("env") != {
             "PIP_ONLY_BINARY": ":all:",
             "MATURIN_PEP517_ARGS": "--locked",
-            "ADAM_CORE_RELEASE_VERSION": "0.7.0",
-            "ADAM_CORE_ACCEPTANCE_REF": CORE_REF,
+            "ADAM_CORE_RELEASE_VERSION": "0.8.0",
+            "ADAM_CORE_ACCEPTANCE_REF": CORE_PUBLIC_REF,
             "ADAM_ASSIST_RELEASE_VERSION": "0.6.0",
         }:
             _fail(name, "wheel release identities drifted")
+        commands = "\n".join(
+            _run(step) for job in jobs.values() for step in _steps(job)
+        )
+        if "adam-core>=0.8.0,<0.9.0" not in commands:
+            _fail(name, "wheel acceptance must require the Core 0.8 line")
         matrix = jobs["artifact-acceptance"].get("strategy", {}).get("matrix", {})
         platforms = matrix.get("platform", [])
         macos_arm64 = [
@@ -512,6 +551,8 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
             for platform in platforms
             if isinstance(platform, Mapping) and platform.get("name") == "macos-arm64"
         ]
+        if matrix.get("python-version") != ["3.11", "3.12", "3.13", "3.14"]:
+            _fail(name, "wheel release matrix must cover CPython 3.11-3.14")
         if len(macos_arm64) != 1 or macos_arm64[0].get("runner") != "macos-15":
             _fail(name, "macOS arm64 wheels require the supported macos-15 runner")
         benchmark = jobs["full-current-benchmark"]
@@ -522,19 +563,74 @@ def _verify_gated_release_workflow(name: str, workflow: Mapping[str, Any]) -> No
     elif name == "rust-crate-release-candidate.yml":
         if workflow.get("env") != {
             "RUST_RELEASE_VERSION": "0.6.0",
-            "CORE_RUST_VERSION": "0.7.0",
+            "CORE_RUST_VERSION": "0.8.0",
             "RELEASE_CHANNEL": "stable",
         }:
             _fail(name, "Rust release identities drifted")
         for job_id in ("package-and-test", "latest-stable-compatibility"):
             setup = _step_by_name(jobs[job_id], "Set up supported Python")
             if setup.get("uses") != "actions/setup-python@v5" or setup.get("with") != {
-                "python-version": "3.13"
+                "python-version": "3.14"
             }:
                 _fail(
                     f"{name}:{job_id}",
-                    "Python-feature Rust checks require exact CPython 3.13",
+                    "Python-feature Rust checks require exact CPython 3.14",
                 )
+
+
+def _verify_publication_wheel_inventory(
+    workflows: Mapping[str, Mapping[str, Any]],
+) -> None:
+    release = workflows["release-candidate-wheel-matrix.yml"]
+    matrix = (
+        release["jobs"]["artifact-acceptance"].get("strategy", {}).get("matrix", {})
+    )
+    python_versions = matrix.get("python-version", [])
+    platforms = matrix.get("platform", [])
+    if not isinstance(python_versions, list) or not isinstance(platforms, list):
+        _fail("release-candidate-wheel-matrix.yml", "wheel matrix must use lists")
+    expected_count = len(python_versions) * len(platforms)
+    expected_python = {
+        f"cp{str(version).replace('.', '')}" for version in python_versions
+    }
+
+    publish = workflows["publish.yml"]
+    collect = _run(
+        _step_by_name(
+            publish["jobs"]["collect-tested-artifacts"],
+            "Aggregate and verify adam-assist wheels without rebuilding",
+        )
+    )
+    aggregate = re.search(r"test \"\$\(find dist [^\n]+\)\" = (\d+)", collect)
+    if aggregate is None or int(aggregate.group(1)) != expected_count:
+        _fail(
+            "publish.yml:collect-tested-artifacts",
+            f"aggregate wheel count must equal acceptance matrix size {expected_count}",
+        )
+    python_literal = re.search(r"expected_python\s*=\s*\{([^}]*)\}", collect)
+    actual_python = (
+        set(re.findall(r'"(cp\d+)"', python_literal.group(1)))
+        if python_literal is not None
+        else set()
+    )
+    if actual_python != expected_python:
+        _fail(
+            "publish.yml:collect-tested-artifacts",
+            f"publication Python tags {actual_python} != {expected_python}",
+        )
+
+    publisher = publish["jobs"]["publish-pypi"]
+    publication_counts = [
+        int(match)
+        for step in _steps(publisher)
+        for match in re.findall(r"--expected-count\s+(\d+)", _run(step))
+    ]
+    if publication_counts != [expected_count, expected_count]:
+        _fail(
+            "publish.yml:publish-pypi",
+            "every publication expected count must equal the acceptance matrix "
+            f"size {expected_count}; got {publication_counts}",
+        )
 
 
 def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> None:
@@ -557,13 +653,14 @@ def verify_workflow_documents(workflows: Mapping[str, Mapping[str, Any]]) -> Non
     _verify_normal(workflow)
     for name in RELEASE_WORKFLOWS:
         _verify_gated_release_workflow(name, workflows[name])
+    _verify_publication_wheel_inventory(workflows)
 
 
 def verify(root: Path = ROOT) -> None:
     contract = json.loads(
         (root / "migration" / "source_pair_contract.json").read_text()
     )
-    if contract.get("registry_state") != "core-0.7.0-public-and-verified":
+    if contract.get("registry_state") != "core-0.8.0-public-and-verified":
         _fail(
             "source_pair_contract",
             "workflow policy requires the verified public Core release",

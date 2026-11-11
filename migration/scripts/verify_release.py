@@ -30,7 +30,7 @@ except ImportError:
     from write_maturin_version import cargo_version_to_pep440
 
 
-STABLE_PYTHON_CORE_REQUIREMENT = "adam-core>=0.7.0,<0.8.0"
+STABLE_PYTHON_CORE_REQUIREMENT = "adam-core>=0.8.0,<0.9.0"
 
 
 def is_python_prerelease(version: str) -> bool:
@@ -58,7 +58,7 @@ def verify(
         )
     if channel == "stable" and not stable_core_version_supported(core_python_version):
         raise ValueError(
-            "stable Python Core selection must satisfy >=0.7.0,<0.8.0, got "
+            "stable Python Core selection must satisfy >=0.8.0,<0.9.0, got "
             f"{core_python_version}"
         )
 
